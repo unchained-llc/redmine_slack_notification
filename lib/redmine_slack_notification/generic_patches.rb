@@ -21,7 +21,7 @@ module RedmineSlackNotification
           noun: noun, action: action, subject: title, url: RedmineSlackNotification::Formatter.url("/news/#{id}"),
           project: project, actor: respond_to?(:author) ? author : User.current,
           summary: respond_to?(:description) ? description : nil,
-          notes: respond_to?(:comments) ? comments : nil
+          notes: nil
         ), project: project
       )
     end
@@ -73,17 +73,26 @@ module RedmineSlackNotification
 
   module CommentPatch
     def self.included(base)
+      Rails.logger.warn('RedmineSlackNotification: Comment callback registered')
       base.after_create { notify_slack_news_comment }
     end
 
     private
 
     def notify_slack_news_comment
+      Rails.logger.warn("RedmineSlackNotification: Comment ##{id} callback invoked")
       news = respond_to?(:commented) ? commented : nil
+      Rails.logger.warn("RedmineSlackNotification: Comment ##{id} commented class=#{news&.class} id=#{news&.id}")
       return unless news.is_a?(News)
 
       project = news.project
+      Rails.logger.warn("RedmineSlackNotification: News ##{news.id} project=#{project&.identifier}")
       return unless project
+
+      comment_body = if respond_to?(:read_attribute)
+                       read_attribute(:comments).presence || read_attribute(:comment).presence
+                     end
+      comment_body ||= comments if respond_to?(:comments) && comments.is_a?(String)
 
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.generic_payload(
@@ -91,7 +100,7 @@ module RedmineSlackNotification
           url: RedmineSlackNotification::Formatter.url("/news/#{news.id}"), project: project,
           actor: respond_to?(:author) ? author : User.current,
           summary: 'ニュースにコメントが追加されました。',
-          notes: respond_to?(:comments) ? comments : nil
+          notes: comment_body
         ), project: project
       )
     end

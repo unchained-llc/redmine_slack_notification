@@ -34,12 +34,16 @@ module RedmineSlackNotification
     config_paths.first
   end
 
-  def webhook_url(project)
+  def bot_token
+    ENV['SLACK_BOT_TOKEN'].to_s.strip.presence || config.dig('slack', 'bot_token').to_s.strip
+  end
+
+  def channel_id(project)
     return '' unless project
 
     project_config = config.fetch('projects', {}).fetch(project.identifier.to_s, {})
-    project_url = project_config.is_a?(Hash) ? project_config['webhook_url'] : project_config
-    (project_url.presence || config['default_webhook_url']).to_s.strip
+    project_channel = project_config.is_a?(Hash) ? project_config['channel_id'] : nil
+    (project_channel.presence || config.dig('slack', 'default_channel_id')).to_s.strip
   end
 
   def user_mapping
@@ -47,7 +51,7 @@ module RedmineSlackNotification
   end
 
   def configured?(project)
-    webhook_url(project).present?
+    bot_token.present? && channel_id(project).present?
   end
 
   def enqueue(payload, project:)
@@ -57,20 +61,25 @@ module RedmineSlackNotification
   end
 
   def notify(payload, project: nil)
-    url = webhook_url(project)
-    unless url.present?
-      Rails.logger.warn("RedmineSlackNotification: webhook not configured for project #{project&.identifier || '(none)'} (#{config_path})")
+    token = bot_token
+    channel = channel_id(project)
+    unless token.present? && channel.present?
+      Rails.logger.warn("RedmineSlackNotification: Slack API is not configured for project #{project&.identifier || '(none)'} (token/channel missing)")
       return
     end
 
-    Rails.logger.warn("RedmineSlackNotification: sending notification for project #{project.identifier}")
-    uri = URI.parse(url)
+    Rails.logger.warn("RedmineSlackNotification: sending notification for project #{project.identifier} via Slack Chat API")
+    uri = URI('https://slack.com/api/chat.postMessage')
     request = Net::HTTP::Post.new(uri.request_uri)
-    request['Content-Type'] = 'application/json'
-    request.body = payload.to_json
-    Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https', open_timeout: 3, read_timeout: 5) do |http|
+    request['Authorization'] = "Bearer #{token}"
+    request['Content-Type'] = 'application/json; charset=utf-8'
+    request.body = payload.merge('channel' => channel).to_json
+    Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 3, read_timeout: 5) do |http|
       response = http.request(request)
-      Rails.logger.warn("RedmineSlackNotification: Slack returned #{response.code}: #{response.body}") unless response.is_a?(Net::HTTPSuccess)
+      result = JSON.parse(response.body)
+      unless response.is_a?(Net::HTTPSuccess) && result['ok']
+        Rails.logger.warn("RedmineSlackNotification: Slack API returned #{response.code}: #{result['error'] || response.body}")
+      end
     end
   rescue StandardError => e
     Rails.logger.error("RedmineSlackNotification: #{e.class}: #{e.message}")
@@ -99,8 +108,5 @@ module RedmineSlackNotification
   end
 end
 
-if defined?(Issue) && defined?(Journal) && defined?(WikiContent) && defined?(Comment) && defined?(News) && defined?(TimeEntry) && defined?(Version) && defined?(Project)
-  RedmineSlackNotification.install_patches
-else
-  Rails.application.config.to_prepare { RedmineSlackNotification.install_patches }
-end
+Rails.application.config.to_prepare { RedmineSlackNotification.install_patches }
+Rails.application.config.after_initialize { RedmineSlackNotification.install_patches }
