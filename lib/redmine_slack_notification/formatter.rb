@@ -62,7 +62,6 @@ module RedmineSlackNotification
       return { 'text' => message } if blocks.blank?
 
       {
-        'text' => message,
         'attachments' => [{
           'fallback' => message,
           'color' => '#6D5DFB',
