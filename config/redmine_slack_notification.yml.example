@@ -1,6 +1,9 @@
 # Copy this file to the Redmine application's config directory:
-#   config/unchained_slack.yml
+#   config/redmine_slack_notification.yml
 # Do not commit the copied file because it contains Slack webhook secrets.
+
+# Used when a project-specific webhook is not configured.
+default_webhook_url: 'https://hooks.slack.com/services/REPLACE/DEFAULT/VALUE'
 
 projects:
   agentic:
