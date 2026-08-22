@@ -1,0 +1,14 @@
+# Copy this file to the Redmine application's config directory:
+#   config/unchained_slack.yml
+# Do not commit the copied file because it contains Slack webhook secrets.
+
+projects:
+  agentic:
+    webhook_url: 'https://hooks.slack.com/services/REPLACE/THIS/VALUE'
+  another-project:
+    webhook_url: 'https://hooks.slack.com/services/REPLACE/THIS/VALUE'
+
+users:
+  # Redmine login name or email address: Slack member ID
+  alice: 'U0123456789'
+  bob: 'U0234567890'
