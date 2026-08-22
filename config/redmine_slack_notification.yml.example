@@ -1,15 +1,17 @@
 # Copy this file to the Redmine application's config directory:
 #   config/redmine_slack_notification.yml
-# Do not commit the copied file because it contains Slack webhook secrets.
+# Do not commit this file because it contains Slack credentials.
 
-# Used when a project-specific webhook is not configured.
-default_webhook_url: 'https://hooks.slack.com/services/REPLACE/DEFAULT/VALUE'
+slack:
+  # Prefer the SLACK_BOT_TOKEN environment variable in production.
+  bot_token: 'xoxb-REPLACE-ME'
+  default_channel_id: 'C0123456789'
 
 projects:
   agentic:
-    webhook_url: 'https://hooks.slack.com/services/REPLACE/THIS/VALUE'
+    channel_id: 'C0123456789'
   another-project:
-    webhook_url: 'https://hooks.slack.com/services/REPLACE/THIS/VALUE'
+    channel_id: 'C0234567890'
 
 users:
   # Redmine login name or email address: Slack member ID
