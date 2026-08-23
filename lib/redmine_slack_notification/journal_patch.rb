@@ -5,14 +5,14 @@ require_relative 'formatter'
 module RedmineSlackNotification
   module JournalPatch
     def self.included(base)
-      Rails.logger.warn('RedmineSlackNotification: Journal callback registered')
+
       base.after_create :notify_slack_journal_created
     end
 
     private
 
     def notify_slack_journal_created
-      Rails.logger.warn("RedmineSlackNotification: Journal ##{id} callback invoked")
+
       issue = journalized
       return unless issue.is_a?(Issue)
       return if issue.is_private? || private_notes?

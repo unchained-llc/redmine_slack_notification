@@ -5,7 +5,7 @@ require_relative 'formatter'
 module RedmineSlackNotification
   module IssuePatch
     def self.included(base)
-      Rails.logger.warn('RedmineSlackNotification: Issue callback registered')
+
       base.after_create :notify_slack_issue_created
       base.after_destroy :notify_slack_issue_deleted
     end

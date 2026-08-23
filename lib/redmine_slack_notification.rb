@@ -68,7 +68,7 @@ module RedmineSlackNotification
       return
     end
 
-    Rails.logger.warn("RedmineSlackNotification: sending notification for project #{project.identifier} via Slack Chat API")
+
     uri = URI('https://slack.com/api/chat.postMessage')
     request = Net::HTTP::Post.new(uri.request_uri)
     request['Authorization'] = "Bearer #{token}"
@@ -96,7 +96,7 @@ module RedmineSlackNotification
   module_function
 
   def install_patches
-    Rails.logger.warn('RedmineSlackNotification: registering model callbacks')
+
     Issue.include RedmineSlackNotification::IssuePatch if defined?(Issue) && !(Issue < RedmineSlackNotification::IssuePatch)
     Journal.include RedmineSlackNotification::JournalPatch if defined?(Journal) && !(Journal < RedmineSlackNotification::JournalPatch)
     WikiContent.include RedmineSlackNotification::WikiContentPatch if defined?(WikiContent) && !(WikiContent < RedmineSlackNotification::WikiContentPatch)
