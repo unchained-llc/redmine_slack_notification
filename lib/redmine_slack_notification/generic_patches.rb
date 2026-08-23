@@ -73,20 +73,20 @@ module RedmineSlackNotification
 
   module CommentPatch
     def self.included(base)
-      Rails.logger.warn('RedmineSlackNotification: Comment callback registered')
+
       base.after_create { notify_slack_news_comment }
     end
 
     private
 
     def notify_slack_news_comment
-      Rails.logger.warn("RedmineSlackNotification: Comment ##{id} callback invoked")
+
       news = respond_to?(:commented) ? commented : nil
-      Rails.logger.warn("RedmineSlackNotification: Comment ##{id} commented class=#{news&.class} id=#{news&.id}")
+
       return unless news.is_a?(News)
 
       project = news.project
-      Rails.logger.warn("RedmineSlackNotification: News ##{news.id} project=#{project&.identifier}")
+
       return unless project
 
       comment_body = if respond_to?(:read_attribute)

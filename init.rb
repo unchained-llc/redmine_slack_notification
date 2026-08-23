@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
-warn 'RedmineSlackNotification: loading plugin init.rb'
-Rails.logger.info('RedmineSlackNotification: loading plugin init.rb') if defined?(Rails)
+
 require_relative 'lib/redmine_slack_notification'
 
 
