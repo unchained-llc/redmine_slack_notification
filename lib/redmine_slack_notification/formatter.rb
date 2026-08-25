@@ -13,7 +13,7 @@ module RedmineSlackNotification
     def mrkdwn(value)
       protected = []
       source = value.to_s.gsub("\r\n", "\n").gsub("\r", "\n")
-      source.gsub!(/```\w*\n.*?```/m) { protect_mrkdwn(Regexp.last_match(0), protected) }
+      source.gsub!(/```[ \t]*\w*[ \t]*\n.*?```/m) { protect_mrkdwn(Regexp.last_match(0), protected) }
       source.gsub!(/`[^`]+`/) { protect_mrkdwn(Regexp.last_match(0), protected) }
       source = text(source)
       source.gsub!(/\[([^\]]+)\]\(([^)]+)\)/) { "<#{Regexp.last_match(2)}|#{Regexp.last_match(1)}>" }
@@ -30,11 +30,11 @@ module RedmineSlackNotification
     def protect_mrkdwn(value, protected)
       index = protected.length
       protected << value
-      "\u0000MRK#{index}\u0000"
+      "@@MRK#{index}@@"
     end
 
     def restore_mrkdwn(value, protected)
-      value.gsub(/\u0000MRK(\d+)\u0000/) { protected[Regexp.last_match(1).to_i] }
+      value.gsub(/@@MRK(\d+)@@/) { protected[Regexp.last_match(1).to_i] }
     end
 
     def url(path)
@@ -83,9 +83,9 @@ module RedmineSlackNotification
       description = description.sub(/\A[ \t]*\#{1,6}[ \t]+[^\n]+\n?/, '').strip
       if action == 'created'
         blocks.insert(2, section_text('新しいチケットが作成されました。'))
-        blocks.insert(3, section_text("*内容*\n#{mrkdwn(description.truncate(1200))}")) if description.present?
+        blocks.insert(3, *mrkdwn_sections('内容', description)) if description.present?
       elsif description.present? && description_changed
-        blocks.insert(2, section_text("*概要*\n#{mrkdwn(description.truncate(1200))}"))
+        blocks.insert(2, *mrkdwn_sections('概要', description))
       end
 
       if notes.to_s.strip.present?
@@ -119,9 +119,9 @@ module RedmineSlackNotification
         section_text("#{icon} *#{label}*"),
         section_text("*<#{url('/issues/' + issue.id.to_s)}|##{issue.id} #{text(issue.subject)}>*"),
         section_text(combined_update ? 'Issueが更新されました。' : 'コメントが追加されました。'),
-        { 'type' => 'divider' },
-        section_text("*追加コメント*\n#{mrkdwn(notes.to_s)}")
+        { 'type' => 'divider' }
       ]
+      blocks.concat(mrkdwn_sections('追加コメント', notes.to_s))
       if details.any?
         blocks << { 'type' => 'divider' }
         blocks << section_text('*変更内容*')
@@ -204,6 +204,14 @@ module RedmineSlackNotification
 
     def header_block(value)
       { 'type' => 'header', 'text' => { 'type' => 'plain_text', 'text' => value.to_s.truncate(150), 'emoji' => true } }
+    end
+
+    def mrkdwn_sections(heading, value, limit: 2800)
+      chunks = value.to_s.each_char.each_slice(limit).map(&:join)
+      chunks.each_with_index.map do |chunk, index|
+        content = index.zero? ? "*#{heading}*\n#{mrkdwn(chunk)}" : mrkdwn(chunk)
+        section_text(content)
+      end
     end
 
     def section_text(value)
