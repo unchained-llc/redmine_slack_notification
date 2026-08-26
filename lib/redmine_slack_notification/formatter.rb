@@ -92,7 +92,7 @@ module RedmineSlackNotification
       end
 
       changes = change_fields(issue, details)
-      if changes.any?
+      if changes.present?
         blocks << { 'type' => 'divider' }
         blocks << { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => '*変更内容*' } }
         blocks << { 'type' => 'section', 'expand' => true, 'fields' => changes.map { |label, value| field(label, value) } }
@@ -120,10 +120,11 @@ module RedmineSlackNotification
         { 'type' => 'divider' }
       ]
       blocks.concat(mrkdwn_sections('追加コメント', notes.to_s))
-      if details.any?
+      changes = change_fields(issue, details)
+      if changes.present?
         blocks << { 'type' => 'divider' }
         blocks << section_text('*変更内容*')
-        blocks << { 'type' => 'section', 'expand' => true, 'fields' => change_fields(issue, details).map { |label, value| field(label, value) } }
+        blocks << { 'type' => 'section', 'expand' => true, 'fields' => changes.map { |label, value| field(label, value) } }
       end
       blocks.concat([
         { 'type' => 'divider' },
