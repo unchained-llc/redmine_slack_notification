@@ -16,7 +16,7 @@ module RedmineSlackNotification
       return if is_private?
 
       RedmineSlackNotification.enqueue(
-        RedmineSlackNotification::Formatter.issue_payload(self, actor: author, action: 'created', occurred_at: created_on),
+        RedmineSlackNotification::Formatter.issue_payload(self, actor: author, action: 'created'),
         project: self.project
       )
     end
@@ -25,7 +25,7 @@ module RedmineSlackNotification
       return if is_private?
 
       RedmineSlackNotification.enqueue(
-        RedmineSlackNotification::Formatter.issue_payload(self, actor: User.current, action: 'deleted', occurred_at: Time.current),
+        RedmineSlackNotification::Formatter.issue_payload(self, actor: User.current, action: 'deleted'),
         project: self.project
       )
     end
