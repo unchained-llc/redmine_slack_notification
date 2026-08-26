@@ -22,7 +22,6 @@ module RedmineSlackNotification
                     issue,
                     actor: user,
                     notes: notes,
-                    occurred_at: created_on,
                     details: details
                   )
                 elsif details.any?
@@ -30,8 +29,7 @@ module RedmineSlackNotification
                     issue,
                     actor: user,
                     action: 'updated',
-                    details: details,
-                    occurred_at: created_on
+                    details: details
                   )
                 else
                   return

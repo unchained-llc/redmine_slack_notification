@@ -99,7 +99,6 @@ module RedmineSlackNotification
           noun: 'News', action: 'updated', subject: news.title,
           url: RedmineSlackNotification::Formatter.url("/news/#{news.id}"), project: project,
           actor: respond_to?(:author) ? author : User.current,
-          summary: 'ニュースにコメントが追加されました。',
           notes: comment_body
         ), project: project
       )

@@ -70,7 +70,7 @@ module RedmineSlackNotification
       }
     end
 
-    def issue_payload(issue, actor:, action:, details: [], notes: nil, occurred_at: nil)
+    def issue_payload(issue, actor:, action:, details: [], notes: nil)
       event_label = event_label('Issue', action)
       title = "[#{issue.project.name}] #{actor&.name || '不明なユーザー'} #{action} #{issue.tracker.name} ##{issue.id}: #{issue.subject}"
       blocks = [
@@ -82,8 +82,7 @@ module RedmineSlackNotification
       description = issue.description.to_s.strip
       description = description.sub(/\A[ \t]*\#{1,6}[ \t]+[^\n]+\n?/, '').strip
       if action == 'created'
-        blocks.insert(2, section_text('新しいチケットが作成されました。'))
-        blocks.insert(3, *mrkdwn_sections('内容', description)) if description.present?
+        blocks.insert(2, *mrkdwn_sections('内容', description)) if description.present?
       elsif description.present? && description_changed
         blocks.insert(2, *mrkdwn_sections('概要', description))
       end
@@ -104,13 +103,13 @@ module RedmineSlackNotification
       blocks << {
         'type' => 'section',
         'expand' => true,
-        'fields' => metadata_fields(issue, actor, occurred_at).map { |label, value| field(label, value) }
+        'fields' => metadata_fields(issue, actor).map { |label, value| field(label, value) }
       }
 
       payload(title, blocks: blocks)
     end
 
-    def journal_payload(issue, actor:, notes:, occurred_at:, details: [])
+    def journal_payload(issue, actor:, notes:, details: [])
       combined_update = details.any?
       label = combined_update ? 'Issue updated' : 'Comment added'
       icon = combined_update ? '🔄' : '💬'
@@ -118,7 +117,6 @@ module RedmineSlackNotification
       blocks = [
         section_text("#{icon} *#{label}*"),
         section_text("*<#{url('/issues/' + issue.id.to_s)}|##{issue.id} #{text(issue.subject)}>*"),
-        section_text(combined_update ? 'Issueが更新されました。' : 'コメントが追加されました。'),
         { 'type' => 'divider' }
       ]
       blocks.concat(mrkdwn_sections('追加コメント', notes.to_s))
@@ -132,8 +130,7 @@ module RedmineSlackNotification
         section_text('*メタ情報*'),
         { 'type' => 'section', 'expand' => true, 'fields' => [
           field('プロジェクト', text(issue.project.name)),
-          field('投稿者', text(actor&.name || '不明')),
-          field('投稿日時', occurred_at&.strftime('%Y/%m/%d %H:%M') || '不明')
+          field('投稿者', text(actor&.name || '不明'))
         ] },
       ])
       payload(fallback, blocks: blocks)
@@ -143,23 +140,21 @@ module RedmineSlackNotification
       title = content.page.title
       label = event_label('Wiki page', action)
       fallback = "Redmine: #{label} - #{title}"
-      changed_at = content.updated_on || Time.current
-      change_summary = content.comments.to_s.strip.presence || (action == 'created' ? 'Wikiページが作成されました。' : 'Wikiページの内容が更新されました。')
+      change_summary = content.comments.to_s.strip
       blocks = [
         section_text("#{event_icon(action, noun: 'Wiki page')} *#{label}*"),
-        section_text("*<#{url('/projects/' + project.identifier.to_s + '/wiki/' + title.to_s)}|#{text(title)}>*"),
-        section_text("Wikiページが#{action == 'created' ? '作成' : '更新'}されました。"),
-        { 'type' => 'divider' },
-        section_text("*変更内容*\n#{mrkdwn(change_summary)}"),
+        section_text("*<#{url('/projects/' + project.identifier.to_s + '/wiki/' + title.to_s)}|#{text(title)}>*")
+      ]
+      blocks.concat(mrkdwn_sections('変更内容', change_summary)) if change_summary.present?
+      blocks.concat([
         { 'type' => 'divider' },
         section_text('*メタ情報*'),
         { 'type' => 'section', 'expand' => true, 'fields' => [
           field('プロジェクト', text(project.name)),
           field('更新者', text(actor&.name || '不明')),
-          field('更新日時', changed_at.strftime('%Y/%m/%d %H:%M')),
           field('変更箇所', text(title))
-        ] },
-      ]
+        ] }
+      ])
       payload(fallback, blocks: blocks)
     end
 
@@ -218,13 +213,11 @@ module RedmineSlackNotification
       { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => value } }
     end
 
-    def metadata_fields(issue, actor, occurred_at)
-      timestamp = occurred_at || issue.updated_on
+    def metadata_fields(issue, actor)
       [
         ['プロジェクト', text(issue.project.name)],
         ['更新者', text(actor&.name || '不明')],
         ['トラッカー', text(issue.tracker&.name || '未設定')],
-        ['更新日時', timestamp&.strftime('%Y/%m/%d %H:%M') || '不明'],
         ['優先度', text(issue.priority&.name || '未設定')]
       ]
     end
