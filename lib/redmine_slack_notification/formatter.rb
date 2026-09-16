@@ -229,7 +229,11 @@ module RedmineSlackNotification
         label = detail_label(detail)
         next unless label
 
-        if detail.property == 'attr' && detail.prop_key == 'description'
+        if detail.property == 'relation'
+          relation_id = detail.value.presence || detail.old_value
+          action = detail.value.present? ? '追加' : '削除'
+          [label, "#{action}: #{relation_issue_link(relation_id)}"]
+        elsif detail.property == 'attr' && detail.prop_key == 'description'
           [label, '変更あり']
         else
           [label, "#{detail_old_value(detail)} → #{detail_new_value(issue, detail)}"]
@@ -268,6 +272,7 @@ module RedmineSlackNotification
 
     def detail_label(detail)
       return detail.prop_key if detail.property == 'cf'
+      return "関連チケット（#{relation_type_label(detail.prop_key)}）" if detail.property == 'relation'
 
       {
         'status_id' => 'ステータス',
@@ -311,6 +316,27 @@ module RedmineSlackNotification
 
     def detail_new_value(issue, detail)
       detail_value(issue, detail)
+    end
+
+    def relation_type_label(relation_type)
+      {
+        'relates' => '関連',
+        'duplicates' => '重複',
+        'duplicated' => '重複元',
+        'blocks' => 'ブロック',
+        'blocked' => 'ブロック元',
+        'precedes' => '先行',
+        'follows' => '後続',
+        'copied_to' => 'コピー先',
+        'copied_from' => 'コピー元'
+      }.fetch(relation_type.to_s, relation_type.to_s)
+    end
+
+    def relation_issue_link(issue_id)
+      related_issue = Issue.find_by(id: issue_id)
+      return "##{text(issue_id)}" unless related_issue
+
+      "<#{url('/issues/' + related_issue.id.to_s)}|##{related_issue.id} #{text(related_issue.subject)}>"
     end
   end
 end
