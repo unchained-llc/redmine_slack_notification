@@ -219,6 +219,7 @@ module RedmineSlackNotification
         ['プロジェクト', text(issue.project.name)],
         ['更新者', text(actor&.name || '不明')],
         ['トラッカー', text(issue.tracker&.name || '未設定')],
+        ['カテゴリー', text(issue.category&.name || '未設定')],
         ['優先度', text(issue.priority&.name || '未設定')]
       ]
     end
@@ -272,6 +273,7 @@ module RedmineSlackNotification
         'status_id' => 'ステータス',
         'priority_id' => '優先度',
         'assigned_to_id' => '担当者',
+        'category_id' => 'カテゴリー',
         'tracker_id' => 'トラッカー',
         'subject' => '題名',
         'description' => '説明',
@@ -287,6 +289,7 @@ module RedmineSlackNotification
       when 'status_id' then text(issue.status&.name || 'なし')
       when 'priority_id' then text(issue.priority&.name || 'なし')
       when 'assigned_to_id' then user_mention(issue.assigned_to)
+      when 'category_id' then text(issue.category&.name || 'なし')
       when 'tracker_id' then text(issue.tracker&.name || 'なし')
       else text(detail.value.presence || 'なし')
       end
@@ -300,6 +303,7 @@ module RedmineSlackNotification
                when 'status_id' then IssueStatus.find_by(id: value)
                when 'priority_id' then IssuePriority.find_by(id: value)
                when 'assigned_to_id' then User.find_by(id: value)
+               when 'category_id' then IssueCategory.find_by(id: value)
                when 'tracker_id' then Tracker.find_by(id: value)
                end
       record ? text(record.name) : text(value)
