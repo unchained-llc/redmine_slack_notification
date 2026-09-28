@@ -125,17 +125,20 @@ module RedmineSlackNotification
       payload(title, blocks: blocks)
     end
 
-    def journal_payload(issue, actor:, notes:, details: [])
+    def journal_payload(issue, actor:, notes:, details: [], comment_action: 'added')
       combined_update = details.any?
-      label = combined_update ? 'Issue updated' : 'Comment added'
-      icon = combined_update ? '🔄' : '💬'
-      fallback = "[#{issue.project.name}] #{actor&.name || '不明なユーザー'} updated #{issue.tracker.name} ##{issue.id}: #{issue.subject}"
+      label = combined_update ? 'Issue updated' : "Comment #{comment_action}"
+      icon = combined_update ? '🔄' : comment_action == 'deleted' ? '🗑️' : '💬'
+      fallback = "[#{issue.project.name}] #{actor&.name || '不明なユーザー'} #{label.downcase} #{issue.tracker.name} ##{issue.id}: #{issue.subject}"
       blocks = [
         section_text("#{icon} *#{label}*"),
         section_text("*<#{url('/issues/' + issue.id.to_s)}|##{issue.id} #{text(issue.subject)}>*"),
         { 'type' => 'divider' }
       ]
-      blocks.concat(mrkdwn_sections('追加コメント', notes.to_s))
+      if notes.to_s.strip.present?
+        heading = comment_action == 'updated' ? '変更後のコメント' : '追加コメント'
+        blocks.concat(mrkdwn_sections(heading, notes.to_s))
+      end
       changes = change_fields(issue, details)
       if changes.present?
         blocks << { 'type' => 'divider' }
@@ -208,6 +211,7 @@ module RedmineSlackNotification
         'Issue' => { 'created' => '🆕', 'updated' => '🔄', 'deleted' => '🗑️' },
         'Wiki page' => { 'created' => '📚', 'updated' => '✏️', 'deleted' => '🗑️' },
         'News' => { 'created' => '📰', 'updated' => '📰', 'deleted' => '🗑️' },
+        'News comment' => { 'deleted' => '🗑️' },
         'Time entry' => { 'created' => '⏱️', 'updated' => '⏱️', 'deleted' => '🗑️' },
         'Version' => { 'created' => '🏷️', 'updated' => '🏷️', 'deleted' => '🗑️' },
         'Project' => { 'updated' => '🗂️' }

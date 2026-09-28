@@ -7,6 +7,7 @@ module RedmineSlackNotification
     def self.included(base)
 
       base.after_create_commit :notify_slack_journal_created
+      base.after_update_commit :notify_slack_journal_comment_changed
     end
 
     private
@@ -39,6 +40,27 @@ module RedmineSlackNotification
         event: enabled_details.any? ? slack_event_for_detail(enabled_details.first) : 'comment_added',
         image_names: comment_enabled ? RedmineSlackNotification::Formatter.image_references(notes) : [],
         journal_id: comment_enabled ? id : nil
+      )
+    end
+
+    def notify_slack_journal_comment_changed
+      issue = journalized
+      return unless issue.is_a?(Issue)
+      return if issue.is_private? || private_notes? || attribute_before_last_save('private_notes')
+      return unless saved_change_to_notes?
+
+      previous_notes = notes_before_last_save.to_s.strip
+      return if previous_notes.empty?
+
+      action = notes.to_s.strip.empty? ? 'deleted' : 'updated'
+      event = "comment_#{action}"
+      return unless RedmineSlackNotification.event_enabled?(issue.project, event)
+
+      RedmineSlackNotification.enqueue(
+        RedmineSlackNotification::Formatter.journal_payload(
+          issue, actor: updated_by || User.current, notes: notes, comment_action: action
+        ),
+        project: issue.project, event: event
       )
     end
 

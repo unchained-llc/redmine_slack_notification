@@ -40,6 +40,8 @@ events:
     deleted: true
     comment:
       added: true # Independent of issue.updated.enabled
+      updated: true
+      deleted: true
   wiki:
     created: true
     updated: true
@@ -50,6 +52,7 @@ events:
     deleted: false
     comment:
       added: true # Independent of news.updated
+      deleted: true
   time_entry:
     created: true
     updated: true
