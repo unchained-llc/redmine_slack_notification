@@ -147,6 +147,8 @@ messages:
     alt: Image
     link_label: 'Image: %{name}'
   templates:
+    # Visible heading for Issue updates, including updates with a comment.
+    issue_updated_header: "%{actor} *%{event}*"
     issue_fallback: "[%{project}] %{actor} %{action} %{tracker} #%{id}: %{subject}"
     journal_fallback: "[%{project}] %{actor} %{event} %{tracker} #%{id}: %{subject}"
     generic_fallback: 'Redmine: %{event} - %{subject}'

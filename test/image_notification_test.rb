@@ -1103,6 +1103,35 @@ class ImageNotificationTest < Minitest::Test
 end
 
 class NotificationDisplaySettingsTest < Minitest::Test
+  def test_issue_update_heading_shows_actor_in_both_notification_paths
+    project = OpenStruct.new(name: 'Agentic')
+    issue = OpenStruct.new(id: 7, subject: 'Subject', description: '', project: project,
+                           tracker: OpenStruct.new(name: 'Task'))
+    actor = OpenStruct.new(name: 'Kota')
+    empty_changes = []
+    empty_changes.define_singleton_method(:present?) { false }
+
+    RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
+      updated = RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'updated')
+      created = RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'created')
+      combined = RedmineSlackNotification::Formatter.journal_payload(
+        issue, actor: actor, notes: '', details: [OpenStruct.new(property: 'attr', prop_key: 'status_id')]
+      )
+      assert_equal '🔄 Kota *Issue updated*', updated.dig('attachments', 0, 'blocks', 0, 'text', 'text')
+      assert_equal '🔄 Kota *Issue updated*', combined.dig('attachments', 0, 'blocks', 0, 'text', 'text')
+      assert_equal '🆕 *Issue created*', created.dig('attachments', 0, 'blocks', 0, 'text', 'text')
+    end
+
+    RedmineSlackNotification.stub(:config, { 'messages' => { 'templates' => {
+      'issue_updated_header' => '*%{event}* by %{actor}'
+    } } }) do
+      RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
+        customized = RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'updated')
+        assert_equal '🔄 *Issue updated* by Kota', customized.dig('attachments', 0, 'blocks', 0, 'text', 'text')
+      end
+    end
+  end
+
   def test_color_and_message_overrides_apply_to_the_colored_card
     settings = {
       'slack' => { 'attachment_color' => '#12Ab34' },

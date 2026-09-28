@@ -170,14 +170,17 @@ The `messages` tree customizes every plugin-generated notification label. It is 
 - `messages.events` and `messages.icons`: event titles and icons for Issues, comments, Wiki pages, News, News comments, time entries, Versions, and Projects.
 - `messages.sections`, `messages.fields`, `messages.relations`, and `messages.values`: card headings, field names, relation names, and fallback words.
 - `messages.diff` and `messages.images`: diff heading and truncation notice, image preview wording, and the attachment link shown if an upload fails.
-- `messages.templates`: plain-text fallback messages. Keep the `%{...}` placeholders needed by each template; an invalid template falls back to its built-in default.
+- `messages.templates`: the visible Issue-update heading and plain-text fallback messages. Keep the `%{...}` placeholders needed by each template; an invalid template falls back to its built-in default.
 
 You can specify only the keys you want to change. Missing or empty strings retain the built-in text. Changes are global across projects and apply to newly generated notifications after Redmine and Sidekiq restart. The generated event title for a newly created News item, time entry, or Version, and for a new News comment, now says `created` or `added` rather than `updated`.
 
-`messages.templates` controls the attachment's plain-text fallback, used when the rich Slack card cannot be displayed. It does not change the card's visible sections. The placeholders are filled with values from the Redmine event:
+`messages.templates.issue_updated_header` controls the visible first line of Issue update notifications, including updates that also contain a comment. Its default is `%{actor} *%{event}*`, which displays `Kota` followed by bold `Issue updated`. The actor is the Redmine user who made the update. Creation, deletion, and standalone comment headings keep their existing format.
+
+The remaining `messages.templates` values control the attachment's plain-text fallback, used when the rich Slack card cannot be displayed. They do not change the card's visible sections. The placeholders are filled with values from the Redmine event:
 
 | Template | Used for | Placeholders |
 | --- | --- | --- |
+| `issue_updated_header` | Visible Issue-update heading | `%{actor}`, `%{event}` |
 | `issue_fallback` | Issue creation and deletion | `%{project}`, `%{actor}`, `%{action}`, `%{tracker}`, `%{id}`, `%{subject}` |
 | `journal_fallback` | Issue changes and comments | `%{project}`, `%{actor}`, `%{event}`, `%{tracker}`, `%{id}`, `%{subject}` |
 | `generic_fallback` | Wiki, News, News comments, time entries, Versions, Projects | `%{event}`, `%{subject}` |
