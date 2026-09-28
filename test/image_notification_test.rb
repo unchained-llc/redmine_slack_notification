@@ -3,6 +3,16 @@
 require 'minitest/autorun'
 require 'ostruct'
 
+class String
+  def present?
+    !strip.empty?
+  end
+
+  def truncate(length)
+    self[0, length]
+  end
+end
+
 module Rails
   def self.application
     @application ||= OpenStruct.new(config: OpenStruct.new(to_prepare: nil, after_initialize: nil))
@@ -670,8 +680,8 @@ class NewsCommentDeletionTest < Minitest::Test
     assert_equal 'News comment', captured[0][1][:noun]
     assert_equal 'updated', captured[0][1][:action]
     assert_equal ['before', 'after'], captured[0][1][:body_diff]
-    assert_equal 'コメント', captured[0][1][:body_diff_label]
-    assert_equal '変更後のコメント', captured[0][1][:body_full_label]
+    assert_equal 'Comment', captured[0][1][:body_diff_label]
+    assert_equal 'Updated comment', captured[0][1][:body_full_label]
     assert_equal 'news_comment_updated', captured[1][2][:event]
   end
 
@@ -702,7 +712,7 @@ class NewsCommentDeletionTest < Minitest::Test
     assert_equal 'deleted', captured[0][1][:action]
     refute captured[0][1].key?(:notes)
     assert_equal ['Removed comment', ''], captured[0][1][:body_diff]
-    assert_equal 'コメント', captured[0][1][:body_diff_label]
+    assert_equal 'Comment', captured[0][1][:body_diff_label]
     assert_equal 'news_comment_deleted', captured[1][2][:event]
   end
 end
@@ -790,6 +800,10 @@ class ImageNotificationTest < Minitest::Test
   end
 
   def test_deleted_labels_are_distinct_from_updates
+    assert_equal 'News created', RedmineSlackNotification::Formatter.event_label('News', 'created')
+    assert_equal 'Time entry created', RedmineSlackNotification::Formatter.event_label('Time entry', 'created')
+    assert_equal 'Version created', RedmineSlackNotification::Formatter.event_label('Version', 'created')
+    assert_equal 'News comment added', RedmineSlackNotification::Formatter.event_label('News comment', 'added')
     assert_equal 'News deleted', RedmineSlackNotification::Formatter.event_label('News', 'deleted')
     assert_equal '🗑️', RedmineSlackNotification::Formatter.event_icon('deleted', noun: 'Wiki page')
   end
@@ -805,9 +819,9 @@ class ImageNotificationTest < Minitest::Test
     ]
     issue = OpenStruct.new(fixed_version: OpenStruct.new(name: '新版'))
     changes = RedmineSlackNotification::Formatter.change_fields(issue, details)
-    assert_equal ['添付ファイル', '添付ファイル', '親チケット', '対象バージョン', '顧客分類'], changes.map(&:first)
-    assert_equal ['追加: one.png', '追加: two.png'], changes.first(2).map(&:last)
-    assert_equal 'なし → #7011', changes[2][1]
+    assert_equal ['Attachment', 'Attachment', 'Parent issue', 'Target version', '顧客分類'], changes.map(&:first)
+    assert_equal ['Added: one.png', 'Added: two.png'], changes.first(2).map(&:last)
+    assert_equal 'None → #7011', changes[2][1]
     assert_equal '旧版 → 新版', changes[3][1]
     assert_equal 'A → B', changes[4][1]
   end
@@ -902,7 +916,7 @@ class ImageNotificationTest < Minitest::Test
       end
     end
 
-    assert_includes message.dig('attachments', 0, 'blocks', 0, 'text'), '[画像: screenshot.png](https://wac.example.com/attachments/42)'
+    assert_includes message.dig('attachments', 0, 'blocks', 0, 'text'), '[Image: screenshot.png](https://wac.example.com/attachments/42)'
   end
 
   def test_embeds_uploaded_image_and_links_to_wac
@@ -917,7 +931,7 @@ class ImageNotificationTest < Minitest::Test
     assert_equal 'WAC notification', message.dig('attachments', 0, 'fallback')
     blocks = message.dig('attachments', 0, 'blocks')
     assert_equal 2, blocks.length
-    refute_includes blocks.first.dig('text', 'text'), '画像:'
+    refute_includes blocks.first.dig('text', 'text'), 'Image:'
     refute_includes blocks.first.dig('text', 'text'), 'clipboard-202609281254-s6trp@2x.png'
     assert_equal({ 'id' => 'F123' }, blocks.last['slack_file'])
   end
@@ -1088,6 +1102,112 @@ class ImageNotificationTest < Minitest::Test
   end
 end
 
+class NotificationDisplaySettingsTest < Minitest::Test
+  def test_color_and_message_overrides_apply_to_the_colored_card
+    settings = {
+      'slack' => { 'attachment_color' => '#12Ab34' },
+      'messages' => {
+        'events' => { 'news' => { 'updated' => 'News changed' } },
+        'icons' => { 'news' => { 'updated' => '🔔' } },
+        'sections' => { 'summary' => 'Summary', 'metadata' => 'Details' },
+        'fields' => { 'project' => 'Workspace', 'updater' => 'Changed by' },
+        'templates' => { 'generic_fallback' => '%{event}: %{subject}' }
+      }
+    }
+    project = OpenStruct.new(name: 'Agentic')
+    RedmineSlackNotification.stub(:config, settings) do
+      payload = RedmineSlackNotification::Formatter.generic_payload(
+        noun: 'News', action: 'updated', subject: 'Headline', url: 'https://example.com/news/1',
+        project: project, actor: OpenStruct.new(name: 'Kota'), summary: 'Changed text'
+      )
+      card = payload.fetch('attachments').first
+      assert_equal '#12Ab34', card['color']
+      assert_equal 'News changed: Headline', card['fallback']
+      assert_includes card.dig('blocks', 0, 'text', 'text'), '🔔 *News changed*'
+      assert card['blocks'].any? { |block| block.dig('text', 'text').to_s.include?('*Summary*') }
+      assert card['blocks'].any? { |block| block.dig('text', 'text').to_s == '*Details*' }
+      fields = card['blocks'].flat_map { |block| block.fetch('fields', []) }.map { |field| field['text'] }
+      assert fields.any? { |field| field.include?('*Workspace*') }
+      assert fields.any? { |field| field.include?('*Changed by*') }
+    end
+  end
+
+  def test_invalid_color_and_incomplete_templates_use_safe_defaults
+    RedmineSlackNotification.stub(:config, { 'slack' => { 'attachment_color' => 'blue' },
+                                          'messages' => { 'templates' => { 'generic_fallback' => '%{missing}' } } }) do
+      payload = RedmineSlackNotification::Formatter.generic_payload(
+        noun: 'Project', action: 'updated', subject: 'Agentic', url: 'https://example.com/projects/agentic',
+        project: OpenStruct.new(name: 'Agentic'), actor: OpenStruct.new(name: 'Kota')
+      )
+      assert_equal '#6D5DFB', payload.dig('attachments', 0, 'color')
+      assert_equal 'WAC: Project updated - Agentic', payload.dig('attachments', 0, 'fallback')
+    end
+  end
+
+  def test_custom_diff_heading_still_keeps_source_image_reference_literal
+    settings = { 'messages' => { 'diff' => { 'heading' => 'Changes in %{label}' },
+                                 'sections' => { 'comment' => 'Note' },
+                                 'images' => { 'link_label' => 'Picture: %{name}' } } }
+    attachment = OpenStruct.new(id: 42, filename: 'screenshot.png')
+    RedmineSlackNotification.stub(:config, settings) do
+      block = RedmineSlackNotification::Formatter.body_diff_blocks('Note', '', '![](screenshot.png)').first
+      payload = RedmineSlackNotification::Formatter.payload('fallback', blocks: [block])
+      Journal.stub(:find_by, OpenStruct.new(journalized: Issue.new(1), private_notes?: false, attachments: [attachment])) do
+        RedmineSlackNotification.stub(:upload_image, ->(*) { flunk 'diff image was uploaded' }) do
+          RedmineSlackNotification.add_images(payload, ['screenshot.png'], 1, 'token')
+        end
+      end
+      assert_includes payload.dig('attachments', 0, 'blocks', 0, 'text'), '**Changes in Note**'
+
+      image_payload = RedmineSlackNotification::Formatter.payload('fallback', blocks: [RedmineSlackNotification::Formatter.section_text('![](screenshot.png)')])
+      Journal.stub(:find_by, OpenStruct.new(journalized: Issue.new(1), private_notes?: false, attachments: [attachment])) do
+        RedmineSlackNotification.stub(:upload_image, nil) do
+          RedmineSlackNotification.add_images(image_payload, ['screenshot.png'], 1, 'token')
+        end
+      end
+      assert_includes image_payload.dig('attachments', 0, 'blocks', 0, 'text', 'text'), 'Picture: screenshot.png'
+    end
+  end
+
+  def test_issue_comment_wiki_and_image_preview_use_custom_wording
+    settings = { 'messages' => {
+      'events' => { 'issue' => { 'created' => 'Ticket opened' }, 'comment' => { 'deleted' => 'Note removed' },
+                    'wiki' => { 'updated' => 'Page revised' } },
+      'sections' => { 'comment' => 'Note', 'metadata' => 'Properties' },
+      'diff' => { 'heading' => '%{label} changes' },
+      'images' => { 'preparing' => 'Loading picture', 'alt' => 'Picture' }
+    } }
+    project = OpenStruct.new(name: 'Agentic', identifier: 'agentic')
+    issue = OpenStruct.new(id: 7, subject: 'Subject', project: project, tracker: OpenStruct.new(name: 'Task'))
+    empty_changes = []
+    empty_changes.define_singleton_method(:present?) { false }
+    RedmineSlackNotification.stub(:config, settings) do
+      assert_equal 'Ticket opened', RedmineSlackNotification::Formatter.event_label('Issue', 'created')
+      RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
+        card = RedmineSlackNotification::Formatter.journal_payload(
+          issue, actor: OpenStruct.new(name: 'Editor'), notes: '', comment_action: 'deleted', previous_notes: 'old note'
+        ).dig('attachments', 0)
+        assert_includes card.dig('blocks', 0, 'text', 'text'), 'Note removed'
+        assert card['blocks'].any? { |block| block['type'] == 'markdown' && block['text'].include?('Note changes') }
+        assert card['blocks'].any? { |block| block['type'] == 'section' && block.dig('text', 'text') == '*Properties*' }
+      end
+      wiki = OpenStruct.new(page: OpenStruct.new(title: 'Home'), comments: '')
+      wiki_card = RedmineSlackNotification::Formatter.wiki_payload(wiki, project, actor: OpenStruct.new(name: 'Editor'), action: 'updated').dig('attachments', 0)
+      assert_includes wiki_card.dig('blocks', 0, 'text', 'text'), 'Page revised'
+
+      image_payload = RedmineSlackNotification::Formatter.payload('fallback', blocks: [
+        { 'type' => 'image', 'slack_file' => { 'id' => 'F1' }, 'alt_text' => 'Screenshot' }
+      ])
+      calls = []
+      RedmineSlackNotification.stub(:slack_api, ->(method, body, _token) { calls << [method, body]; { 'ok' => true, 'ts' => '1.2' } }) do
+        RedmineSlackNotification.post_message(image_payload, 'C1', 'token')
+      end
+      assert_equal 'Loading picture', calls.first[1].dig('blocks', 0, 'text', 'text')
+      assert_equal 'Picture', calls.first[1].dig('blocks', 0, 'accessory', 'alt_text')
+    end
+  end
+end
+
 class BodyDiffNotificationTest < Minitest::Test
   def project
     OpenStruct.new(id: 7, identifier: 'agentic', name: 'Agentic')
@@ -1115,7 +1235,7 @@ class BodyDiffNotificationTest < Minitest::Test
         assert_includes blocks.first.dig('text', 'text'), "*#{heading}*\nafter"
         refute_includes blocks.first.dig('text', 'text'), '```diff'
       end
-      assert_equal "*本文*\n（空）", formatter.updated_body_blocks('本文', 'before', '').first.dig('text', 'text')
+      assert_equal "*本文*\n(empty)", formatter.updated_body_blocks('本文', 'before', '').first.dig('text', 'text')
     end
   end
 
@@ -1174,7 +1294,7 @@ class BodyDiffNotificationTest < Minitest::Test
 
     blocks = message.dig('attachments', 0, 'blocks')
     comment = blocks.find { |block| block['type'] == 'markdown' }
-    assert_includes comment.fetch('text'), '**変更後のコメント**'
+    assert_includes comment.fetch('text'), '**Updated comment**'
     assert_includes comment.fetch('text'), '1. new text'
     refute_includes comment.fetch('text'), '- 1. old text'
   end
@@ -1225,7 +1345,7 @@ class BodyDiffNotificationTest < Minitest::Test
     after = (1..600).map { |number| "new #{number}" }.join("\n")
     block = RedmineSlackNotification::Formatter.body_diff_blocks('本文', before, after).first
     assert_operator block['text'].length, :<, 6_000
-    assert_includes block['text'], '差分を一部省略'
+    assert_includes block['text'], 'Diff truncated.'
   end
 
   def test_news_description_change_passes_old_and_new_body

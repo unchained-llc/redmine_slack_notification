@@ -74,22 +74,22 @@ module RedmineSlackNotification
     @config ||= begin
       path = config_paths.find { |candidate| File.exist?(candidate) }
       unless path
-        Rails.logger.warn("RedmineSlackNotification: config file not found: #{config_paths.join(', ')}")
+        Rails.logger&.warn("RedmineSlackNotification: config file not found: #{config_paths.join(', ')}")
         {}
       else
         YAML.safe_load(File.read(path), permitted_classes: [], aliases: false) || {}
       end
     rescue StandardError => e
-      Rails.logger.error("RedmineSlackNotification: cannot load #{path}: #{e.class}: #{e.message}")
+      Rails.logger&.error("RedmineSlackNotification: cannot load #{path}: #{e.class}: #{e.message}")
       {}
     end
   end
 
   def config_paths
     [
-      Rails.root.join('config', 'redmine_slack_notification.yml'),
+      (Rails.root.join('config', 'redmine_slack_notification.yml') if Rails.respond_to?(:root)),
       File.expand_path('../config/redmine_slack_notification.yml', __dir__)
-    ]
+    ].compact
   end
 
   def config_path
@@ -245,8 +245,8 @@ module RedmineSlackNotification
       request['blocks'] = image_ids.map do |file_id|
         {
           'type' => 'section',
-          'text' => { 'type' => 'plain_text', 'text' => '画像を準備中' },
-          'accessory' => { 'type' => 'image', 'slack_file' => { 'id' => file_id }, 'alt_text' => '画像' }
+          'text' => { 'type' => 'plain_text', 'text' => Formatter.message('images', 'preparing') },
+          'accessory' => { 'type' => 'image', 'slack_file' => { 'id' => file_id }, 'alt_text' => Formatter.message('images', 'alt') }
         }
       end
     end
@@ -300,7 +300,7 @@ module RedmineSlackNotification
       markdown_block = block['type'] == 'markdown'
       content = markdown_block ? block['text'] : block.dig('text', 'text')
       next [block] unless content.is_a?(String)
-      next [block] if content.match?(/\A\*{1,2}(?:説明|本文|コメント)の差分\*{1,2}\n\n?`{3,}(?:diff)?\n/)
+      next [block] if content.match?(/\A\*{1,2}[^\n]+\*{1,2}\n\n?`{3,}(?:diff)?\n/)
 
       with_text = lambda do |value|
         markdown_block ? block.merge('text' => value) : block.merge('text' => block['text'].merge('text' => value))
@@ -327,9 +327,13 @@ module RedmineSlackNotification
             path = attachment ? "/attachments/#{attachment.id}" : "/issues/#{journal.journalized.id}"
             if markdown_block
               label = name.gsub(/[\\\[\]]/) { |character| "\\#{character}" }
-              current_text << "[画像: #{label}](#{RedmineSlackNotification::Formatter.url(path)})"
+              image_label = Formatter.interpolate(Formatter.message('images', 'link_label'), { name: label },
+                                                  fallback: Formatter::DEFAULT_MESSAGES.dig('images', 'link_label'))
+              current_text << "[#{image_label}](#{Formatter.url(path)})"
             else
-              current_text << "<#{RedmineSlackNotification::Formatter.url(path)}|画像: #{RedmineSlackNotification::Formatter.text(name)}>"
+              image_label = Formatter.interpolate(Formatter.message('images', 'link_label'), { name: Formatter.text(name) },
+                                                  fallback: Formatter::DEFAULT_MESSAGES.dig('images', 'link_label'))
+              current_text << "<#{Formatter.url(path)}|#{image_label}>"
             end
           end
         else

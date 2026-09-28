@@ -53,9 +53,9 @@ Deletion of Wiki pages, News, Time entries, and Versions was not previously noti
 
 Wiki notifications do not include the full Wiki body. They include the Wiki edit comment when one is provided; otherwise, they report that the Wiki content was updated.
 
-When an Issue description, News description, or Wiki body changes, its notification includes a line diff inside the existing colored card. A Markdown `diff` code block marks removed lines with `-` and added lines with `+`, with two unchanged lines of context. The full updated body is not repeated. Long lines and large diffs are shortened with an omission notice; the Issue, News, or Wiki title still links to the full content. Wiki comment-only edits do not produce a body diff.
+By default, when an Issue description, News description, or Wiki body changes, its notification includes a line diff inside the existing colored card. A Markdown `diff` code block marks removed lines with `-` and added lines with `+`, with two unchanged lines of context. The full updated body is not repeated. Long lines and large diffs are shortened with an omission notice; the Issue, News, or Wiki title still links to the full content. Wiki comment-only edits do not produce a body diff.
 
-Edited Issue and News comments use the same line diff format. New comments show their full text. Deleted Issue and News comments show removed lines in a diff, without re-uploading their images.
+Edited Issue and News comments use the same line diff format by default. New comments show their full text. Deleted Issue and News comments show removed lines in a diff, without re-uploading their images.
 
 Set `slack.body_diff: false` to show the updated text instead of a diff for Issue descriptions, News descriptions, Wiki bodies, and edited Issue or News comments. The default is `true`. Deleted comments always show a diff regardless of this setting. Restart Redmine and Sidekiq after changing the YAML setting.
 
@@ -146,11 +146,34 @@ Slack configuration selection order:
 
 The Bot Token requires the `chat:write` scope. To show images from Issue comments, add `files:write` and reinstall the Slack app so the Bot Token gains that scope. The bot must be a member of each target channel.
 
+### Notification appearance and wording
+
+Set `slack.attachment_color` to a six-digit hex color such as `'#2E7D32'` to change the left border of every notification card. The default is `'#6D5DFB'`; invalid values fall back to that default. Quote the value in YAML because `#` starts a comment.
+
+The `messages` tree customizes every plugin-generated notification label. It is independent of the `events` tree, which enables or disables delivery. The [example YAML](config/redmine_slack_notification.yml.example) lists every available key and its default value:
+
+- `messages.events` and `messages.icons`: event titles and icons for Issues, comments, Wiki pages, News, News comments, time entries, Versions, and Projects.
+- `messages.sections`, `messages.fields`, `messages.relations`, and `messages.values`: card headings, field names, relation names, and fallback words.
+- `messages.diff` and `messages.images`: diff heading and truncation notice, image preview wording, and the attachment link shown if an upload fails.
+- `messages.templates`: plain-text fallback messages. Keep the `%{...}` placeholders needed by each template; an invalid template falls back to its built-in default.
+
+You can specify only the keys you want to change. Missing or empty strings retain the built-in text. Changes are global across projects and apply to newly generated notifications after Redmine and Sidekiq restart. The generated event title for a newly created News item, time entry, or Version, and for a new News comment, now says `created` or `added` rather than `updated`.
+
+`messages.templates` controls the attachment's plain-text fallback, used when the rich Slack card cannot be displayed. It does not change the card's visible sections. The placeholders are filled with values from the Redmine event:
+
+| Template | Used for | Placeholders |
+| --- | --- | --- |
+| `issue_fallback` | Issue creation and deletion | `%{project}`, `%{actor}`, `%{action}`, `%{tracker}`, `%{id}`, `%{subject}` |
+| `journal_fallback` | Issue changes and comments | `%{project}`, `%{actor}`, `%{event}`, `%{tracker}`, `%{id}`, `%{subject}` |
+| `generic_fallback` | Wiki, News, News comments, time entries, Versions, Projects | `%{event}`, `%{subject}` |
+
+For example, `generic_fallback: '[WAC] %{event}: %{subject}'` produces `[WAC] News updated: Example title`. Keep placeholders in `%{name}` form; an unknown placeholder falls back to the built-in template.
+
 Set `slack.auto_map_users_by_name: true` to mention an assignee automatically when the Redmine login matches exactly one active human Slack member's `profile.display_name` or account `name` (case-insensitive). Explicit `users` mappings take precedence. If the name is missing or ambiguous, the notification displays the Redmine name without a mention. The plugin caches the Slack user directory for 10 minutes and falls back to plain names when the API is unavailable. Automatic name matching requires the Bot Token's `users:read` scope and reinstalling the Slack app after adding that scope. It does not read email addresses and does not require `users:read.email`. The option defaults to `false` for existing installations.
 
 Comment images are uploaded from the attachments added in the same public Journal, then included in the colored notification card. This also works when an existing Issue comment is edited: with `slack.body_diff: false`, images appear at their Markdown positions in the updated text; with `true`, previews appear after the comment diff. A successful image replaces the source Markdown without an extra attachment link. Slack initially needs a top-level image accessory to share each newly uploaded private file with the channel; the plugin removes those small temporary previews with `chat.update` after posting. If that update fails, the complete colored card remains visible and an error is logged rather than posting a duplicate notification. Images over 20 MB and failed uploads remain clickable WAC attachment links. Images in private Issues or private comments are never uploaded. Already posted Slack notifications are not changed automatically by installing this version.
 
-Redmine text containing an ordered Markdown list is sent in a Slack `markdown` block inside the colored attachment card. Slack renders repeated `1.` markers as a numbered list, as Redmine does. The card header, dividers, metadata fields, and purple border keep their existing layout even when a comment includes images. Slack limits Markdown blocks to 12,000 characters per message, so longer text uses the existing `mrkdwn` section format.
+Redmine text containing an ordered Markdown list is sent in a Slack `markdown` block inside the colored attachment card. Slack renders repeated `1.` markers as a numbered list, as Redmine does. The card header, dividers, metadata fields, and configured border keep their existing layout even when a comment includes images. Slack limits Markdown blocks to 12,000 characters per message, so longer text uses the existing `mrkdwn` section format.
 
 The configuration file contains credentials and must not be committed to Git. The example file is safe to commit; replace all placeholder values before use.
 

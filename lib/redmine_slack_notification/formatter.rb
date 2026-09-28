@@ -6,8 +6,92 @@ module RedmineSlackNotification
     BODY_DIFF_MAX_LINE_CHARS = 400
     BODY_DIFF_CONTEXT_LINES = 2
     BODY_DIFF_LCS_CELLS = 40_000
+    EVENT_NOUN_KEYS = {
+      'Issue' => 'issue', 'Comment' => 'comment', 'Wiki page' => 'wiki', 'News' => 'news',
+      'News comment' => 'news_comment', 'Time entry' => 'time_entry', 'Version' => 'version',
+      'Project' => 'project'
+    }.freeze
+    DETAIL_FIELD_KEYS = {
+      'status_id' => 'status', 'priority_id' => 'priority', 'assigned_to_id' => 'assignee',
+      'category_id' => 'category', 'tracker_id' => 'tracker', 'fixed_version_id' => 'target_version',
+      'parent_id' => 'parent_issue', 'child_id' => 'child_issue', 'subject' => 'subject',
+      'description' => 'description', 'start_date' => 'start_date', 'due_date' => 'due_date'
+    }.freeze
+    DEFAULT_MESSAGES = {
+      'events' => {
+        'issue' => { 'created' => 'Issue created', 'updated' => 'Issue updated', 'deleted' => 'Issue deleted' },
+        'comment' => { 'added' => 'Comment added', 'updated' => 'Comment updated', 'deleted' => 'Comment deleted' },
+        'wiki' => { 'created' => 'Wiki page created', 'updated' => 'Wiki page updated', 'deleted' => 'Wiki page deleted' },
+        'news' => { 'created' => 'News created', 'updated' => 'News updated', 'deleted' => 'News deleted' },
+        'news_comment' => { 'added' => 'News comment added', 'updated' => 'News comment updated', 'deleted' => 'News comment deleted' },
+        'time_entry' => { 'created' => 'Time entry created', 'updated' => 'Time entry updated', 'deleted' => 'Time entry deleted' },
+        'version' => { 'created' => 'Version created', 'updated' => 'Version updated', 'deleted' => 'Version deleted' },
+        'project' => { 'updated' => 'Project updated' }
+      },
+      'icons' => {
+        'issue' => { 'created' => '🆕', 'updated' => '🔄', 'deleted' => '🗑️' },
+        'comment' => { 'added' => '💬', 'updated' => '💬', 'deleted' => '🗑️' },
+        'wiki' => { 'created' => '📚', 'updated' => '✏️', 'deleted' => '🗑️' },
+        'news' => { 'created' => '📰', 'updated' => '📰', 'deleted' => '🗑️' },
+        'news_comment' => { 'added' => '💬', 'updated' => '✏️', 'deleted' => '🗑️' },
+        'time_entry' => { 'created' => '⏱️', 'updated' => '⏱️', 'deleted' => '🗑️' },
+        'version' => { 'created' => '🏷️', 'updated' => '🏷️', 'deleted' => '🗑️' },
+        'project' => { 'updated' => '🗂️' }
+      },
+      'sections' => {
+        'content' => 'Content', 'comment' => 'Comment', 'summary' => 'Summary', 'changes' => 'Changes',
+        'metadata' => 'Metadata', 'added_comment' => 'Added comment', 'updated_comment' => 'Updated comment',
+        'description' => 'Description', 'body' => 'Body'
+      },
+      'fields' => {
+        'project' => 'Project', 'updater' => 'Updated by', 'poster' => 'Posted by', 'tracker' => 'Tracker',
+        'category' => 'Category', 'priority' => 'Priority', 'status' => 'Status', 'assignee' => 'Assignee',
+        'target_version' => 'Target version', 'parent_issue' => 'Parent issue', 'child_issue' => 'Child issue',
+        'subject' => 'Subject', 'description' => 'Description', 'start_date' => 'Start date', 'due_date' => 'Due date',
+        'attachment' => 'Attachment', 'relation' => 'Related issue (%{type})', 'location' => 'Changed location',
+        'hours' => 'Hours', 'spent_on' => 'Spent on'
+      },
+      'relations' => {
+        'relates' => 'Related', 'duplicates' => 'Duplicates', 'duplicated' => 'Duplicated by', 'blocks' => 'Blocks',
+        'blocked' => 'Blocked by', 'precedes' => 'Precedes', 'follows' => 'Follows', 'copied_to' => 'Copied to',
+        'copied_from' => 'Copied from'
+      },
+      'values' => { 'unknown_user' => 'Unknown user', 'unknown' => 'Unknown', 'unset' => 'Not set',
+                    'none' => 'None', 'empty' => '(empty)', 'added' => 'Added', 'removed' => 'Removed',
+                    'created' => 'created', 'updated' => 'updated', 'deleted' => 'deleted' },
+      'diff' => { 'heading' => '%{label} diff', 'omitted' => 'Diff truncated. See the linked page for the full text.' },
+      'images' => { 'preparing' => 'Preparing image', 'alt' => 'Image', 'link_label' => 'Image: %{name}' },
+      'templates' => {
+        'issue_fallback' => '[%{project}] %{actor} %{action} %{tracker} #%{id}: %{subject}',
+        'journal_fallback' => '[%{project}] %{actor} %{event} %{tracker} #%{id}: %{subject}',
+        'generic_fallback' => 'WAC: %{event} - %{subject}'
+      }
+    }.freeze
 
     module_function
+
+    def message(*path)
+      default = DEFAULT_MESSAGES.dig(*path)
+      configured = RedmineSlackNotification.config['messages']
+      path.each do |key|
+        configured = configured.is_a?(Hash) ? configured[key] : nil
+      end
+      configured.is_a?(String) && !configured.empty? ? configured : default
+    end
+
+    def interpolate(template, values, fallback: nil)
+      template % values
+    rescue KeyError, ArgumentError
+      fallback ? fallback % values : template
+    end
+
+    def section_label(key)
+      message('sections', key)
+    end
+
+    def field_label(key)
+      message('fields', key)
+    end
 
     def text(value)
       value.to_s.gsub('&', '&amp;').gsub('<', '&lt;').gsub('>', '&gt;')
@@ -59,7 +143,7 @@ module RedmineSlackNotification
     end
 
     def user_mention(user)
-      return '不明なユーザー' if user.nil?
+      return message('values', 'unknown_user') if user.nil?
 
       mapping = RedmineSlackNotification.user_mapping
       slack_id = mapping[user.login.to_s] || mapping[user.mail.to_s]
@@ -81,15 +165,23 @@ module RedmineSlackNotification
       {
         'attachments' => [{
           'fallback' => message,
-          'color' => '#6D5DFB',
+          'color' => attachment_color,
           'blocks' => blocks
         }]
       }
     end
 
+    def attachment_color
+      color = RedmineSlackNotification.config.dig('slack', 'attachment_color')
+      color.is_a?(String) && color.match?(/\A#[0-9a-fA-F]{6}\z/) ? color : '#6D5DFB'
+    end
+
     def issue_payload(issue, actor:, action:, details: [], notes: nil)
       event_label = event_label('Issue', action)
-      title = "[#{issue.project.name}] #{actor&.name || '不明なユーザー'} #{action} #{issue.tracker.name} ##{issue.id}: #{issue.subject}"
+      title = interpolate(message('templates', 'issue_fallback'),
+                          { project: issue.project.name, actor: actor&.name || message('values', 'unknown_user'),
+                            action: message('values', action), tracker: issue.tracker.name, id: issue.id, subject: issue.subject },
+                          fallback: DEFAULT_MESSAGES.dig('templates', 'issue_fallback'))
       blocks = [
         section_text("#{event_icon(action, noun: 'Issue')} *#{event_label}*"),
         section_text("*<#{url('/issues/' + issue.id.to_s)}|##{issue.id} #{text(issue.subject)}>*")
@@ -99,30 +191,30 @@ module RedmineSlackNotification
       description = issue.description.to_s.strip
       description = description.sub(/\A[ \t]*\#{1,6}[ \t]+[^\n]+\n?/, '').strip
       if action == 'created'
-        blocks.insert(2, *mrkdwn_sections('内容', description)) if description.present?
+        blocks.insert(2, *mrkdwn_sections(section_label('content'), description)) if description.present?
       end
 
       if notes.to_s.strip.present?
         if ordered_list?(notes)
-          blocks.insert(2, *mrkdwn_sections('コメント', notes.to_s))
+          blocks.insert(2, *mrkdwn_sections(section_label('comment'), notes.to_s))
         else
-          blocks.insert(2, { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => "*コメント*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}" } })
+          blocks.insert(2, { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => "*#{text(section_label('comment'))}*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}" } })
         end
       end
       if action != 'created' && description_detail
-        blocks.insert(2, *updated_body_blocks('説明', description_detail.old_value, description_detail.value,
-                                              blocks: blocks, full_heading: '概要', full_text: description))
+        blocks.insert(2, *updated_body_blocks(section_label('description'), description_detail.old_value, description_detail.value,
+                                              blocks: blocks, full_heading: section_label('summary'), full_text: description))
       end
 
       changes = change_fields(issue, details)
       if changes.present?
         blocks << { 'type' => 'divider' }
-        blocks << { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => '*変更内容*' } }
+        blocks << section_text("*#{text(section_label('changes'))}*")
         blocks.concat(change_field_blocks(changes))
       end
 
       blocks << { 'type' => 'divider' }
-      blocks << { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => '*メタ情報*' } }
+      blocks << section_text("*#{text(section_label('metadata'))}*")
       blocks << {
         'type' => 'section',
         'expand' => true,
@@ -134,44 +226,47 @@ module RedmineSlackNotification
 
     def journal_payload(issue, actor:, notes:, details: [], comment_action: 'added', previous_notes: nil)
       combined_update = details.any?
-      label = combined_update ? 'Issue updated' : "Comment #{comment_action}"
-      icon = combined_update ? '🔄' : comment_action == 'deleted' ? '🗑️' : '💬'
-      fallback = "[#{issue.project.name}] #{actor&.name || '不明なユーザー'} #{label.downcase} #{issue.tracker.name} ##{issue.id}: #{issue.subject}"
+      label = combined_update ? event_label('Issue', 'updated') : message('events', 'comment', comment_action)
+      icon = combined_update ? event_icon('updated', noun: 'Issue') : event_icon(comment_action, noun: 'Comment')
+      fallback = interpolate(message('templates', 'journal_fallback'),
+                             { project: issue.project.name, actor: actor&.name || message('values', 'unknown_user'),
+                               event: label.downcase, tracker: issue.tracker.name, id: issue.id, subject: issue.subject },
+                             fallback: DEFAULT_MESSAGES.dig('templates', 'journal_fallback'))
       blocks = [
         section_text("#{icon} *#{label}*"),
         section_text("*<#{url('/issues/' + issue.id.to_s)}|##{issue.id} #{text(issue.subject)}>*"),
         { 'type' => 'divider' }
       ]
       if comment_action == 'deleted' && !previous_notes.nil?
-        blocks.concat(body_diff_blocks('コメント', previous_notes, '', blocks: blocks))
+        blocks.concat(body_diff_blocks(section_label('comment'), previous_notes, '', blocks: blocks))
       elsif comment_action == 'updated' && !previous_notes.nil?
-        blocks.concat(updated_body_blocks('コメント', previous_notes, notes, blocks: blocks,
-                                          full_heading: '変更後のコメント'))
+        blocks.concat(updated_body_blocks(section_label('comment'), previous_notes, notes, blocks: blocks,
+                                          full_heading: section_label('updated_comment')))
         if RedmineSlackNotification.body_diff_enabled?
           image_references(notes).each { |name| blocks << section_text("![](#{name})") }
         end
       elsif notes.to_s.strip.present?
-        heading = comment_action == 'updated' ? '変更後のコメント' : '追加コメント'
+        heading = section_label(comment_action == 'updated' ? 'updated_comment' : 'added_comment')
         blocks.concat(mrkdwn_sections(heading, notes.to_s))
       end
 
       description_detail = details.find { |detail| detail.property == 'attr' && detail.prop_key == 'description' }
       if description_detail
-        blocks.concat(updated_body_blocks('説明', description_detail.old_value, description_detail.value,
-                                          blocks: blocks, full_heading: '概要'))
+        blocks.concat(updated_body_blocks(section_label('description'), description_detail.old_value, description_detail.value,
+                                          blocks: blocks, full_heading: section_label('summary')))
       end
       changes = change_fields(issue, details)
       if changes.present?
         blocks << { 'type' => 'divider' }
-        blocks << section_text('*変更内容*')
+        blocks << section_text("*#{text(section_label('changes'))}*")
         blocks.concat(change_field_blocks(changes))
       end
       blocks.concat([
         { 'type' => 'divider' },
-        section_text('*メタ情報*'),
+        section_text("*#{text(section_label('metadata'))}*"),
         { 'type' => 'section', 'expand' => true, 'fields' => [
-          field('プロジェクト', text(issue.project.name)),
-          field('投稿者', text(actor&.name || '不明'))
+          field(field_label('project'), text(issue.project.name)),
+          field(field_label('poster'), text(actor&.name || message('values', 'unknown')))
         ] },
       ])
       payload(fallback, blocks: blocks)
@@ -180,29 +275,33 @@ module RedmineSlackNotification
     def wiki_payload(content, project, actor:, action:, body_diff: nil)
       title = content.page.title
       label = event_label('Wiki page', action)
-      fallback = "WAC: #{label} - #{title}"
+      fallback = interpolate(message('templates', 'generic_fallback'), { event: label, subject: title },
+                             fallback: DEFAULT_MESSAGES.dig('templates', 'generic_fallback'))
       change_summary = content.comments.to_s.strip
       blocks = [
         section_text("#{event_icon(action, noun: 'Wiki page')} *#{label}*"),
         section_text("*<#{url('/projects/' + project.identifier.to_s + '/wiki/' + title.to_s)}|#{text(title)}>*")
       ]
-      blocks.concat(mrkdwn_sections('変更内容', change_summary)) if change_summary.present?
-      blocks.concat(updated_body_blocks('本文', *body_diff, blocks: blocks)) if body_diff
+      blocks.concat(mrkdwn_sections(section_label('changes'), change_summary)) if change_summary.present?
+      blocks.concat(updated_body_blocks(section_label('body'), *body_diff, blocks: blocks)) if body_diff
       blocks.concat([
         { 'type' => 'divider' },
-        section_text('*メタ情報*'),
+        section_text("*#{text(section_label('metadata'))}*"),
         { 'type' => 'section', 'expand' => true, 'fields' => [
-          field('プロジェクト', text(project.name)),
-          field('更新者', text(actor&.name || '不明')),
-          field('変更箇所', text(title))
+          field(field_label('project'), text(project.name)),
+          field(field_label('updater'), text(actor&.name || message('values', 'unknown'))),
+          field(field_label('location'), text(title))
         ] }
       ])
       payload(fallback, blocks: blocks)
     end
 
-    def generic_payload(noun:, action:, subject:, url:, project:, actor:, fields: [], summary: nil, notes: nil, body_diff: nil, body_diff_label: '本文', body_full_label: '概要')
+    def generic_payload(noun:, action:, subject:, url:, project:, actor:, fields: [], summary: nil, notes: nil, body_diff: nil, body_diff_label: nil, body_full_label: nil)
       label = event_label(noun, action)
-      fallback = "WAC: #{label} - #{subject}"
+      fallback = interpolate(message('templates', 'generic_fallback'), { event: label, subject: subject },
+                             fallback: DEFAULT_MESSAGES.dig('templates', 'generic_fallback'))
+      body_diff_label ||= section_label('body')
+      body_full_label ||= section_label('summary')
       blocks = [
         section_text("#{event_icon(action, noun: noun)} *#{label}*"),
         section_text("*<#{url}|#{text(subject)}>*")
@@ -216,39 +315,32 @@ module RedmineSlackNotification
                       end
         blocks.concat(body_blocks)
       elsif summary.to_s.strip.present?
-        blocks << section_text("*概要*\n#{mrkdwn(summary.to_s.truncate(1200))}")
+        blocks << section_text("*#{text(section_label('summary'))}*\n#{mrkdwn(summary.to_s.truncate(1200))}")
       end
       blocks << { 'type' => 'divider' }
-      blocks << { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => '*メタ情報*' } }
-      metadata = [['プロジェクト', text(project.name)], ['更新者', text(actor&.name || '不明')]] + fields
+      blocks << section_text("*#{text(section_label('metadata'))}*")
+      metadata = [[field_label('project'), text(project.name)], [field_label('updater'), text(actor&.name || message('values', 'unknown'))]] + fields
       blocks << { 'type' => 'section', 'expand' => true, 'fields' => metadata.map { |key, value| field(key, value) } }
       if notes.to_s.strip.present?
-        blocks.insert(2, *(ordered_list?(notes) ? mrkdwn_sections('コメント', notes.to_s) : [section_text("*コメント*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}")]))
+        blocks.insert(2, *(ordered_list?(notes) ? mrkdwn_sections(section_label('comment'), notes.to_s) : [section_text("*#{text(section_label('comment'))}*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}")]))
       end
       payload(fallback, blocks: blocks)
     end
 
     def event_label(noun, action)
-      return "#{noun} deleted" if action == 'deleted'
-      return 'News updated' if noun == 'News'
-      return 'Time entry updated' if noun == 'Time entry'
-      return 'Version updated' if noun == 'Version'
-      return 'Project updated' if noun == 'Project'
+      key = event_key(noun)
+      configured = message('events', key, action) if key
+      return configured if configured
 
-      "#{noun} #{action == 'created' ? 'created' : action == 'deleted' ? 'deleted' : 'updated'}"
+      "#{noun} #{action}"
     end
 
     def event_icon(action, noun: 'Issue')
-      icons = {
-        'Issue' => { 'created' => '🆕', 'updated' => '🔄', 'deleted' => '🗑️' },
-        'Wiki page' => { 'created' => '📚', 'updated' => '✏️', 'deleted' => '🗑️' },
-        'News' => { 'created' => '📰', 'updated' => '📰', 'deleted' => '🗑️' },
-        'News comment' => { 'updated' => '✏️', 'deleted' => '🗑️' },
-        'Time entry' => { 'created' => '⏱️', 'updated' => '⏱️', 'deleted' => '🗑️' },
-        'Version' => { 'created' => '🏷️', 'updated' => '🏷️', 'deleted' => '🗑️' },
-        'Project' => { 'updated' => '🗂️' }
-      }
-      icons.fetch(noun, {}).fetch(action, '🔧')
+      message('icons', event_key(noun), action) || '🔧'
+    end
+
+    def event_key(noun)
+      EVENT_NOUN_KEYS[noun]
     end
 
     def header_block(value)
@@ -257,14 +349,14 @@ module RedmineSlackNotification
 
     def mrkdwn_sections(heading, value, limit: 2800)
       markdown = value.to_s.gsub("\r\n", "\n").gsub("\r", "\n")
-      markdown_text = "**#{heading}**\n\n#{markdown}"
+      markdown_text = "**#{text(heading)}**\n\n#{markdown}"
       # Slack caps all Markdown blocks in one message at 12,000 characters.
       # Keep the existing section path for longer notes rather than dropping text.
       return [{ 'type' => 'markdown', 'text' => markdown_text }] if ordered_list?(markdown) && markdown_text.length <= 12_000
 
       chunks = value.to_s.each_char.each_slice(limit).map(&:join)
       chunks.each_with_index.map do |chunk, index|
-        content = index.zero? ? "*#{heading}*\n#{mrkdwn(chunk)}" : mrkdwn(chunk)
+        content = index.zero? ? "*#{text(heading)}*\n#{mrkdwn(chunk)}" : mrkdwn(chunk)
         section_text(content)
       end
     end
@@ -278,7 +370,7 @@ module RedmineSlackNotification
       return [] if body_lines(before) == body_lines(after)
 
       content = full_text.nil? ? after.to_s : full_text.to_s
-      mrkdwn_sections(full_heading, content.strip.empty? ? '（空）' : content)
+      mrkdwn_sections(full_heading, content.strip.empty? ? message('values', 'empty') : content)
     end
 
     def body_diff_blocks(label, before, after, blocks: [])
@@ -300,7 +392,8 @@ module RedmineSlackNotification
       markdown_available = 12_000 - markdown_used - 100
       use_markdown = markdown_available >= 500
       max_chars = use_markdown ? [BODY_DIFF_MAX_CHARS, markdown_available].min : 2_800
-      heading = use_markdown ? "**#{label}の差分**\n\n" : "*#{label}の差分*\n"
+      diff_heading = interpolate(message('diff', 'heading'), { label: label }, fallback: DEFAULT_MESSAGES.dig('diff', 'heading'))
+      heading = use_markdown ? "**#{text(diff_heading)}**\n\n" : "*#{text(diff_heading)}*\n"
       body = +''
       previous = -1
       shortened = false
@@ -322,7 +415,7 @@ module RedmineSlackNotification
         body << addition
         previous = index
       end
-      body << '  … (差分を一部省略。全文はリンク先で確認)' if shortened
+      body << "  … (#{message('diff', 'omitted')})" if shortened
       longest_ticks = body.scan(/`+/).map(&:length).max || 0
       fence = '`' * [3, longest_ticks + 1].max
       opening = use_markdown ? "#{fence}diff" : fence
@@ -393,11 +486,11 @@ module RedmineSlackNotification
 
     def metadata_fields(issue, actor)
       [
-        ['プロジェクト', text(issue.project.name)],
-        ['更新者', text(actor&.name || '不明')],
-        ['トラッカー', text(issue.tracker&.name || '未設定')],
-        ['カテゴリー', text(issue.category&.name || '未設定')],
-        ['優先度', text(issue.priority&.name || '未設定')]
+        [field_label('project'), text(issue.project.name)],
+        [field_label('updater'), text(actor&.name || message('values', 'unknown'))],
+        [field_label('tracker'), text(issue.tracker&.name || message('values', 'unset'))],
+        [field_label('category'), text(issue.category&.name || message('values', 'unset'))],
+        [field_label('priority'), text(issue.priority&.name || message('values', 'unset'))]
       ]
     end
 
@@ -408,10 +501,10 @@ module RedmineSlackNotification
 
         value = if detail.property == 'relation'
                   relation_id = detail.value.presence || detail.old_value
-                  action = detail.value.present? ? '追加' : '削除'
+                  action = message('values', detail.value.present? ? 'added' : 'removed')
                   "#{action}: #{relation_issue_link(relation_id)}"
                 elsif detail.property == 'attachment'
-                  action = detail.value.present? ? '追加' : '削除'
+                  action = message('values', detail.value.present? ? 'added' : 'removed')
                   filename = detail.value.presence || detail.old_value
                   "#{action}: #{text(filename)}"
                 elsif detail.property == 'attr' && detail.prop_key == 'description'
@@ -432,14 +525,14 @@ module RedmineSlackNotification
     end
 
     def issue_reference(issue_id)
-      issue_id.present? ? relation_issue_link(issue_id) : 'なし'
+      issue_id.present? ? relation_issue_link(issue_id) : message('values', 'none')
     end
 
     def issue_fields(issue, details)
       current = [
-        ['ステータス', issue.status&.name],
-        ['優先度', issue.priority&.name],
-        ['担当者', user_mention(issue.assigned_to)]
+        [field_label('status'), issue.status&.name],
+        [field_label('priority'), issue.priority&.name],
+        [field_label('assignee'), user_mention(issue.assigned_to)]
       ].compact
       changed = details.filter_map do |detail|
         label = detail_label(detail)
@@ -458,49 +551,38 @@ module RedmineSlackNotification
         label = detail_label(detail)
         next unless label
 
-        old_value = text(detail.old_value.presence || 'なし')
-        new_value = text(detail.value.presence || 'なし')
+        old_value = text(detail.old_value.presence || message('values', 'none'))
+        new_value = text(detail.value.presence || message('values', 'none'))
         "• *#{text(label)}*: #{old_value} → #{new_value}"
       end
     end
 
     def detail_label(detail)
       return CustomField.find_by(id: detail.prop_key)&.name || detail.prop_key.to_s if detail.property == 'cf'
-      return "関連チケット（#{relation_type_label(detail.prop_key)}）" if detail.property == 'relation'
-      return '添付ファイル' if detail.property == 'attachment'
+      return interpolate(field_label('relation'), { type: relation_type_label(detail.prop_key) },
+                         fallback: DEFAULT_MESSAGES.dig('fields', 'relation')) if detail.property == 'relation'
+      return field_label('attachment') if detail.property == 'attachment'
 
-      {
-        'status_id' => 'ステータス',
-        'priority_id' => '優先度',
-        'assigned_to_id' => '担当者',
-        'category_id' => 'カテゴリー',
-        'tracker_id' => 'トラッカー',
-        'fixed_version_id' => '対象バージョン',
-        'parent_id' => '親チケット',
-        'child_id' => '子チケット',
-        'subject' => '題名',
-        'description' => '説明',
-        'start_date' => '開始日',
-        'due_date' => '期日'
-      }[detail.prop_key]
+      key = DETAIL_FIELD_KEYS[detail.prop_key]
+      field_label(key) if key
     end
 
     def detail_value(issue, detail)
-      return text(detail.value.presence || 'なし') unless detail.property == 'attr'
+      return text(detail.value.presence || message('values', 'none')) unless detail.property == 'attr'
 
       case detail.prop_key
-      when 'status_id' then text(issue.status&.name || 'なし')
-      when 'priority_id' then text(issue.priority&.name || 'なし')
+      when 'status_id' then text(issue.status&.name || message('values', 'none'))
+      when 'priority_id' then text(issue.priority&.name || message('values', 'none'))
       when 'assigned_to_id' then user_mention(issue.assigned_to)
-      when 'category_id' then text(issue.category&.name || 'なし')
-      when 'tracker_id' then text(issue.tracker&.name || 'なし')
-      when 'fixed_version_id' then text(issue.fixed_version&.name || 'なし')
-      else text(detail.value.presence || 'なし')
+      when 'category_id' then text(issue.category&.name || message('values', 'none'))
+      when 'tracker_id' then text(issue.tracker&.name || message('values', 'none'))
+      when 'fixed_version_id' then text(issue.fixed_version&.name || message('values', 'none'))
+      else text(detail.value.presence || message('values', 'none'))
       end
     end
 
     def detail_old_value(detail)
-      value = detail.old_value.presence || 'なし'
+      value = detail.old_value.presence || message('values', 'none')
       return text(value) unless detail.property == 'attr'
 
       record = case detail.prop_key
@@ -519,17 +601,7 @@ module RedmineSlackNotification
     end
 
     def relation_type_label(relation_type)
-      {
-        'relates' => '関連',
-        'duplicates' => '重複',
-        'duplicated' => '重複元',
-        'blocks' => 'ブロック',
-        'blocked' => 'ブロック元',
-        'precedes' => '先行',
-        'follows' => '後続',
-        'copied_to' => 'コピー先',
-        'copied_from' => 'コピー元'
-      }.fetch(relation_type.to_s, relation_type.to_s)
+      message('relations', relation_type.to_s) || relation_type.to_s
     end
 
     def relation_issue_link(issue_id)

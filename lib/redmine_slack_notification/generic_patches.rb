@@ -47,7 +47,8 @@ module RedmineSlackNotification
       project = self.project
       return unless project
 
-      fields = [['作業時間', "#{hours}h"], ['作業日', spent_on.to_s]]
+      fields = [[RedmineSlackNotification::Formatter.field_label('hours'), "#{hours}h"],
+                [RedmineSlackNotification::Formatter.field_label('spent_on'), spent_on.to_s]]
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.generic_payload(
           noun: noun, action: action, subject: "##{id}", url: RedmineSlackNotification::Formatter.url("/projects/#{project.identifier}/time_entries"),
@@ -70,7 +71,8 @@ module RedmineSlackNotification
       project = self.project
       return unless project
 
-      fields = [['ステータス', status.to_s], ['期日', effective_date.to_s]]
+      fields = [[RedmineSlackNotification::Formatter.field_label('status'), status.to_s],
+                [RedmineSlackNotification::Formatter.field_label('due_date'), effective_date.to_s]]
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.generic_payload(
           noun: noun, action: action, subject: name,
@@ -108,7 +110,7 @@ module RedmineSlackNotification
 
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.generic_payload(
-          noun: 'News', action: 'updated', subject: news.title,
+          noun: 'News comment', action: 'added', subject: news.title,
           url: RedmineSlackNotification::Formatter.url("/news/#{news.id}"), project: project,
           actor: respond_to?(:author) ? author : User.current,
           notes: comment_body
@@ -127,7 +129,8 @@ module RedmineSlackNotification
         RedmineSlackNotification::Formatter.generic_payload(
           noun: 'News comment', action: 'deleted', subject: news.title,
           url: RedmineSlackNotification::Formatter.url("/news/#{news.id}"), project: project,
-          actor: User.current, body_diff: [content, ''], body_diff_label: 'コメント'
+          actor: User.current, body_diff: [content, ''],
+          body_diff_label: RedmineSlackNotification::Formatter.section_label('comment')
         ), project: project, event: 'news_comment_deleted'
       )
     end
@@ -146,7 +149,8 @@ module RedmineSlackNotification
           noun: 'News comment', action: 'updated', subject: news.title,
           url: RedmineSlackNotification::Formatter.url("/news/#{news.id}"), project: project,
           actor: User.current, body_diff: [content_before_last_save, content],
-          body_diff_label: 'コメント', body_full_label: '変更後のコメント'
+          body_diff_label: RedmineSlackNotification::Formatter.section_label('comment'),
+          body_full_label: RedmineSlackNotification::Formatter.section_label('updated_comment')
         ), project: project, event: 'news_comment_updated'
       )
     end
