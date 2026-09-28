@@ -19,6 +19,7 @@ module RedmineSlackNotification
     'status_changed' => %w[issue updated status_changed],
     'assignee_changed' => %w[issue updated assignee_changed],
     'priority_changed' => %w[issue updated priority_changed],
+    'category_changed' => %w[issue updated category_changed],
     'due_date_changed' => %w[issue updated due_date_changed],
     'start_date_changed' => %w[issue updated start_date_changed],
     'version_changed' => %w[issue updated version_changed],

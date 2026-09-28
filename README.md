@@ -45,10 +45,11 @@ The `events` tree controls delivery. The table gives every supported leaf and it
 | --- | :---: | --- |
 | `issue.created` | `true` | Issue created |
 | `issue.updated.enabled` | `true` | Parent switch for all Issue detail changes below |
-| `issue.updated.other_changed` | `true` | Other Issue details, such as category or tracker |
+| `issue.updated.other_changed` | `true` | Other Issue details, such as tracker |
 | `issue.updated.status_changed` | `true` | Status |
 | `issue.updated.assignee_changed` | `true` | Assignee |
 | `issue.updated.priority_changed` | `true` | Priority |
+| `issue.updated.category_changed` | `true` | Category |
 | `issue.updated.due_date_changed` | `true` | Due date |
 | `issue.updated.start_date_changed` | `true` | Start date |
 | `issue.updated.version_changed` | `true` | Issue target version |
@@ -105,7 +106,7 @@ Deletion of Wiki pages, News, time entries, and Versions defaults to off because
 
 ## Notification content
 
-The card contains an event heading, a link to the Redmine record, and relevant text or changed fields. Issue creation and updates can include current-value metadata; comment-only and deletion notifications do not. Other event types show their metadata unless disabled below. `slack.attachment_color` changes the card's left border:
+The card contains an event heading, a link to the Redmine record, and relevant text or changed fields. Issue creation and updates include the configured current-value metadata; comment-only and deletion notifications do not. Other event types show their metadata unless disabled below. `slack.attachment_color` changes the card's left border:
 
 ```yaml
 slack:
@@ -114,58 +115,53 @@ slack:
 
 The default is `'#6D5DFB'`. Use a quoted six-digit hex value; invalid values fall back to the default. Slack attachments preserve the card border and sections when Markdown lists or images appear.
 
-For Issues, configure current values independently under `slack.metadata.issue.created` and `slack.metadata.issue.updated`. A field set to `true` appears whenever that notification is sent, even if that field did not change. Unset scalar values show `Not set`; empty lists show `None`. By default, creation shows the five original fields and updates show no metadata. For other notification types, set `slack.metadata.<type>.<field>` to `false` to hide a field; unspecified fields remain visible. Available fields are:
+For Issues, use one `slack.metadata.issue` map for both creation and updates. A field set to `true` appears whenever either notification is sent, even if it did not change. By default, `project`, `updater`, `tracker`, `category`, and `priority` are visible; the other Issue fields are hidden. Unset scalar values show `Not set`; empty lists show `None`. For other notification types, set `slack.metadata.<type>.<field>` to `false` to hide a field; unspecified fields remain visible. Available fields are:
 
 | Type | Fields |
 | --- | --- |
-| `issue.created`, `issue.updated` | `project`, `updater`, `tracker`, `category`, `priority`, `status`, `assignee`, `author`, `target_version`, `start_date`, `due_date`, `estimated_hours`, `done_ratio`, `parent_issue`, `children`, `relations`, `attachments`, `watchers`, `custom_fields` |
+| `issue` | `project`, `updater`, `tracker`, `category`, `priority`, `status`, `assignee`, `author`, `target_version`, `start_date`, `due_date`, `estimated_hours`, `done_ratio`, `parent_issue`, `children`, `relations`, `attachments`, `watchers`, `custom_fields` |
 | `wiki` | `project`, `updater`, `location` |
 | `news`, `news_comment`, `project` | `project`, `updater` |
 | `time_entry` | `project`, `updater`, `hours`, `spent_on` |
 | `version` | `project`, `updater`, `status`, `due_date` |
 
-For example, this hides the updater on new Issues, always shows the current status and target version on Issue updates, and hides the project on News notifications:
+For example, this shows the current status and target version on both new Issues and Issue updates, and hides the project on News notifications:
 
 ```yaml
 slack:
   metadata:
     issue:
-      created:
-        updater: false
-      updated:
-        status: true
-        target_version: true
+      status: true
+      target_version: true
     news:
       project: false
 ```
 
-Set a type such as `wiki: false`, or `issue.updated: false`, to hide its entire metadata section. `slack.metadata: false` hides metadata everywhere. A section with no visible fields is omitted. The previous flat `slack.metadata.issue` settings still apply to creation; use `issue.updated` to configure update notifications. `messages.fields` changes labels without changing visibility.
+Set a type such as `wiki: false` or `issue: false` to hide its entire metadata section. `slack.metadata: false` hides metadata everywhere. A section with no visible fields is omitted. `messages.fields` changes labels without changing visibility.
 
-Related Issues and child Issues are linked when available; private Issues are omitted. Custom fields use Redmine's visible custom field values and can be selected by numeric ID independently for creation and updates:
+Related Issues and child Issues are linked when available; private Issues are omitted. Custom fields use Redmine's visible custom field values and can be selected by numeric ID:
 
 ```yaml
 slack:
   metadata:
     issue:
-      created:
-        target_version: true
-      updated:
-        relations: true
-        custom_fields:
-          default: false
-          '42': true
+      target_version: true
+      relations: true
+      custom_fields:
+        default: false
+        '42': true
 ```
 
-Issue updates also show a separate **Changes** section containing only values that changed. By default, it includes enabled event details and a description diff, regardless of which current-value metadata fields are off. Disable all Issue change details with `slack.issue_change_details: false`:
+Issue updates also show a separate **Changes** section with the old and new values of changed fields. Changes to visible fields are always shown. By default, changes to hidden fields are shown too; set `slack.issue_changes_when_hidden: false` to omit them:
 
 ```yaml
 slack:
-  issue_change_details: false
+  issue_changes_when_hidden: false
 ```
 
-This switch also hides the Issue description diff, but does not hide comments. The existing `events.issue.updated` switches decide which changes cause a notification and which change details reach the formatter; `issue_change_details` only controls whether those details appear in the card. A notification can therefore contain only its heading and Issue link if both metadata and change details are off. For `custom_fields` under metadata, a boolean shows or hides all visible fields; a map uses `default` for unspecified IDs. The IDs are Redmine custom field IDs, independent of field names and translated labels.
+This switch does not hide the Issue description diff, the subject link, or comments. The `events.issue.updated` switches still decide which changes cause a notification and reach the formatter; this switch only controls whether changes to hidden metadata fields appear in the card. For `custom_fields`, a boolean shows or hides all visible custom fields; a map uses `default` for unspecified IDs. The IDs are Redmine custom field IDs, independent of field names and translated labels.
 
-The former per-field `slack.issue_changes` map is no longer used. Replace it with `metadata.issue.created` / `metadata.issue.updated` for current values, `issue_change_details` for change display, and `events.issue.updated` for notification triggers.
+Existing `metadata.issue.created` / `metadata.issue.updated` maps are still read for compatibility. Replace them with the single `metadata.issue` map when editing your YAML; do not mix the two forms. The former per-field `slack.issue_changes` map and `slack.issue_change_details` switch are no longer used. Use `issue_changes_when_hidden` for hidden-field changes and `events.issue.updated` for notification triggers.
 
 Issue creation includes the description. New comments include their text. An Issue update shows only enabled detail changes and, when applicable, a description diff. A Wiki update shows the edit comment if provided and a body diff when its text changed; Wiki creation does not include the full page body. News creation includes a summary of its description. Deleted comments display removed lines. The record title links to the full content in Redmine.
 

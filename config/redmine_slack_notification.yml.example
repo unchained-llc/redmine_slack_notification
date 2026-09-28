@@ -21,55 +21,31 @@ slack:
       comment: true
   # Six-digit hexadecimal color for the left border of the Slack attachment.
   attachment_color: '#6D5DFB'
-  # Current Issue values are configured separately for creation and updates.
-  # On updates, enabled fields appear even when their values did not change.
+  # Issue fields are shown on creation and every update, even when unchanged.
   # Other notification types show their listed metadata fields by default.
   metadata:
     issue:
-      created:
-        project: true
-        updater: true
-        tracker: true
-        category: true
-        priority: true
-        status: false
-        assignee: false
-        author: false
-        target_version: false
-        start_date: false
-        due_date: false
-        estimated_hours: false
-        done_ratio: false
-        parent_issue: false
-        children: false
-        relations: false
-        attachments: false
-        watchers: false
-        custom_fields:
-          default: false
-          '42': false
-      updated:
-        project: false
-        updater: false
-        tracker: false
-        category: false
-        priority: false
-        status: false
-        assignee: false
-        author: false
-        target_version: false
-        start_date: false
-        due_date: false
-        estimated_hours: false
-        done_ratio: false
-        parent_issue: false
-        children: false
-        relations: false
-        attachments: false
-        watchers: false
-        custom_fields:
-          default: false
-          '42': false
+      project: true
+      updater: true
+      tracker: true
+      category: true
+      priority: true
+      status: false
+      assignee: false
+      author: false
+      target_version: false
+      start_date: false
+      due_date: false
+      estimated_hours: false
+      done_ratio: false
+      parent_issue: false
+      children: false
+      relations: false
+      attachments: false
+      watchers: false
+      custom_fields:
+        default: false
+        '42': false
     wiki:
       project: true
       updater: true
@@ -93,9 +69,9 @@ slack:
     project:
       project: true
       updater: true
-  # Show changes (including the description diff) even for metadata fields
-  # disabled above. Set false to show current metadata without change details.
-  issue_change_details: true
+  # Also show changes to Issue fields hidden from metadata above.
+  # Changes to visible fields and the description diff are always shown.
+  issue_changes_when_hidden: true
 
 # All displayed notification wording is optional. The values below reproduce
 # the built-in defaults; edit individual keys as needed. %{...} are placeholders.
@@ -244,13 +220,14 @@ events:
     created: true
     updated:
       enabled: true
-      other_changed: true # Category, tracker, and other Issue details
+      other_changed: true # Tracker and other Issue details
       relation:
         added: true
         removed: true
       status_changed: true
       assignee_changed: true
       priority_changed: true
+      category_changed: true
       due_date_changed: true
       start_date_changed: true
       version_changed: true # Issue target version; distinct from events.version.updated
