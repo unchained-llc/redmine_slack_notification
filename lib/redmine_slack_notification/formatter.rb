@@ -110,7 +110,8 @@ module RedmineSlackNotification
         end
       end
       if action != 'created' && description_detail
-        blocks.insert(2, *body_diff_blocks('説明', description_detail.old_value, description_detail.value, blocks: blocks))
+        blocks.insert(2, *updated_body_blocks('説明', description_detail.old_value, description_detail.value,
+                                              blocks: blocks, full_heading: '概要', full_text: description))
       end
 
       changes = change_fields(issue, details)
@@ -142,14 +143,18 @@ module RedmineSlackNotification
         { 'type' => 'divider' }
       ]
       if comment_action == 'updated' && !previous_notes.nil?
-        blocks.concat(body_diff_blocks('コメント', previous_notes, notes, blocks: blocks))
+        blocks.concat(updated_body_blocks('コメント', previous_notes, notes, blocks: blocks,
+                                          full_heading: '変更後のコメント'))
       elsif notes.to_s.strip.present?
         heading = comment_action == 'updated' ? '変更後のコメント' : '追加コメント'
         blocks.concat(mrkdwn_sections(heading, notes.to_s))
       end
 
       description_detail = details.find { |detail| detail.property == 'attr' && detail.prop_key == 'description' }
-      blocks.concat(body_diff_blocks('説明', description_detail.old_value, description_detail.value, blocks: blocks)) if description_detail
+      if description_detail
+        blocks.concat(updated_body_blocks('説明', description_detail.old_value, description_detail.value,
+                                          blocks: blocks, full_heading: '概要'))
+      end
       changes = change_fields(issue, details)
       if changes.present?
         blocks << { 'type' => 'divider' }
@@ -177,7 +182,7 @@ module RedmineSlackNotification
         section_text("*<#{url('/projects/' + project.identifier.to_s + '/wiki/' + title.to_s)}|#{text(title)}>*")
       ]
       blocks.concat(mrkdwn_sections('変更内容', change_summary)) if change_summary.present?
-      blocks.concat(body_diff_blocks('本文', *body_diff, blocks: blocks)) if body_diff
+      blocks.concat(updated_body_blocks('本文', *body_diff, blocks: blocks)) if body_diff
       blocks.concat([
         { 'type' => 'divider' },
         section_text('*メタ情報*'),
@@ -190,7 +195,7 @@ module RedmineSlackNotification
       payload(fallback, blocks: blocks)
     end
 
-    def generic_payload(noun:, action:, subject:, url:, project:, actor:, fields: [], summary: nil, notes: nil, body_diff: nil, body_diff_label: '本文')
+    def generic_payload(noun:, action:, subject:, url:, project:, actor:, fields: [], summary: nil, notes: nil, body_diff: nil, body_diff_label: '本文', body_full_label: '概要')
       label = event_label(noun, action)
       fallback = "WAC: #{label} - #{subject}"
       blocks = [
@@ -198,7 +203,8 @@ module RedmineSlackNotification
         section_text("*<#{url}|#{text(subject)}>*")
       ]
       if body_diff
-        blocks.concat(body_diff_blocks(body_diff_label, *body_diff, blocks: blocks))
+        blocks.concat(updated_body_blocks(body_diff_label, *body_diff, blocks: blocks,
+                                          full_heading: body_full_label))
       elsif summary.to_s.strip.present?
         blocks << section_text("*概要*\n#{mrkdwn(summary.to_s.truncate(1200))}")
       end
@@ -255,6 +261,14 @@ module RedmineSlackNotification
 
     def ordered_list?(value)
       value.to_s.match?(/^[ \t]*\d+\.[ \t]+/)
+    end
+
+    def updated_body_blocks(label, before, after, blocks: [], full_heading: label, full_text: nil)
+      return body_diff_blocks(label, before, after, blocks: blocks) if RedmineSlackNotification.body_diff_enabled?
+      return [] if body_lines(before) == body_lines(after)
+
+      content = full_text.nil? ? after.to_s : full_text.to_s
+      mrkdwn_sections(full_heading, content.strip.empty? ? '（空）' : content)
     end
 
     def body_diff_blocks(label, before, after, blocks: [])

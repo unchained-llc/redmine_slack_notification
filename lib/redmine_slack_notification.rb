@@ -100,6 +100,10 @@ module RedmineSlackNotification
     ENV['SLACK_BOT_TOKEN'].to_s.strip.presence || config.dig('slack', 'bot_token').to_s.strip
   end
 
+  def body_diff_enabled?
+    config.dig('slack', 'body_diff') != false
+  end
+
   def channel_id(project)
     return '' unless project
 
