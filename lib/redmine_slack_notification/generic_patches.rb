@@ -47,8 +47,7 @@ module RedmineSlackNotification
       project = self.project
       return unless project
 
-      fields = [[RedmineSlackNotification::Formatter.field_label('hours'), "#{hours}h"],
-                [RedmineSlackNotification::Formatter.field_label('spent_on'), spent_on.to_s]]
+      fields = [['hours', "#{hours}h"], ['spent_on', spent_on.to_s]]
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.generic_payload(
           noun: noun, action: action, subject: "##{id}", url: RedmineSlackNotification::Formatter.url("/projects/#{project.identifier}/time_entries"),
@@ -71,8 +70,7 @@ module RedmineSlackNotification
       project = self.project
       return unless project
 
-      fields = [[RedmineSlackNotification::Formatter.field_label('status'), status.to_s],
-                [RedmineSlackNotification::Formatter.field_label('due_date'), effective_date.to_s]]
+      fields = [['status', status.to_s], ['due_date', effective_date.to_s]]
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.generic_payload(
           noun: noun, action: action, subject: name,

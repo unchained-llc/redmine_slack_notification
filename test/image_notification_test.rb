@@ -1103,6 +1103,73 @@ class ImageNotificationTest < Minitest::Test
 end
 
 class NotificationDisplaySettingsTest < Minitest::Test
+  def test_metadata_fields_can_be_hidden_independently_for_every_notification_type
+    settings = { 'slack' => { 'metadata' => {
+      'issue' => { 'project' => false }, 'wiki' => { 'location' => false },
+      'news' => { 'updater' => false }, 'news_comment' => { 'project' => false },
+      'time_entry' => { 'hours' => false }, 'version' => { 'due_date' => false },
+      'project' => { 'updater' => false }
+    } } }
+    project = OpenStruct.new(name: 'Agentic', identifier: 'agentic')
+    actor = OpenStruct.new(name: 'Kota')
+    issue = OpenStruct.new(id: 7, subject: 'Subject', description: '', project: project,
+                           tracker: OpenStruct.new(name: 'Task'))
+    no_changes = []
+    no_changes.define_singleton_method(:present?) { false }
+    metadata = lambda do |payload|
+      payload.dig('attachments', 0, 'blocks').flat_map { |block| block.fetch('fields', []) }
+             .map { |entry| entry.fetch('text') }
+    end
+
+    RedmineSlackNotification.stub(:config, settings) do
+      RedmineSlackNotification::Formatter.stub(:change_fields, no_changes) do
+        fields = metadata.call(RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'created'))
+        refute fields.any? { |value| value.start_with?('*Project*') }
+        assert fields.any? { |value| value.start_with?('*Tracker*') }
+      end
+
+      wiki = OpenStruct.new(page: OpenStruct.new(title: 'Home'), comments: '')
+      fields = metadata.call(RedmineSlackNotification::Formatter.wiki_payload(wiki, project, actor: actor, action: 'updated'))
+      refute fields.any? { |value| value.start_with?('*Changed location*') }
+      assert fields.any? { |value| value.start_with?('*Project*') }
+
+      cases = {
+        'News' => { hidden: '*Updated by*', visible: '*Project*' },
+        'News comment' => { hidden: '*Project*', visible: '*Updated by*' },
+        'Time entry' => { hidden: '*Hours*', visible: '*Spent on*', fields: [['hours', '2h'], ['spent_on', '2026-09-29']] },
+        'Version' => { hidden: '*Due date*', visible: '*Status*', fields: [['status', 'open'], ['due_date', '2026-10-01']] },
+        'Project' => { hidden: '*Updated by*', visible: '*Project*' }
+      }
+      cases.each do |noun, checks|
+        fields = metadata.call(RedmineSlackNotification::Formatter.generic_payload(
+          noun: noun, action: 'updated', subject: noun, url: 'https://example.com',
+          project: project, actor: actor, fields: checks.fetch(:fields, [])
+        ))
+        refute fields.any? { |value| value.start_with?(checks[:hidden]) }, noun
+        assert fields.any? { |value| value.start_with?(checks[:visible]) }, noun
+      end
+    end
+  end
+
+  def test_metadata_section_disappears_when_its_group_or_all_fields_are_disabled
+    project = OpenStruct.new(name: 'Agentic')
+    actor = OpenStruct.new(name: 'Kota')
+    settings = { 'slack' => { 'metadata' => {
+      'news' => false, 'project' => { 'project' => false, 'updater' => false }
+    } } }
+
+    RedmineSlackNotification.stub(:config, settings) do
+      %w[News Project].each do |noun|
+        blocks = RedmineSlackNotification::Formatter.generic_payload(
+          noun: noun, action: 'updated', subject: noun, url: 'https://example.com',
+          project: project, actor: actor
+        ).dig('attachments', 0, 'blocks')
+        refute blocks.any? { |block| block.dig('text', 'text') == '*Metadata*' }, noun
+        refute blocks.any? { |block| block['type'] == 'divider' }, noun
+      end
+    end
+  end
+
   def test_issue_update_heading_shows_actor_in_both_notification_paths
     project = OpenStruct.new(name: 'Agentic')
     issue = OpenStruct.new(id: 7, subject: 'Subject', description: '', project: project,

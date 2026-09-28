@@ -216,13 +216,7 @@ module RedmineSlackNotification
       end
 
       if action == 'created'
-        blocks << { 'type' => 'divider' }
-        blocks << section_text("*#{text(section_label('metadata'))}*")
-        blocks << {
-          'type' => 'section',
-          'expand' => true,
-          'fields' => metadata_fields(issue, actor).map { |label, value| field(label, value) }
-        }
+        append_metadata(blocks, 'issue', metadata_fields(issue, actor))
       end
 
       payload(title, blocks: blocks)
@@ -282,14 +276,10 @@ module RedmineSlackNotification
       blocks.concat(mrkdwn_sections(section_label('changes'), change_summary)) if change_summary.present?
       blocks.concat(updated_body_blocks(section_label('body'), *body_diff, blocks: blocks,
                                         diff_kind: :wiki_body)) if body_diff
-      blocks.concat([
-        { 'type' => 'divider' },
-        section_text("*#{text(section_label('metadata'))}*"),
-        { 'type' => 'section', 'expand' => true, 'fields' => [
-          field(field_label('project'), text(project.name)),
-          field(field_label('updater'), text(actor&.name || message('values', 'unknown'))),
-          field(field_label('location'), text(title))
-        ] }
+      append_metadata(blocks, 'wiki', [
+        ['project', text(project.name)],
+        ['updater', text(actor&.name || message('values', 'unknown'))],
+        ['location', text(title)]
       ])
       payload(fallback, blocks: blocks)
     end
@@ -316,10 +306,8 @@ module RedmineSlackNotification
       elsif summary.to_s.strip.present?
         blocks << section_text("*#{text(section_label('summary'))}*\n#{mrkdwn(summary.to_s.truncate(1200))}")
       end
-      blocks << { 'type' => 'divider' }
-      blocks << section_text("*#{text(section_label('metadata'))}*")
-      metadata = [[field_label('project'), text(project.name)], [field_label('updater'), text(actor&.name || message('values', 'unknown'))]] + fields
-      blocks << { 'type' => 'section', 'expand' => true, 'fields' => metadata.map { |key, value| field(key, value) } }
+      metadata = [['project', text(project.name)], ['updater', text(actor&.name || message('values', 'unknown'))]] + fields
+      append_metadata(blocks, event_key(noun), metadata)
       if notes.to_s.strip.present?
         blocks.insert(2, *(ordered_list?(notes) ? mrkdwn_sections(section_label('comment'), notes.to_s) : [section_text("*#{text(section_label('comment'))}*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}")]))
       end
@@ -491,13 +479,37 @@ module RedmineSlackNotification
       { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => value } }
     end
 
+    def metadata_enabled?(kind, key)
+      slack = RedmineSlackNotification.config['slack']
+      settings = slack['metadata'] if slack.is_a?(Hash)
+      return false if settings == false
+
+      group = settings[kind] if settings.is_a?(Hash)
+      return false if group == false
+
+      !group.is_a?(Hash) || group[key] != false
+    end
+
+    def append_metadata(blocks, kind, entries)
+      shown = entries.each_with_object([]) do |(key, value), visible|
+        visible << field(field_label(key), value) if metadata_enabled?(kind, key)
+      end
+      return if shown.empty?
+
+      blocks << { 'type' => 'divider' }
+      blocks << section_text("*#{text(section_label('metadata'))}*")
+      shown.each_slice(10) do |slice|
+        blocks << { 'type' => 'section', 'expand' => true, 'fields' => slice }
+      end
+    end
+
     def metadata_fields(issue, actor)
       [
-        [field_label('project'), text(issue.project.name)],
-        [field_label('updater'), text(actor&.name || message('values', 'unknown'))],
-        [field_label('tracker'), text(issue.tracker&.name || message('values', 'unset'))],
-        [field_label('category'), text(issue.category&.name || message('values', 'unset'))],
-        [field_label('priority'), text(issue.priority&.name || message('values', 'unset'))]
+        ['project', text(issue.project.name)],
+        ['updater', text(actor&.name || message('values', 'unknown'))],
+        ['tracker', text(issue.tracker&.name || message('values', 'unset'))],
+        ['category', text(issue.category&.name || message('values', 'unset'))],
+        ['priority', text(issue.priority&.name || message('values', 'unset'))]
       ]
     end
 

@@ -105,7 +105,7 @@ Deletion of Wiki pages, News, time entries, and Versions defaults to off because
 
 ## Notification content
 
-The card contains an event heading, a link to the Redmine record, and relevant text or changed fields. New Issue notifications also show the Issue's metadata. Issue updates, comments, and deletions omit the metadata section because their changes or content are already shown. Other event types retain their existing metadata. `slack.attachment_color` changes the card's left border:
+The card contains an event heading, a link to the Redmine record, and relevant text or changed fields. New Issue notifications also show the Issue's metadata. Issue updates, comments, and deletions omit the metadata section because their changes or content are already shown. Other event types show their metadata unless disabled below. `slack.attachment_color` changes the card's left border:
 
 ```yaml
 slack:
@@ -113,6 +113,29 @@ slack:
 ```
 
 The default is `'#6D5DFB'`. Use a quoted six-digit hex value; invalid values fall back to the default. Slack attachments preserve the card border and sections when Markdown lists or images appear.
+
+Set `slack.metadata.<type>.<field>` to `false` to hide a metadata field. Unspecified fields remain visible. The notification types and their available fields are:
+
+| Type | Fields |
+| --- | --- |
+| `issue` (creation only) | `project`, `updater`, `tracker`, `category`, `priority` |
+| `wiki` | `project`, `updater`, `location` |
+| `news`, `news_comment`, `project` | `project`, `updater` |
+| `time_entry` | `project`, `updater`, `hours`, `spent_on` |
+| `version` | `project`, `updater`, `status`, `due_date` |
+
+For example, this hides the updater on new Issues and the project on News notifications:
+
+```yaml
+slack:
+  metadata:
+    issue:
+      updater: false
+    news:
+      project: false
+```
+
+Set a type such as `wiki: false` to hide its entire metadata section, or set `slack.metadata: false` to hide metadata everywhere. A section with no visible fields is omitted. These settings affect the metadata section only; the record link, content, and changed fields remain visible. `messages.fields` changes field labels without changing their visibility.
 
 Issue creation includes the description. New comments include their text. An Issue update shows only enabled detail changes and, when applicable, a description diff. A Wiki update shows the edit comment if provided and a body diff when its text changed; Wiki creation does not include the full page body. News creation includes a summary of its description. Deleted comments display removed lines. The record title links to the full content in Redmine.
 
