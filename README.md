@@ -98,6 +98,8 @@ The Bot Token requires the `chat:write` scope. To show images from Issue comment
 
 Comment images are uploaded from the attachments added in the same public Journal, then included in the notification as top-level Slack image blocks at their original Markdown positions. A successful image replaces the source Markdown without an extra attachment link. Image notifications use top-level blocks rather than the colored attachment card. Images over 20 MB and failed uploads remain clickable WAC attachment links. Images in private Issues or private comments are never uploaded. Already posted Slack notifications are not changed automatically by installing this version.
 
+Redmine text containing an ordered Markdown list is sent in a top-level Slack `markdown` block. Slack renders repeated `1.` markers as a numbered list, as Redmine does. Uploaded images still appear at their positions between text blocks. Slack limits Markdown blocks to 12,000 characters per message, so longer text uses the existing `mrkdwn` section format.
+
 The configuration file contains credentials and must not be committed to Git. The example file is safe to commit; replace all placeholder values before use.
 
 ## Sidekiq

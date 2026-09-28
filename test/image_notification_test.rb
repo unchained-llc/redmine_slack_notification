@@ -56,6 +56,50 @@ class ImageNotificationTest < Minitest::Test
     assert_equal '![English](english.png)', RedmineSlackNotification::Formatter.mrkdwn('![English](english.png)')
   end
 
+  def test_ordered_lists_use_a_top_level_markdown_block
+    notes = "1. first\n1. second\n1. third\n\n![](screenshot.png)\n\nDone"
+    blocks = RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', notes)
+    message = RedmineSlackNotification::Formatter.payload('WAC notification', blocks: blocks)
+
+    assert_equal [{ 'type' => 'markdown', 'text' => "**追加コメント**\n\n#{notes}" }], message['blocks']
+    assert_nil message['attachments']
+  end
+
+  def test_long_ordered_list_keeps_the_existing_section_format
+    notes = "1. first\n" + ('x' * 12_000)
+    assert_equal 'section', RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', notes).first['type']
+  end
+
+  def test_uploaded_image_stays_between_markdown_text_blocks
+    name = 'screenshot.png'
+    attachment = OpenStruct.new(id: 42, filename: name)
+    notes = "1. first\n1. second\n\n![](#{name})\n\nDone"
+    message = RedmineSlackNotification::Formatter.payload('WAC notification', blocks: RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', notes))
+    Journal.stub(:find_by, journal(attachments: [attachment])) do
+      RedmineSlackNotification.stub(:upload_image, 'F123') do
+        RedmineSlackNotification.add_images(message, [name], 1, 'token')
+      end
+    end
+
+    assert_equal ['markdown', 'image', 'markdown'], message['blocks'].map { |block| block['type'] }
+    assert_equal "**追加コメント**\n\n1. first\n1. second", message.dig('blocks', 0, 'text')
+    assert_equal 'F123', message.dig('blocks', 1, 'slack_file', 'id')
+    assert_equal 'Done', message.dig('blocks', 2, 'text')
+  end
+
+  def test_failed_markdown_image_upload_keeps_a_wac_link
+    attachment = OpenStruct.new(id: 42, filename: 'screenshot.png')
+    notes = "1. first\n\n![](screenshot.png)"
+    message = RedmineSlackNotification::Formatter.payload('WAC notification', blocks: RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', notes))
+    Journal.stub(:find_by, journal(attachments: [attachment])) do
+      RedmineSlackNotification.stub(:upload_image, nil) do
+        RedmineSlackNotification.add_images(message, [attachment.filename], 1, 'token')
+      end
+    end
+
+    assert_includes message.dig('blocks', 0, 'text'), '[画像: screenshot.png](https://wac.example.com/attachments/42)'
+  end
+
   def test_embeds_uploaded_image_and_links_to_wac
     attachment = OpenStruct.new(id: 42, filename: 'clipboard-202609281254-s6trp@2x.png')
     message = payload
