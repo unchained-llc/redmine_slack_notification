@@ -24,6 +24,8 @@ The plugin does not use interactive Slack elements such as buttons, menus, or wo
 | `issue_updated` | Issue attributes updated | 🔄 Issue updated |
 | `issue_deleted` | Issue deleted | 🗑️ Issue deleted |
 | `comment_added` | Issue comment added | 💬 Comment added |
+| `relation_added` | Issue relation added | 🔄 Issue updated |
+| `relation_removed` | Issue relation removed | 🔄 Issue updated |
 | `wiki_created` | Wiki page created | 📚 Wiki page created |
 | `wiki_updated` | Wiki page updated | ✏️ Wiki page updated |
 | `news_created` | News created | 📰 News updated |
@@ -35,7 +37,7 @@ The plugin does not use interactive Slack elements such as buttons, menus, or wo
 | `version_updated` | Version updated | 🏷️ Version updated |
 | `project_updated` | Project updated | 🗂️ Project updated |
 
-When a comment and Issue attributes are changed in the same Journal, one notification contains both if both events are enabled. If only one is enabled, the notification contains only that part. If both are disabled, no notification is sent.
+When a comment, Issue attributes, and relations change in the same Journal, one notification contains only the enabled parts. If all parts are disabled, no notification is sent. `issue_deleted` controls deletion of an Issue; `relation_removed` controls removal of an Issue relation. When a relation key is omitted, it inherits `issue_updated` to preserve existing configurations. An explicit relation key overrides that inherited setting.
 
 Wiki notifications do not include the full Wiki body. They include the Wiki edit comment when one is provided; otherwise, they report that the Wiki content was updated.
 
@@ -79,7 +81,10 @@ slack:
 events:
   issue_created: true
   issue_updated: true
+  issue_deleted: false
   comment_added: false
+  relation_added: false
+  relation_removed: true
 
 projects:
   agentic:
@@ -97,7 +102,7 @@ users:
 
 `projects` keys must be Redmine project identifiers, not project display names. Channel IDs start with `C` for public channels and commonly `G` for private channels.
 
-Set any event key in the table above to `false` to suppress that notification. Missing keys default to `true`. `projects.<identifier>.events` overrides the global `events` value for that project. Use YAML booleans (`true` or `false`), not quoted strings. Restart Redmine and Sidekiq after editing the configuration; each process caches the YAML.
+Set any event key in the table above to `false` to suppress that notification. Missing keys default to `true`, except relation keys that inherit `issue_updated` when omitted. `projects.<identifier>.events` overrides the global `events` value for that project. Use YAML booleans (`true` or `false`), not quoted strings. Restart Redmine and Sidekiq after editing the configuration; each process caches the YAML.
 
 Slack configuration selection order:
 
