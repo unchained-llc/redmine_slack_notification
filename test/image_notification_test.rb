@@ -82,10 +82,11 @@ class ImageNotificationTest < Minitest::Test
       end
     end
 
-    assert_equal ['markdown', 'image', 'markdown'], message['blocks'].map { |block| block['type'] }
-    assert_equal "**追加コメント**\n\n1. first\n1. second", message.dig('blocks', 0, 'text')
-    assert_equal 'F123', message.dig('blocks', 1, 'slack_file', 'id')
-    assert_equal 'Done', message.dig('blocks', 2, 'text')
+    assert_equal '#6D5DFB', message.dig('attachments', 0, 'color')
+    assert_equal ['markdown', 'image', 'markdown'], message.dig('attachments', 0, 'blocks').map { |block| block['type'] }
+    assert_equal "**追加コメント**\n\n1. first\n1. second", message.dig('attachments', 0, 'blocks', 0, 'text')
+    assert_equal 'F123', message.dig('attachments', 0, 'blocks', 1, 'slack_file', 'id')
+    assert_equal 'Done', message.dig('attachments', 0, 'blocks', 2, 'text')
   end
 
   def test_failed_markdown_image_upload_keeps_a_wac_link
@@ -110,9 +111,8 @@ class ImageNotificationTest < Minitest::Test
       end
     end
 
-    assert_nil message['attachments']
-    assert_equal 'WAC notification', message['text']
-    blocks = message['blocks']
+    assert_equal 'WAC notification', message.dig('attachments', 0, 'fallback')
+    blocks = message.dig('attachments', 0, 'blocks')
     assert_equal 2, blocks.length
     refute_includes blocks.first.dig('text', 'text'), '画像:'
     refute_includes blocks.first.dig('text', 'text'), 'clipboard-202609281254-s6trp@2x.png'
@@ -156,7 +156,7 @@ class ImageNotificationTest < Minitest::Test
       ['section', 'ZH'],
       ['image', 'FZH'],
       ['divider', nil]
-    ], message.fetch('blocks').map { |block| [block['type'], block['type'] == 'image' ? block.dig('slack_file', 'id') : block.dig('text', 'text')] }
+    ], message.dig('attachments', 0, 'blocks').map { |block| [block['type'], block['type'] == 'image' ? block.dig('slack_file', 'id') : block.dig('text', 'text')] }
   end
 
   def test_missing_attachment_links_to_issue_without_upload
@@ -205,13 +205,13 @@ class ImageNotificationTest < Minitest::Test
     assert_equal({ 'filename' => 'clipboard.png', 'length' => '42' }, URI.decode_www_form(captured_request.body).to_h)
   end
 
-  def test_retries_newly_uploaded_image_without_changing_file_id
+  def test_retries_image_processing_without_changing_file_id
     message = { 'blocks' => [{ 'type' => 'image', 'slack_file' => { 'id' => 'F123' }, 'alt_text' => 'image' }] }
     attempts = []
     delays = []
     error = RedmineSlackNotification::SlackApiError.new(
       'chat.postMessage', '200',
-      { 'error' => 'invalid_blocks', 'response_metadata' => { 'messages' => ['[ERROR] invalid slack file'] } }
+      { 'error' => 'invalid_blocks', 'response_metadata' => { 'messages' => ['[ERROR] invalid file type'] } }
     )
     api = lambda do |_method, body, _token|
       attempts << body.dig('blocks', 0, 'slack_file', 'id')
@@ -228,5 +228,59 @@ class ImageNotificationTest < Minitest::Test
 
     assert_equal ['F123', 'F123', 'F123'], attempts
     assert_equal [1, 2], delays
+  end
+
+  def test_image_message_keeps_the_colored_card_after_file_sharing
+    message = RedmineSlackNotification::Formatter.payload('WAC notification', blocks: [
+      { 'type' => 'markdown', 'text' => "**追加コメント**\n\n1. first" },
+      { 'type' => 'image', 'slack_file' => { 'id' => 'F123' }, 'alt_text' => 'screenshot' },
+      { 'type' => 'markdown', 'text' => 'after image' }
+    ])
+    calls = []
+    api = lambda do |method, body, _token|
+      calls << [method, body]
+      method == 'chat.postMessage' ? { 'ok' => true, 'ts' => '123.456' } : { 'ok' => true }
+    end
+
+    RedmineSlackNotification.stub(:slack_api, api) do
+      assert_equal({ 'ok' => true, 'ts' => '123.456' }, RedmineSlackNotification.post_message(message, 'C123', 'token'))
+    end
+
+    assert_equal %w[chat.postMessage chat.update], calls.map(&:first)
+    initial = calls[0][1]
+    final = calls[1][1]
+    assert_equal '#6D5DFB', initial.dig('attachments', 0, 'color')
+    assert_equal 'F123', initial.dig('blocks', 0, 'accessory', 'slack_file', 'id')
+    assert_equal %w[markdown image markdown], initial.dig('attachments', 0, 'blocks').map { |block| block['type'] }
+    assert_equal '123.456', final['ts']
+    assert_equal '', final['text']
+    assert_equal [], final['blocks']
+    assert_equal initial['attachments'], final['attachments']
+    assert_nil message['blocks']
+  end
+
+  def test_retries_attachment_until_new_image_is_ready
+    message = RedmineSlackNotification::Formatter.payload('WAC notification', blocks: [
+      { 'type' => 'image', 'slack_file' => { 'id' => 'F123' }, 'alt_text' => 'screenshot' }
+    ])
+    methods = []
+    error = RedmineSlackNotification::SlackApiError.new(
+      'chat.postMessage', '200',
+      { 'error' => 'invalid_attachments', 'response_metadata' => { 'messages' => ['[ERROR] invalid slack file'] } }
+    )
+    api = lambda do |method, _body, _token|
+      methods << method
+      raise error if methods.length == 1
+
+      method == 'chat.postMessage' ? { 'ok' => true, 'ts' => '123.456' } : { 'ok' => true }
+    end
+
+    RedmineSlackNotification.stub(:slack_api, api) do
+      RedmineSlackNotification.stub(:sleep, ->(*) {}) do
+        RedmineSlackNotification.post_message(message, 'C123', 'token')
+      end
+    end
+
+    assert_equal %w[chat.postMessage chat.postMessage chat.update], methods
   end
 end
