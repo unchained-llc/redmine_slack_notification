@@ -109,15 +109,20 @@ module RedmineSlackNotification
     return unless journal && journal.journalized.is_a?(Issue) && !journal.private_notes? && !journal.journalized.is_private?
 
     attachments = journal.attachments.each_with_object({}) { |attachment, indexed| indexed[attachment.filename] = attachment }
-    blocks = payload.dig('attachments', 0, 'blocks')
+    blocks = payload['blocks'] || payload.dig('attachments', 0, 'blocks')
     return unless blocks
 
     image_added = false
     eligible_names = image_names.to_h { |name| [name.downcase, name] }
     upload_results = {}
     ordered_blocks = blocks.flat_map do |block|
-      content = block.dig('text', 'text')
+      markdown_block = block['type'] == 'markdown'
+      content = markdown_block ? block['text'] : block.dig('text', 'text')
       next [block] unless content.is_a?(String)
+
+      with_text = lambda do |value|
+        markdown_block ? block.merge('text' => value) : block.merge('text' => block['text'].merge('text' => value))
+      end
 
       pieces = []
       current_text = +''
@@ -133,13 +138,18 @@ module RedmineSlackNotification
           file_id = upload_results.fetch(name) { upload_results[name] = upload_image(attachment, token) if attachment }
           if file_id
             text_before = current_text.strip
-            pieces << block.merge('text' => block['text'].merge('text' => text_before)) unless text_before.empty?
+            pieces << with_text.call(text_before) unless text_before.empty?
             pieces << { 'type' => 'image', 'slack_file' => { 'id' => file_id }, 'alt_text' => name[0, 2000] }
             current_text = +''
             image_added = true
           else
             path = attachment ? "/attachments/#{attachment.id}" : "/issues/#{journal.journalized.id}"
-            current_text << "<#{RedmineSlackNotification::Formatter.url(path)}|画像: #{RedmineSlackNotification::Formatter.text(name)}>"
+            if markdown_block
+              label = name.gsub(/[\\\[\]]/) { |character| "\\#{character}" }
+              current_text << "[画像: #{label}](#{RedmineSlackNotification::Formatter.url(path)})"
+            else
+              current_text << "<#{RedmineSlackNotification::Formatter.url(path)}|画像: #{RedmineSlackNotification::Formatter.text(name)}>"
+            end
           end
         else
           current_text << match[0]
@@ -150,14 +160,14 @@ module RedmineSlackNotification
 
       current_text << content[cursor..]
       final_text = current_text.strip
-      pieces << block.merge('text' => block['text'].merge('text' => final_text)) unless final_text.empty?
+      pieces << with_text.call(final_text) unless final_text.empty?
       pieces.empty? ? [block] : pieces
     end
     blocks.replace(ordered_blocks)
 
     # Slack rejects secure image blocks inside a legacy attachment. Put the
     # complete notification in top-level blocks when it contains an image.
-    if image_added
+    if image_added && payload['attachments']
       payload['text'] = payload.dig('attachments', 0, 'fallback')
       payload['blocks'] = blocks
       payload.delete('attachments')

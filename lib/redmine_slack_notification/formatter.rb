@@ -70,7 +70,11 @@ module RedmineSlackNotification
     end
 
     def payload(message, blocks: nil)
-      return { 'text' => message } if blocks.blank?
+      return { 'text' => message } if blocks.nil? || blocks.empty?
+
+      # Markdown blocks belong in the message body. Image blocks are also
+      # moved here by add_images so their Slack file IDs can be displayed.
+      return { 'text' => message, 'blocks' => blocks } if blocks.any? { |block| block['type'] == 'markdown' }
 
       {
         'attachments' => [{
@@ -99,7 +103,11 @@ module RedmineSlackNotification
       end
 
       if notes.to_s.strip.present?
-        blocks.insert(2, { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => "*コメント*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}" } })
+        if ordered_list?(notes)
+          blocks.insert(2, *mrkdwn_sections('コメント', notes.to_s))
+        else
+          blocks.insert(2, { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => "*コメント*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}" } })
+        end
       end
 
       changes = change_fields(issue, details)
@@ -183,7 +191,7 @@ module RedmineSlackNotification
       metadata = [['プロジェクト', text(project.name)], ['更新者', text(actor&.name || '不明')]] + fields
       blocks << { 'type' => 'section', 'expand' => true, 'fields' => metadata.map { |key, value| field(key, value) } }
       if notes.to_s.strip.present?
-        blocks.insert(2, section_text("*コメント*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}"))
+        blocks.insert(2, *(ordered_list?(notes) ? mrkdwn_sections('コメント', notes.to_s) : [section_text("*コメント*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}")]))
       end
       payload(fallback, blocks: blocks)
     end
@@ -214,11 +222,21 @@ module RedmineSlackNotification
     end
 
     def mrkdwn_sections(heading, value, limit: 2800)
+      markdown = value.to_s.gsub("\r\n", "\n").gsub("\r", "\n")
+      markdown_text = "**#{heading}**\n\n#{markdown}"
+      # Slack caps all Markdown blocks in one message at 12,000 characters.
+      # Keep the existing section path for longer notes rather than dropping text.
+      return [{ 'type' => 'markdown', 'text' => markdown_text }] if ordered_list?(markdown) && markdown_text.length <= 12_000
+
       chunks = value.to_s.each_char.each_slice(limit).map(&:join)
       chunks.each_with_index.map do |chunk, index|
         content = index.zero? ? "*#{heading}*\n#{mrkdwn(chunk)}" : mrkdwn(chunk)
         section_text(content)
       end
+    end
+
+    def ordered_list?(value)
+      value.to_s.match?(/^[ \t]*\d+\.[ \t]+/)
     end
 
     def section_text(value)
