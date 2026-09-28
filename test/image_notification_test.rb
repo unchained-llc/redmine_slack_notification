@@ -793,6 +793,24 @@ class ImageNotificationTest < Minitest::Test
     assert_equal 'Done', message.dig('attachments', 0, 'blocks', 2, 'text')
   end
 
+  def test_image_reference_inside_body_diff_remains_literal
+    name = 'screenshot.png'
+    attachment = OpenStruct.new(id: 42, filename: name)
+    diff = RedmineSlackNotification::Formatter.body_diff_blocks('説明', '', "![](#{name})").first
+    comment = RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', "1. See image\n![](#{name})").first
+    message = RedmineSlackNotification::Formatter.payload('Redmine notification', blocks: [diff, comment])
+
+    Journal.stub(:find_by, journal(attachments: [attachment])) do
+      RedmineSlackNotification.stub(:upload_image, 'F123') do
+        RedmineSlackNotification.add_images(message, [name], 1, 'token')
+      end
+    end
+
+    blocks = message.dig('attachments', 0, 'blocks')
+    assert_includes blocks.first['text'], "![](#{name})"
+    assert_equal 1, blocks.count { |block| block['type'] == 'image' }
+  end
+
   def test_failed_markdown_image_upload_keeps_a_redmine_link
     attachment = OpenStruct.new(id: 42, filename: 'screenshot.png')
     notes = "1. first\n\n![](screenshot.png)"
@@ -986,5 +1004,84 @@ class ImageNotificationTest < Minitest::Test
     end
 
     assert_equal %w[chat.postMessage chat.postMessage chat.update], methods
+  end
+end
+
+class BodyDiffNotificationTest < Minitest::Test
+  def project
+    OpenStruct.new(id: 7, identifier: 'agentic', name: 'Agentic')
+  end
+
+  def test_body_diff_uses_markdown_diff_fence_and_only_nearby_context
+    before = (1..20).map { |number| "unchanged #{number}" }
+    after = before.dup
+    after[9] = '**new value**'
+    block = RedmineSlackNotification::Formatter.body_diff_blocks('説明', before.join("\n"), after.join("\n")).first
+
+    assert_equal 'markdown', block['type']
+    assert_includes block['text'], '```diff'
+    assert_includes block['text'], '- unchanged 10'
+    assert_includes block['text'], '+ **new value**'
+    refute_includes block['text'], "unchanged 1\n"
+    assert_includes block['text'], '  …'
+    assert_equal '#6D5DFB', RedmineSlackNotification::Formatter.payload('fallback', blocks: [block]).dig('attachments', 0, 'color')
+  end
+
+  def test_body_diff_handles_code_fences_and_slack_markdown_budget
+    block = RedmineSlackNotification::Formatter.body_diff_blocks('本文', '```old', '```new').first
+    assert_includes block['text'], '````diff'
+
+    existing = [{ 'type' => 'markdown', 'text' => 'x' * 11_800 }]
+    fallback = RedmineSlackNotification::Formatter.body_diff_blocks('本文', 'old', 'new', blocks: existing).first
+    assert_equal 'section', fallback['type']
+    assert_operator fallback.dig('text', 'text').length, :<, 3_000
+  end
+
+  def test_body_diff_handles_empty_and_normalized_line_endings
+    formatter = RedmineSlackNotification::Formatter
+    assert_empty formatter.body_diff_blocks('本文', "same\r\nline", "same\nline")
+    removed = formatter.body_diff_blocks('本文', "old\ntext", '').first['text']
+    assert_includes removed, '- old'
+    assert_includes removed, '- text'
+    refute_includes removed, '+ old'
+  end
+
+  def test_body_diff_truncates_large_changes_without_exceeding_limit
+    before = (1..600).map { |number| "old #{number}" }.join("\n")
+    after = (1..600).map { |number| "new #{number}" }.join("\n")
+    block = RedmineSlackNotification::Formatter.body_diff_blocks('本文', before, after).first
+    assert_operator block['text'].length, :<, 6_000
+    assert_includes block['text'], '差分を一部省略'
+  end
+
+  def test_news_description_change_passes_old_and_new_body
+    news = News.new(id: 17, title: 'Release', description: 'new body', project: project)
+    news.define_singleton_method(:saved_change_to_description?) { true }
+    news.define_singleton_method(:description_before_last_save) { 'old body' }
+    news.extend(RedmineSlackNotification::NewsPatch)
+    captured = nil
+    formatter = ->(**kwargs) { captured = kwargs; :message }
+    RedmineSlackNotification::Formatter.stub(:generic_payload, formatter) do
+      RedmineSlackNotification.stub(:enqueue, ->(*) {}) do
+        news.send(:notify_slack_generic, 'News', 'updated')
+      end
+    end
+    assert_equal ['old body', 'new body'], captured[:body_diff]
+  end
+
+  def test_wiki_text_change_passes_old_and_new_body
+    content = OpenStruct.new(page: OpenStruct.new(title: 'Home', wiki: OpenStruct.new(project: project)),
+                             text: 'new body', comments: '')
+    content.define_singleton_method(:saved_change_to_text?) { true }
+    content.define_singleton_method(:text_before_last_save) { 'old body' }
+    content.extend(RedmineSlackNotification::WikiContentPatch)
+    captured = nil
+    formatter = ->(*_args, **kwargs) { captured = kwargs; :message }
+    RedmineSlackNotification::Formatter.stub(:wiki_payload, formatter) do
+      RedmineSlackNotification.stub(:enqueue, ->(*) {}) do
+        content.send(:notify_slack_wiki_updated)
+      end
+    end
+    assert_equal ['old body', 'new body'], captured[:body_diff]
   end
 end

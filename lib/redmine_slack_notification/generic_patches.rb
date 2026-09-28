@@ -17,12 +17,17 @@ module RedmineSlackNotification
       project = self.project
       return unless project
 
+      description_diff = if action == 'updated' && saved_change_to_description?
+                           [description_before_last_save, description]
+                         end
+
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.generic_payload(
           noun: noun, action: action, subject: title,
           url: RedmineSlackNotification::Formatter.url(action == 'deleted' ? "/projects/#{project.identifier}/news" : "/news/#{id}"),
           project: project, actor: action == 'deleted' ? User.current : (respond_to?(:author) ? author : User.current),
           summary: respond_to?(:description) ? description : nil,
+          body_diff: description_diff,
           notes: nil
         ), project: project, event: "news_#{action}"
       )

@@ -2,6 +2,11 @@
 
 module RedmineSlackNotification
   module Formatter
+    BODY_DIFF_MAX_CHARS = 6_000
+    BODY_DIFF_MAX_LINE_CHARS = 400
+    BODY_DIFF_CONTEXT_LINES = 2
+    BODY_DIFF_LCS_CELLS = 40_000
+
     module_function
 
     def text(value)
@@ -90,13 +95,11 @@ module RedmineSlackNotification
         section_text("*<#{url('/issues/' + issue.id.to_s)}|##{issue.id} #{text(issue.subject)}>*")
       ]
 
-      description_changed = details.any? { |detail| detail.property == 'attr' && detail.prop_key == 'description' }
+      description_detail = details.find { |detail| detail.property == 'attr' && detail.prop_key == 'description' }
       description = issue.description.to_s.strip
       description = description.sub(/\A[ \t]*\#{1,6}[ \t]+[^\n]+\n?/, '').strip
       if action == 'created'
         blocks.insert(2, *mrkdwn_sections('内容', description)) if description.present?
-      elsif description.present? && description_changed
-        blocks.insert(2, *mrkdwn_sections('概要', description))
       end
 
       if notes.to_s.strip.present?
@@ -105,6 +108,9 @@ module RedmineSlackNotification
         else
           blocks.insert(2, { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => "*コメント*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}" } })
         end
+      end
+      if action != 'created' && description_detail
+        blocks.insert(2, *body_diff_blocks('説明', description_detail.old_value, description_detail.value, blocks: blocks))
       end
 
       changes = change_fields(issue, details)
@@ -139,6 +145,9 @@ module RedmineSlackNotification
         heading = comment_action == 'updated' ? '変更後のコメント' : '追加コメント'
         blocks.concat(mrkdwn_sections(heading, notes.to_s))
       end
+
+      description_detail = details.find { |detail| detail.property == 'attr' && detail.prop_key == 'description' }
+      blocks.concat(body_diff_blocks('説明', description_detail.old_value, description_detail.value, blocks: blocks)) if description_detail
       changes = change_fields(issue, details)
       if changes.present?
         blocks << { 'type' => 'divider' }
@@ -156,7 +165,7 @@ module RedmineSlackNotification
       payload(fallback, blocks: blocks)
     end
 
-    def wiki_payload(content, project, actor:, action:)
+    def wiki_payload(content, project, actor:, action:, body_diff: nil)
       title = content.page.title
       label = event_label('Wiki page', action)
       fallback = "Redmine: #{label} - #{title}"
@@ -166,6 +175,7 @@ module RedmineSlackNotification
         section_text("*<#{url('/projects/' + project.identifier.to_s + '/wiki/' + title.to_s)}|#{text(title)}>*")
       ]
       blocks.concat(mrkdwn_sections('変更内容', change_summary)) if change_summary.present?
+      blocks.concat(body_diff_blocks('本文', *body_diff, blocks: blocks)) if body_diff
       blocks.concat([
         { 'type' => 'divider' },
         section_text('*メタ情報*'),
@@ -178,14 +188,18 @@ module RedmineSlackNotification
       payload(fallback, blocks: blocks)
     end
 
-    def generic_payload(noun:, action:, subject:, url:, project:, actor:, fields: [], summary: nil, notes: nil)
+    def generic_payload(noun:, action:, subject:, url:, project:, actor:, fields: [], summary: nil, notes: nil, body_diff: nil)
       label = event_label(noun, action)
       fallback = "Redmine: #{label} - #{subject}"
       blocks = [
         section_text("#{event_icon(action, noun: noun)} *#{label}*"),
         section_text("*<#{url}|#{text(subject)}>*")
       ]
-      blocks << section_text("*概要*\n#{mrkdwn(summary.to_s.truncate(1200))}") if summary.to_s.strip.present?
+      if body_diff
+        blocks.concat(body_diff_blocks('本文', *body_diff, blocks: blocks))
+      elsif summary.to_s.strip.present?
+        blocks << section_text("*概要*\n#{mrkdwn(summary.to_s.truncate(1200))}")
+      end
       blocks << { 'type' => 'divider' }
       blocks << { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => '*メタ情報*' } }
       metadata = [['プロジェクト', text(project.name)], ['更新者', text(actor&.name || '不明')]] + fields
@@ -241,6 +255,112 @@ module RedmineSlackNotification
       value.to_s.match?(/^[ \t]*\d+\.[ \t]+/)
     end
 
+    def body_diff_blocks(label, before, after, blocks: [])
+      old_lines = body_lines(before)
+      new_lines = body_lines(after)
+      return [] if old_lines == new_lines
+
+      operations = body_diff_operations(old_lines, new_lines)
+      shown = Array.new(operations.length, false)
+      operations.each_with_index do |(kind, _line), index|
+        next if kind == :same
+
+        ((index - BODY_DIFF_CONTEXT_LINES)..(index + BODY_DIFF_CONTEXT_LINES)).each do |nearby|
+          shown[nearby] = true if nearby >= 0 && nearby < shown.length
+        end
+      end
+
+      markdown_used = blocks.sum { |block| block['type'] == 'markdown' ? block['text'].to_s.length : 0 }
+      markdown_available = 12_000 - markdown_used - 100
+      use_markdown = markdown_available >= 500
+      max_chars = use_markdown ? [BODY_DIFF_MAX_CHARS, markdown_available].min : 2_800
+      heading = use_markdown ? "**#{label}の差分**\n\n" : "*#{label}の差分*\n"
+      body = +''
+      previous = -1
+      shortened = false
+      operations.each_with_index do |(kind, line), index|
+        next unless shown[index]
+
+        marker = { same: '  ', removed: '- ', added: '+ ' }.fetch(kind)
+        if line.length > BODY_DIFF_MAX_LINE_CHARS
+          line = "#{line[0, BODY_DIFF_MAX_LINE_CHARS]}…"
+          shortened = true
+        end
+        addition = +''
+        addition << "  …\n" if index > previous + 1
+        addition << "#{marker}#{line}\n"
+        if body.length + addition.length > max_chars - heading.length - 150
+          shortened = true
+          break
+        end
+        body << addition
+        previous = index
+      end
+      body << '  … (差分を一部省略。全文はリンク先で確認)' if shortened
+      longest_ticks = body.scan(/`+/).map(&:length).max || 0
+      fence = '`' * [3, longest_ticks + 1].max
+      opening = use_markdown ? "#{fence}diff" : fence
+      content = "#{heading}#{opening}\n#{body.rstrip}\n#{fence}"
+      use_markdown ? [{ 'type' => 'markdown', 'text' => content }] : [section_text(content)]
+    end
+
+    def body_lines(value)
+      source = value.to_s.gsub("\r\n", "\n").gsub("\r", "\n")
+      source.empty? ? [] : source.split("\n", -1)
+    end
+
+    def body_diff_operations(before, after)
+      prefix = 0
+      prefix += 1 while prefix < before.length && prefix < after.length && before[prefix] == after[prefix]
+      suffix = 0
+      while suffix < before.length - prefix && suffix < after.length - prefix &&
+            before[-suffix - 1] == after[-suffix - 1]
+        suffix += 1
+      end
+
+      old_middle = before[prefix, before.length - prefix - suffix]
+      new_middle = after[prefix, after.length - prefix - suffix]
+      middle = if old_middle.length * new_middle.length > BODY_DIFF_LCS_CELLS
+                 old_middle.map { |line| [:removed, line] } + new_middle.map { |line| [:added, line] }
+               else
+                 body_diff_lcs(old_middle, new_middle)
+               end
+      before.first(prefix).map { |line| [:same, line] } + middle +
+        (suffix.zero? ? [] : before.last(suffix).map { |line| [:same, line] })
+    end
+
+    def body_diff_lcs(before, after)
+      lengths = Array.new(before.length + 1) { Array.new(after.length + 1, 0) }
+      (before.length - 1).downto(0) do |old_index|
+        (after.length - 1).downto(0) do |new_index|
+          lengths[old_index][new_index] = if before[old_index] == after[new_index]
+                                             lengths[old_index + 1][new_index + 1] + 1
+                                           else
+                                             [lengths[old_index + 1][new_index], lengths[old_index][new_index + 1]].max
+                                           end
+        end
+      end
+
+      operations = []
+      old_index = 0
+      new_index = 0
+      while old_index < before.length || new_index < after.length
+        if old_index < before.length && new_index < after.length && before[old_index] == after[new_index]
+          operations << [:same, before[old_index]]
+          old_index += 1
+          new_index += 1
+        elsif old_index < before.length &&
+              (new_index == after.length || lengths[old_index + 1][new_index] >= lengths[old_index][new_index + 1])
+          operations << [:removed, before[old_index]]
+          old_index += 1
+        else
+          operations << [:added, after[new_index]]
+          new_index += 1
+        end
+      end
+      operations
+    end
+
     def section_text(value)
       { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => value } }
     end
@@ -269,7 +389,7 @@ module RedmineSlackNotification
                   filename = detail.value.presence || detail.old_value
                   "#{action}: #{text(filename)}"
                 elsif detail.property == 'attr' && detail.prop_key == 'description'
-                  '変更あり'
+                  next
                 elsif detail.property == 'attr' && %w[parent_id child_id].include?(detail.prop_key)
                   "#{issue_reference(detail.old_value)} → #{issue_reference(detail.value)}"
                 else
