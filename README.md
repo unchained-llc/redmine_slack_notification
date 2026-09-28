@@ -95,6 +95,7 @@ slack:
   # Prefer the SLACK_BOT_TOKEN environment variable in production.
   bot_token: 'xoxb-REPLACE-ME'
   default_channel_id: 'C0123456789'
+  auto_map_users_by_name: true
 
 events:
   issue_created: true
@@ -113,6 +114,7 @@ projects:
     channel_id: 'C0234567890'
 
 users:
+  # Optional explicit mappings; these take precedence over automatic matching.
   # Redmine login name or email address: Slack member ID
   alice: 'U0123456789'
   bob: 'U0234567890'
@@ -131,6 +133,8 @@ Slack configuration selection order:
 5. No notification if the token or channel is missing
 
 The Bot Token requires the `chat:write` scope. To show images from Issue comments, add `files:write` and reinstall the Slack app so the Bot Token gains that scope. The bot must be a member of each target channel.
+
+Set `slack.auto_map_users_by_name: true` to mention an assignee automatically when the Redmine login matches exactly one active human Slack member's `profile.display_name` or account `name` (case-insensitive). Explicit `users` mappings take precedence. If the name is missing or ambiguous, the notification displays the Redmine name without a mention. The plugin caches the Slack user directory for 10 minutes and falls back to plain names when the API is unavailable. Automatic name matching requires the Bot Token's `users:read` scope and reinstalling the Slack app after adding that scope. It does not read email addresses and does not require `users:read.email`. The option defaults to `false` for existing installations.
 
 Comment images are uploaded from the attachments added in the same public Journal, then included in the colored notification card at their original Markdown positions. A successful image replaces the source Markdown without an extra attachment link. Slack initially needs a top-level image accessory to share each newly uploaded private file with the channel; the plugin removes those small temporary previews with `chat.update` after posting. If that update fails, the complete colored card remains visible and an error is logged rather than posting a duplicate notification. Images over 20 MB and failed uploads remain clickable Redmine attachment links. Images in private Issues or private comments are never uploaded. Already posted Slack notifications are not changed automatically by installing this version.
 
