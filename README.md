@@ -57,6 +57,8 @@ When an Issue description, News description, or Wiki body changes, its notificat
 
 Edited Issue and News comments use the same line diff format. New comments still show their full text; deletion notifications omit removed text.
 
+Set `slack.body_diff: false` to show the updated text instead of a diff for Issue descriptions, News descriptions, Wiki bodies, and edited Issue or News comments. The default is `true`. New comments and deletion notifications are unchanged. Restart Redmine and Sidekiq after changing this YAML setting.
+
 ## Installation
 
 1. Copy this plugin to the Redmine `plugins` directory:

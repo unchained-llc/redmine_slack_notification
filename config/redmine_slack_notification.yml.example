@@ -8,6 +8,8 @@ slack:
   default_channel_id: 'C0123456789'
   # Requires users:read and an app reinstall. Ambiguous names are not mentioned.
   auto_map_users_by_name: false
+  # true: show Markdown line diffs on body/comment edits; false: show updated text.
+  body_diff: true
 
 # issue.updated.enabled is the parent switch for all Issue detail events below.
 # Setting it to false suppresses them even when an individual key is true.

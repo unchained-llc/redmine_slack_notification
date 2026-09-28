@@ -145,7 +145,8 @@ module RedmineSlackNotification
         RedmineSlackNotification::Formatter.generic_payload(
           noun: 'News comment', action: 'updated', subject: news.title,
           url: RedmineSlackNotification::Formatter.url("/news/#{news.id}"), project: project,
-          actor: User.current, body_diff: [content_before_last_save, content], body_diff_label: 'コメント'
+          actor: User.current, body_diff: [content_before_last_save, content],
+          body_diff_label: 'コメント', body_full_label: '変更後のコメント'
         ), project: project, event: 'news_comment_updated'
       )
     end

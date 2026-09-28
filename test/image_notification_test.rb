@@ -667,6 +667,7 @@ class NewsCommentDeletionTest < Minitest::Test
     assert_equal 'updated', captured[0][1][:action]
     assert_equal ['before', 'after'], captured[0][1][:body_diff]
     assert_equal 'コメント', captured[0][1][:body_diff_label]
+    assert_equal '変更後のコメント', captured[0][1][:body_full_label]
     assert_equal 'news_comment_updated', captured[1][2][:event]
   end
 
@@ -1049,6 +1050,32 @@ class BodyDiffNotificationTest < Minitest::Test
     OpenStruct.new(id: 7, identifier: 'agentic', name: 'Agentic')
   end
 
+  def test_yaml_body_diff_setting_defaults_to_true_and_false_disables_it
+    RedmineSlackNotification.stub(:config, {}) do
+      assert RedmineSlackNotification.body_diff_enabled?
+    end
+    RedmineSlackNotification.stub(:config, { 'slack' => { 'body_diff' => false } }) do
+      refute RedmineSlackNotification.body_diff_enabled?
+    end
+  end
+
+  def test_full_body_setting_shows_updated_text_for_description_wiki_and_comment
+    RedmineSlackNotification.stub(:config, { 'slack' => { 'body_diff' => false } }) do
+      formatter = RedmineSlackNotification::Formatter
+      {
+        '説明' => '概要',
+        '本文' => '本文',
+        'コメント' => '変更後のコメント'
+      }.each do |label, heading|
+        blocks = formatter.updated_body_blocks(label, 'before', 'after', full_heading: heading)
+        assert_equal 'section', blocks.first['type']
+        assert_includes blocks.first.dig('text', 'text'), "*#{heading}*\nafter"
+        refute_includes blocks.first.dig('text', 'text'), '```diff'
+      end
+      assert_equal "*本文*\n（空）", formatter.updated_body_blocks('本文', 'before', '').first.dig('text', 'text')
+    end
+  end
+
   def test_body_diff_uses_markdown_diff_fence_and_only_nearby_context
     before = (1..20).map { |number| "unchanged #{number}" }
     after = before.dup
@@ -1070,11 +1097,13 @@ class BodyDiffNotificationTest < Minitest::Test
     empty_changes = []
     empty_changes.define_singleton_method(:present?) { false }
     message = nil
-    RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
-      message = RedmineSlackNotification::Formatter.journal_payload(
-        issue, actor: OpenStruct.new(name: 'Editor'), notes: 'new text',
-        comment_action: 'updated', previous_notes: 'old text'
-      )
+    RedmineSlackNotification.stub(:config, {}) do
+      RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
+        message = RedmineSlackNotification::Formatter.journal_payload(
+          issue, actor: OpenStruct.new(name: 'Editor'), notes: 'new text',
+          comment_action: 'updated', previous_notes: 'old text'
+        )
+      end
     end
 
     blocks = message.dig('attachments', 0, 'blocks')
@@ -1083,6 +1112,28 @@ class BodyDiffNotificationTest < Minitest::Test
     assert_includes diff.fetch('text'), '- old text'
     assert_includes diff.fetch('text'), '+ new text'
     refute blocks.any? { |block| block['type'] == 'section' && block.dig('text', 'text').to_s.include?('変更後のコメント') }
+  end
+
+  def test_edited_issue_comment_can_show_updated_text_instead_of_diff
+    issue = OpenStruct.new(id: 7098, subject: 'Title', project: project,
+                           tracker: OpenStruct.new(name: 'Task'))
+    empty_changes = []
+    empty_changes.define_singleton_method(:present?) { false }
+    message = nil
+    RedmineSlackNotification.stub(:config, { 'slack' => { 'body_diff' => false } }) do
+      RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
+        message = RedmineSlackNotification::Formatter.journal_payload(
+          issue, actor: OpenStruct.new(name: 'Editor'), notes: '1. new text',
+          comment_action: 'updated', previous_notes: '1. old text'
+        )
+      end
+    end
+
+    blocks = message.dig('attachments', 0, 'blocks')
+    comment = blocks.find { |block| block['type'] == 'markdown' }
+    assert_includes comment.fetch('text'), '**変更後のコメント**'
+    assert_includes comment.fetch('text'), '1. new text'
+    refute_includes comment.fetch('text'), '- 1. old text'
   end
 
   def test_body_diff_handles_code_fences_and_slack_markdown_budget
