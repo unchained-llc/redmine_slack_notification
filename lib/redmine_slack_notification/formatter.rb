@@ -145,6 +145,9 @@ module RedmineSlackNotification
       if comment_action == 'updated' && !previous_notes.nil?
         blocks.concat(updated_body_blocks('コメント', previous_notes, notes, blocks: blocks,
                                           full_heading: '変更後のコメント'))
+        if RedmineSlackNotification.body_diff_enabled?
+          image_references(notes).each { |name| blocks << section_text("![](#{name})") }
+        end
       elsif notes.to_s.strip.present?
         heading = comment_action == 'updated' ? '変更後のコメント' : '追加コメント'
         blocks.concat(mrkdwn_sections(heading, notes.to_s))

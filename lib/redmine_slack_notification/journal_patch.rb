@@ -56,12 +56,15 @@ module RedmineSlackNotification
       event = "comment_#{action}"
       return unless RedmineSlackNotification.event_enabled?(issue.project, event)
 
+      image_names = action == 'updated' ? RedmineSlackNotification::Formatter.image_references(notes) : []
+
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.journal_payload(
           issue, actor: updated_by || User.current, notes: notes, comment_action: action,
           previous_notes: action == 'updated' ? notes_before_last_save : nil
         ),
-        project: issue.project, event: event
+        project: issue.project, event: event,
+        image_names: image_names, journal_id: action == 'updated' ? id : nil
       )
     end
 

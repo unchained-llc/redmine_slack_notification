@@ -485,7 +485,7 @@ class EventConfigurationTest < Minitest::Test
     RedmineSlackNotification.stub(:config, {}) do
       RedmineSlackNotification::Formatter.stub(:journal_payload, formatter) do
         RedmineSlackNotification.stub(:enqueue, enqueue) do
-          item.notes = 'Edited comment'
+          item.notes = 'Edited comment ![](screenshot.png)'
           item.send(:notify_slack_journal_comment_changed)
           item.notes = ''
           item.send(:notify_slack_journal_comment_changed)
@@ -498,6 +498,10 @@ class EventConfigurationTest < Minitest::Test
     assert_equal 'Editor', calls[0][1][:actor].name
     assert_equal 'Previous public comment', calls[0][1][:previous_notes]
     assert_nil calls[2][1][:previous_notes]
+    assert_equal ['screenshot.png'], calls[1][2][:image_names]
+    assert_equal 12, calls[1][2][:journal_id]
+    assert_empty calls[3][2][:image_names]
+    assert_nil calls[3][2][:journal_id]
   end
 
   def test_issue_comment_removal_respects_setting_and_privacy
@@ -847,6 +851,43 @@ class ImageNotificationTest < Minitest::Test
     assert_includes blocks.first['text'], "![](#{name})"
     assert_includes blocks[1]['text'], "![](#{name})"
     assert_equal 1, blocks.count { |block| block['type'] == 'image' }
+  end
+
+  def test_edited_comment_embeds_image_with_full_text_or_diff
+    name = 'screenshot.png'
+    attachment = OpenStruct.new(id: 42, filename: name)
+    issue = OpenStruct.new(id: 7098, subject: 'Title', project: OpenStruct.new(name: 'Agentic'),
+                           tracker: OpenStruct.new(name: 'Task'))
+    empty_changes = []
+    empty_changes.define_singleton_method(:present?) { false }
+
+    [false, true].each do |show_diff|
+      message = nil
+      RedmineSlackNotification.stub(:config, { 'slack' => { 'body_diff' => show_diff } }) do
+        RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
+          message = RedmineSlackNotification::Formatter.journal_payload(
+            issue, actor: OpenStruct.new(name: 'Editor'),
+            notes: "![](#{name})\ntest", previous_notes: "![](#{name})",
+            comment_action: 'updated'
+          )
+        end
+      end
+      Journal.stub(:find_by, journal(attachments: [attachment])) do
+        RedmineSlackNotification.stub(:upload_image, 'F123') do
+          RedmineSlackNotification.add_images(message, [name], 1, 'token')
+        end
+      end
+
+      blocks = message.dig('attachments', 0, 'blocks')
+      assert_equal '#6D5DFB', message.dig('attachments', 0, 'color')
+      assert_equal 1, blocks.count { |block| block['type'] == 'image' }
+      assert_equal 'F123', blocks.find { |block| block['type'] == 'image' }.dig('slack_file', 'id')
+      if show_diff
+        assert_includes blocks.find { |block| block['type'] == 'markdown' }['text'], "![](#{name})"
+      else
+        refute blocks.any? { |block| block['type'] == 'markdown' }
+      end
+    end
   end
 
   def test_failed_markdown_image_upload_keeps_a_redmine_link
