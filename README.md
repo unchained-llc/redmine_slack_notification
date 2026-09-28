@@ -53,6 +53,8 @@ Deletion of Wiki pages, News, Time entries, and Versions was not previously noti
 
 Wiki notifications do not include the full Wiki body. They include the Wiki edit comment when one is provided; otherwise, they report that the Wiki content was updated.
 
+When an Issue description, News description, or Wiki body changes, its notification includes a line diff inside the existing colored card. A Markdown `diff` code block marks removed lines with `-` and added lines with `+`, with two unchanged lines of context. The full updated body is not repeated. Long lines and large diffs are shortened with an omission notice; the Issue, News, or Wiki title still links to the full content. Wiki comment-only edits do not produce a body diff.
+
 ## Installation
 
 1. Copy this plugin to the Redmine `plugins` directory:

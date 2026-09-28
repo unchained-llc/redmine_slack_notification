@@ -26,8 +26,10 @@ module RedmineSlackNotification
       return unless project
 
       author = respond_to?(:author) ? self.author : User.current
+      body_diff = [text_before_last_save, text] if action == 'updated' && saved_change_to_text?
       RedmineSlackNotification.enqueue(
-        RedmineSlackNotification::Formatter.wiki_payload(self, project, actor: author, action: action),
+        RedmineSlackNotification::Formatter.wiki_payload(self, project, actor: author, action: action,
+                                                         body_diff: body_diff),
         project: project, event: "wiki_#{action}"
       )
     end
