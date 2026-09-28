@@ -10,6 +10,137 @@ slack:
   auto_map_users_by_name: false
   # true: show Markdown line diffs on body/comment edits; false: show updated text.
   body_diff: true
+  # Six-digit hexadecimal color for the left border of the Slack attachment.
+  attachment_color: '#6D5DFB'
+
+# All displayed notification wording is optional. The values below reproduce
+# the built-in defaults; edit individual keys as needed. %{...} are placeholders.
+messages:
+  events:
+    issue:
+      created: Issue created
+      updated: Issue updated
+      deleted: Issue deleted
+    comment:
+      added: Comment added
+      updated: Comment updated
+      deleted: Comment deleted
+    wiki:
+      created: Wiki page created
+      updated: Wiki page updated
+      deleted: Wiki page deleted
+    news:
+      created: News created
+      updated: News updated
+      deleted: News deleted
+    news_comment:
+      added: News comment added
+      updated: News comment updated
+      deleted: News comment deleted
+    time_entry:
+      created: Time entry created
+      updated: Time entry updated
+      deleted: Time entry deleted
+    version:
+      created: Version created
+      updated: Version updated
+      deleted: Version deleted
+    project:
+      updated: Project updated
+  icons:
+    issue:
+      created: '🆕'
+      updated: '🔄'
+      deleted: '🗑️'
+    comment:
+      added: '💬'
+      updated: '💬'
+      deleted: '🗑️'
+    wiki:
+      created: '📚'
+      updated: '✏️'
+      deleted: '🗑️'
+    news:
+      created: '📰'
+      updated: '📰'
+      deleted: '🗑️'
+    news_comment:
+      added: '💬'
+      updated: '✏️'
+      deleted: '🗑️'
+    time_entry:
+      created: '⏱️'
+      updated: '⏱️'
+      deleted: '🗑️'
+    version:
+      created: '🏷️'
+      updated: '🏷️'
+      deleted: '🗑️'
+    project:
+      updated: '🗂️'
+  sections:
+    content: Content
+    comment: Comment
+    summary: Summary
+    changes: Changes
+    metadata: Metadata
+    added_comment: Added comment
+    updated_comment: Updated comment
+    description: Description
+    body: Body
+  fields:
+    project: Project
+    updater: Updated by
+    poster: Posted by
+    tracker: Tracker
+    category: Category
+    priority: Priority
+    status: Status
+    assignee: Assignee
+    target_version: Target version
+    parent_issue: Parent issue
+    child_issue: Child issue
+    subject: Subject
+    description: Description
+    start_date: Start date
+    due_date: Due date
+    attachment: Attachment
+    relation: Related issue (%{type})
+    location: Changed location
+    hours: Hours
+    spent_on: Spent on
+  relations:
+    relates: Related
+    duplicates: Duplicates
+    duplicated: Duplicated by
+    blocks: Blocks
+    blocked: Blocked by
+    precedes: Precedes
+    follows: Follows
+    copied_to: Copied to
+    copied_from: Copied from
+  values:
+    unknown_user: Unknown user
+    unknown: Unknown
+    unset: Not set
+    none: None
+    empty: "(empty)"
+    added: Added
+    removed: Removed
+    created: created
+    updated: updated
+    deleted: deleted
+  diff:
+    heading: "%{label} diff"
+    omitted: Diff truncated. See the linked page for the full text.
+  images:
+    preparing: Preparing image
+    alt: Image
+    link_label: 'Image: %{name}'
+  templates:
+    issue_fallback: "[%{project}] %{actor} %{action} %{tracker} #%{id}: %{subject}"
+    journal_fallback: "[%{project}] %{actor} %{event} %{tracker} #%{id}: %{subject}"
+    generic_fallback: 'Redmine: %{event} - %{subject}'
 
 # issue.updated.enabled is the parent switch for all Issue detail events below.
 # Setting it to false suppresses them even when an individual key is true.
