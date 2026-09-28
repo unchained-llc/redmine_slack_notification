@@ -21,6 +21,38 @@ slack:
       comment: true
   # Six-digit hexadecimal color for the left border of the Slack attachment.
   attachment_color: '#6D5DFB'
+  # Metadata fields are shown by default. Set a field (or whole group) to false
+  # to hide it. Issue metadata is included only when an Issue is created.
+  metadata:
+    issue:
+      project: true
+      updater: true
+      tracker: true
+      category: true
+      priority: true
+    wiki:
+      project: true
+      updater: true
+      location: true
+    news:
+      project: true
+      updater: true
+    news_comment:
+      project: true
+      updater: true
+    time_entry:
+      project: true
+      updater: true
+      hours: true
+      spent_on: true
+    version:
+      project: true
+      updater: true
+      status: true
+      due_date: true
+    project:
+      project: true
+      updater: true
 
 # All displayed notification wording is optional. The values below reproduce
 # the built-in defaults; edit individual keys as needed. %{...} are placeholders.
