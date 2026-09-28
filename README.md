@@ -96,9 +96,9 @@ Slack configuration selection order:
 
 The Bot Token requires the `chat:write` scope. To show images from Issue comments, add `files:write` and reinstall the Slack app so the Bot Token gains that scope. The bot must be a member of each target channel.
 
-Comment images are uploaded from the attachments added in the same public Journal, then included in the notification as top-level Slack image blocks at their original Markdown positions. A successful image replaces the source Markdown without an extra attachment link. Image notifications use top-level blocks rather than the colored attachment card. Images over 20 MB and failed uploads remain clickable Redmine attachment links. Images in private Issues or private comments are never uploaded. Already posted Slack notifications are not changed automatically by installing this version.
+Comment images are uploaded from the attachments added in the same public Journal, then included in the colored notification card at their original Markdown positions. A successful image replaces the source Markdown without an extra attachment link. Slack initially needs a top-level image accessory to share each newly uploaded private file with the channel; the plugin removes those small temporary previews with `chat.update` after posting. If that update fails, the complete colored card remains visible and an error is logged rather than posting a duplicate notification. Images over 20 MB and failed uploads remain clickable Redmine attachment links. Images in private Issues or private comments are never uploaded. Already posted Slack notifications are not changed automatically by installing this version.
 
-Redmine text containing an ordered Markdown list is sent in a Slack `markdown` block inside the existing colored attachment card. Slack renders repeated `1.` markers as a numbered list, as Redmine does. The card header, dividers, and metadata fields keep their existing layout. Uploaded images still appear at their positions between text blocks; because Slack rejects secure image blocks inside a legacy attachment, notifications with images use top-level blocks. Slack limits Markdown blocks to 12,000 characters per message, so longer text uses the existing `mrkdwn` section format.
+Redmine text containing an ordered Markdown list is sent in a Slack `markdown` block inside the colored attachment card. Slack renders repeated `1.` markers as a numbered list, as Redmine does. The card header, dividers, metadata fields, and purple border keep their existing layout even when a comment includes images. Slack limits Markdown blocks to 12,000 characters per message, so longer text uses the existing `mrkdwn` section format.
 
 The configuration file contains credentials and must not be committed to Git. The example file is safe to commit; replace all placeholder values before use.
 
@@ -117,7 +117,7 @@ production:
   - slack
 ```
 
-Slack API delivery errors are logged and retried by Sidekiq; they do not make the original Redmine operation fail. If Slack has not made a newly uploaded image available to Block Kit yet, the same message is retried briefly before the Job fails.
+Slack API delivery errors are logged and retried by Sidekiq; they do not make the original Redmine operation fail. If Slack has not processed a newly uploaded image yet, the initial post is retried briefly before the Job fails. A failure to remove temporary image previews after a successful post is logged without retrying the Job, to avoid sending a duplicate notification.
 
 ### Running without Sidekiq
 

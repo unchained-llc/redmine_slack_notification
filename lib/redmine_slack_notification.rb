@@ -15,8 +15,8 @@ module RedmineSlackNotification
       super("Slack #{method} returned #{status}: #{@code || 'unknown error'}#{details.empty? ? '' : " (#{details})"}")
     end
 
-    def invalid_slack_file?
-      code == 'invalid_blocks' && message.include?('invalid slack file')
+    def unready_image_file?
+      %w[invalid_blocks invalid_attachments].include?(code) && message.match?(/invalid (?:slack file|file type)/)
     end
   end
 
@@ -91,12 +91,51 @@ module RedmineSlackNotification
   end
 
   def post_message(payload, channel, token)
+    image_ids = Array(payload.dig('attachments', 0, 'blocks')).each_with_object([]) do |block, ids|
+      ids << block.dig('slack_file', 'id') if block['type'] == 'image'
+    end.compact.uniq
+    request = payload.merge('channel' => channel)
+    if image_ids.any?
+      # A private Slack file becomes available to the channel when referenced
+      # in a top-level image element. Keep the colored attachment from the
+      # first post, then remove these temporary small previews.
+      request['blocks'] = image_ids.map do |file_id|
+        {
+          'type' => 'section',
+          'text' => { 'type' => 'plain_text', 'text' => '画像を準備中' },
+          'accessory' => { 'type' => 'image', 'slack_file' => { 'id' => file_id }, 'alt_text' => '画像' }
+        }
+      end
+    end
+
+    posted = post_with_image_retry(request, token)
+    return posted if image_ids.empty?
+
+    begin
+      update = {
+        'channel' => channel,
+        'ts' => posted.fetch('ts'),
+        'text' => '',
+        'blocks' => [],
+        'attachments' => payload.fetch('attachments')
+      }
+      post_with_image_retry(update, token, method: 'chat.update')
+    rescue StandardError => e
+      # The initial message already contains the complete colored card. Do
+      # not retry the job and post a second notification if cleanup fails.
+      Rails.logger.error("RedmineSlackNotification: could not remove temporary image previews from #{channel}/#{posted['ts']}: #{e.class}: #{e.message}")
+    end
+    posted
+  end
+
+  def post_with_image_retry(request, token, method: 'chat.postMessage')
     retries = 0
     begin
-      slack_api('chat.postMessage', payload.merge('channel' => channel), token)
+      slack_api(method, request, token)
     rescue SlackApiError => e
-      image_message = payload['blocks']&.any? { |block| block['type'] == 'image' }
-      raise unless image_message && e.invalid_slack_file? && retries < 3
+      image_message = Array(request['blocks']).any? { |block| block['type'] == 'image' || block.dig('accessory', 'slack_file', 'id') } ||
+        Array(request.dig('attachments', 0, 'blocks')).any? { |block| block['type'] == 'image' }
+      raise unless image_message && e.unready_image_file? && retries < 3
 
       sleep([1, 2, 4][retries])
       retries += 1
@@ -112,7 +151,6 @@ module RedmineSlackNotification
     blocks = payload['blocks'] || payload.dig('attachments', 0, 'blocks')
     return unless blocks
 
-    image_added = false
     eligible_names = image_names.to_h { |name| [name.downcase, name] }
     upload_results = {}
     ordered_blocks = blocks.flat_map do |block|
@@ -141,7 +179,6 @@ module RedmineSlackNotification
             pieces << with_text.call(text_before) unless text_before.empty?
             pieces << { 'type' => 'image', 'slack_file' => { 'id' => file_id }, 'alt_text' => name[0, 2000] }
             current_text = +''
-            image_added = true
           else
             path = attachment ? "/attachments/#{attachment.id}" : "/issues/#{journal.journalized.id}"
             if markdown_block
@@ -164,14 +201,6 @@ module RedmineSlackNotification
       pieces.empty? ? [block] : pieces
     end
     blocks.replace(ordered_blocks)
-
-    # Slack rejects secure image blocks inside a legacy attachment. Put the
-    # complete notification in top-level blocks when it contains an image.
-    if image_added && payload['attachments']
-      payload['text'] = payload.dig('attachments', 0, 'fallback')
-      payload['blocks'] = blocks
-      payload.delete('attachments')
-    end
   end
 
   def upload_image(attachment, token)
