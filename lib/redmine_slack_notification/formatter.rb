@@ -15,6 +15,9 @@ module RedmineSlackNotification
       source = value.to_s.gsub("\r\n", "\n").gsub("\r", "\n")
       source.gsub!(/```[ \t]*\w*[ \t]*\n.*?```/m) { protect_mrkdwn(Regexp.last_match(0), protected) }
       source.gsub!(/`[^`]+`/) { protect_mrkdwn(Regexp.last_match(0), protected) }
+      source.gsub!(/!\[[^\]\n]*\]\([^)\n]+\)/) do |image|
+        image_references(image).any? ? protect_mrkdwn(image, protected) : image
+      end
       source = text(source)
       source.gsub!(/\[([^\]]+)\]\(([^)]+)\)/) { "<#{Regexp.last_match(2)}|#{Regexp.last_match(1)}>" }
       source.gsub!(/^[ \t]*\#{1,6}[ \t]+([^\r\n]+)$/) { "*#{Regexp.last_match(1).strip}*" }
@@ -25,6 +28,14 @@ module RedmineSlackNotification
       source.gsub!(/^\s*\d+\.\s+/, '• ')
       source.gsub!(/\n{3,}/, "\n\n")
       restore_mrkdwn(source, protected)
+    end
+
+    # Only local Redmine attachment names are eligible for upload. Remote URLs
+    # and paths must never be fetched on behalf of a notification.
+    def image_references(value)
+      value.to_s.scan(/!\[[^\]\n]*\]\(([^)\n]+\.(?:png|jpe?g|gif))\)/i).flatten.uniq.reject do |name|
+        name.include?('/') || name.include?('\\') || name.include?(':')
+      end
     end
 
     def protect_mrkdwn(value, protected)
