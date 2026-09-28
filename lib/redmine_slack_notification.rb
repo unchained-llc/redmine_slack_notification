@@ -4,6 +4,7 @@ require 'net/http'
 require 'json'
 require 'uri'
 require 'yaml'
+require 'digest'
 
 module RedmineSlackNotification
   EVENT_KEYS = %w[
@@ -79,6 +80,57 @@ module RedmineSlackNotification
 
   def user_mapping
     config.fetch('users', {})
+  end
+
+  def slack_user_id_for_name(name)
+    return nil unless config.dig('slack', 'auto_map_users_by_name') == true
+
+    key = name.to_s.strip.downcase
+    return nil if key.empty?
+
+    ids = slack_user_directory[key]
+    ids.first if ids&.length == 1
+  end
+
+  def slack_user_directory
+    token = bot_token
+    return {} if token.empty?
+
+    cache_key = "redmine_slack_notification/users/#{Digest::SHA256.hexdigest(token)}"
+    Rails.cache.fetch(cache_key, expires_in: 600) do
+      fetch_slack_user_directory(token)
+    rescue StandardError => e
+      Rails.logger.warn("RedmineSlackNotification: could not load Slack users: #{e.class}: #{e.message}")
+      {}
+    end
+  end
+
+  def fetch_slack_user_directory(token)
+    directory = Hash.new { |hash, name| hash[name] = [] }
+    cursor = nil
+    seen_cursors = {}
+    loop do
+      params = { 'limit' => 200 }
+      params['cursor'] = cursor if cursor
+      response = slack_api('users.list', params, token, form: true, open_timeout: 2, read_timeout: 3)
+      Array(response['members']).each do |member|
+        next unless member.is_a?(Hash) && member['id'].to_s != ''
+        next if member['deleted'] || member['is_bot'] || member['is_app_user'] || member['is_stranger']
+
+        profile = member['profile'].is_a?(Hash) ? member['profile'] : {}
+        [profile['display_name'], member['name']].each do |value|
+          name = value.to_s.strip.downcase
+          directory[name] << member['id'] unless name.empty? || directory[name].include?(member['id'])
+        end
+      end
+      cursor = response.dig('response_metadata', 'next_cursor').to_s
+      break if cursor.empty?
+
+      raise 'Slack users.list returned a repeated cursor' if seen_cursors[cursor]
+
+      seen_cursors[cursor] = true
+    end
+    directory.each_with_object({}) { |(name, ids), result| result[name] = ids }
   end
 
   def configured?(project)
@@ -273,7 +325,7 @@ module RedmineSlackNotification
     nil
   end
 
-  def slack_api(method, body, token, form: false)
+  def slack_api(method, body, token, form: false, open_timeout: 3, read_timeout: 10)
     uri = URI("https://slack.com/api/#{method}")
     request = Net::HTTP::Post.new(uri.request_uri)
     request['Authorization'] = "Bearer #{token}"
@@ -283,7 +335,7 @@ module RedmineSlackNotification
       request['Content-Type'] = 'application/json; charset=utf-8'
       request.body = body.to_json
     end
-    Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 3, read_timeout: 10) do |http|
+    Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: open_timeout, read_timeout: read_timeout) do |http|
       response = http.request(request)
       result = JSON.parse(response.body)
       unless response.is_a?(Net::HTTPSuccess) && result['ok']

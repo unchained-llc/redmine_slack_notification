@@ -7,6 +7,14 @@ module Rails
   def self.application
     @application ||= OpenStruct.new(config: OpenStruct.new(to_prepare: nil, after_initialize: nil))
   end
+
+  def self.cache
+    @cache
+  end
+
+  def self.logger
+    @logger
+  end
 end
 
 class Issue
@@ -55,6 +63,12 @@ class RedmineSlackNotificationJob
 end
 
 class User
+  attr_accessor :login, :mail, :name
+
+  def blank?
+    false
+  end
+
   def self.current
     OpenStruct.new(name: 'Kota')
   end
@@ -67,6 +81,117 @@ class Journal
 end
 
 require_relative '../lib/redmine_slack_notification'
+
+class AutomaticUserMappingTest < Minitest::Test
+  class MemoryCache
+    def initialize
+      @entries = {}
+    end
+
+    def fetch(key, expires_in:)
+      @entries[key] ||= yield
+    end
+  end
+
+  def test_disabled_mapping_does_not_fetch_users
+    RedmineSlackNotification.stub(:config, { 'slack' => { 'auto_map_users_by_name' => false } }) do
+      RedmineSlackNotification.stub(:slack_user_directory, -> { flunk 'users.list was called' }) do
+        assert_nil RedmineSlackNotification.slack_user_id_for_name('kota')
+      end
+    end
+  end
+
+  def test_matches_only_a_unique_name_without_case_sensitivity
+    directory = { 'kota' => ['U123'], 'jun' => %w[U456 U789] }
+    RedmineSlackNotification.stub(:config, { 'slack' => { 'auto_map_users_by_name' => true } }) do
+      RedmineSlackNotification.stub(:slack_user_directory, directory) do
+        assert_equal 'U123', RedmineSlackNotification.slack_user_id_for_name(' Kota ')
+        assert_nil RedmineSlackNotification.slack_user_id_for_name('jun')
+        assert_nil RedmineSlackNotification.slack_user_id_for_name('missing')
+      end
+    end
+  end
+
+  def test_explicit_mapping_takes_precedence_over_automatic_lookup
+    user = User.new
+    user.login = 'kota'
+    user.mail = 'kota@example.com'
+    user.name = 'Kota'
+    RedmineSlackNotification.stub(:user_mapping, { 'kota' => PresenceValue.new('U123') }) do
+      RedmineSlackNotification.stub(:slack_user_id_for_name, ->(*) { flunk 'automatic lookup ran' }) do
+        assert_equal '<@U123>', RedmineSlackNotification::Formatter.user_mention(user)
+      end
+    end
+  end
+
+  def test_unmapped_user_uses_automatic_lookup
+    user = User.new
+    user.login = 'kota'
+    user.mail = 'kota@example.com'
+    user.name = 'Kota'
+    RedmineSlackNotification.stub(:user_mapping, {}) do
+      RedmineSlackNotification.stub(:slack_user_id_for_name, PresenceValue.new('U123')) do
+        assert_equal '<@U123>', RedmineSlackNotification::Formatter.user_mention(user)
+      end
+    end
+  end
+
+  def test_user_directory_paginates_and_ignores_non_human_accounts
+    calls = []
+    responses = [
+      { 'members' => [
+          { 'id' => 'U123', 'name' => 'kota', 'profile' => { 'display_name' => 'Kota' } },
+          { 'id' => 'B123', 'name' => 'bot', 'is_bot' => true },
+          { 'id' => 'U456', 'name' => 'former', 'deleted' => true }
+        ], 'response_metadata' => { 'next_cursor' => 'next' } },
+      { 'members' => [
+          { 'id' => 'U789', 'name' => 'jun', 'profile' => { 'display_name' => 'Kota' } },
+          { 'id' => 'U999', 'name' => 'outsider', 'is_stranger' => true }
+        ], 'response_metadata' => { 'next_cursor' => '' } }
+    ]
+    api = lambda do |method, params, token, **options|
+      calls << [method, params, token, options]
+      responses.shift
+    end
+
+    RedmineSlackNotification.stub(:slack_api, api) do
+      directory = RedmineSlackNotification.fetch_slack_user_directory('token')
+      assert_equal %w[U123 U789], directory['kota']
+      assert_equal ['U789'], directory['jun']
+      refute directory.key?('bot')
+      refute directory.key?('former')
+      refute directory.key?('outsider')
+    end
+    assert_equal [{ 'limit' => 200 }, { 'limit' => 200, 'cursor' => 'next' }], calls.map { |call| call[1] }
+    assert calls.all? { |call| call[0] == 'users.list' && call[2] == 'token' && call[3][:form] }
+  end
+
+  def test_directory_is_cached_and_api_failure_falls_back_to_plain_name
+    cache = MemoryCache.new
+    warnings = []
+    logger = Object.new
+    logger.define_singleton_method(:warn) { |message| warnings << message }
+    attempts = 0
+    api = lambda do |*|
+      attempts += 1
+      raise 'missing_scope'
+    end
+
+    Rails.stub(:cache, cache) do
+      Rails.stub(:logger, logger) do
+        RedmineSlackNotification.stub(:bot_token, 'token') do
+          RedmineSlackNotification.stub(:slack_api, api) do
+            assert_equal({}, RedmineSlackNotification.slack_user_directory)
+            assert_equal({}, RedmineSlackNotification.slack_user_directory)
+          end
+        end
+      end
+    end
+    assert_equal 1, attempts
+    assert_equal 1, warnings.length
+    assert_includes warnings.first, 'missing_scope'
+  end
+end
 
 class EventConfigurationTest < Minitest::Test
   class TestJournal < Journal

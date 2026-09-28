@@ -6,6 +6,8 @@ slack:
   # Prefer the SLACK_BOT_TOKEN environment variable in production.
   bot_token: 'xoxb-REPLACE-ME'
   default_channel_id: 'C0123456789'
+  # Requires users:read and an app reinstall. Ambiguous names are not mentioned.
+  auto_map_users_by_name: false
 
 # Issue detail events inherit issue_updated when omitted. Newly supported
 # deletion events below default to false; other omitted events default to true.
@@ -55,6 +57,6 @@ projects:
     channel_id: 'C0234567890'
 
 users:
-  # Redmine login name or email address: Slack member ID
+  # Redmine login name or email address: Slack member ID. Overrides automatic matching.
   alice: 'U0123456789'
   bob: 'U0234567890'

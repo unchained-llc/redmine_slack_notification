@@ -54,11 +54,12 @@ module RedmineSlackNotification
     end
 
     def user_mention(user)
-      return '不明なユーザー' if user.blank?
+      return '不明なユーザー' if user.nil?
 
       mapping = RedmineSlackNotification.user_mapping
       slack_id = mapping[user.login.to_s] || mapping[user.mail.to_s]
-      slack_id.present? ? "<@#{text(slack_id)}>" : text(user.name)
+      slack_id = RedmineSlackNotification.slack_user_id_for_name(user.login) if (slack_id == false || slack_id.to_s.strip.empty?) && user.is_a?(User)
+      slack_id == false || slack_id.to_s.strip.empty? ? text(user.name) : "<@#{text(slack_id)}>"
     end
 
     def issue_title(issue)
