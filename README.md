@@ -105,7 +105,7 @@ Deletion of Wiki pages, News, time entries, and Versions defaults to off because
 
 ## Notification content
 
-The card contains an event heading, a link to the Redmine record, relevant text or changed fields, and metadata. `slack.attachment_color` changes its left border:
+The card contains an event heading, a link to the Redmine record, and relevant text or changed fields. New Issue notifications also show the Issue's metadata. Issue updates, comments, and deletions omit the metadata section because their changes or content are already shown. Other event types retain their existing metadata. `slack.attachment_color` changes the card's left border:
 
 ```yaml
 slack:

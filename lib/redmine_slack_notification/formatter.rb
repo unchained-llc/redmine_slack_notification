@@ -215,13 +215,15 @@ module RedmineSlackNotification
         blocks.concat(change_field_blocks(changes))
       end
 
-      blocks << { 'type' => 'divider' }
-      blocks << section_text("*#{text(section_label('metadata'))}*")
-      blocks << {
-        'type' => 'section',
-        'expand' => true,
-        'fields' => metadata_fields(issue, actor).map { |label, value| field(label, value) }
-      }
+      if action == 'created'
+        blocks << { 'type' => 'divider' }
+        blocks << section_text("*#{text(section_label('metadata'))}*")
+        blocks << {
+          'type' => 'section',
+          'expand' => true,
+          'fields' => metadata_fields(issue, actor).map { |label, value| field(label, value) }
+        }
+      end
 
       payload(title, blocks: blocks)
     end
@@ -264,14 +266,6 @@ module RedmineSlackNotification
         blocks << section_text("*#{text(section_label('changes'))}*")
         blocks.concat(change_field_blocks(changes))
       end
-      blocks.concat([
-        { 'type' => 'divider' },
-        section_text("*#{text(section_label('metadata'))}*"),
-        { 'type' => 'section', 'expand' => true, 'fields' => [
-          field(field_label('project'), text(issue.project.name)),
-          field(field_label('poster'), text(actor&.name || message('values', 'unknown')))
-        ] },
-      ])
       payload(fallback, blocks: blocks)
     end
 
