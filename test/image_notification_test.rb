@@ -1164,30 +1164,93 @@ class NotificationDisplaySettingsTest < Minitest::Test
     end
   end
 
-  def test_issue_change_switches_hide_selected_details_and_description_diff
+  def test_updated_issue_metadata_shows_enabled_unset_and_custom_fields
+    issue = OpenStruct.new(id: 7, subject: 'Subject', description: '', status: nil, fixed_version: nil,
+                           project: OpenStruct.new(name: 'Agentic'), tracker: OpenStruct.new(name: 'Task'))
+    issue.define_singleton_method(:visible_custom_field_values) do
+      [OpenStruct.new(custom_field: OpenStruct.new(id: 42, name: 'Customer'), value: '')]
+    end
+    settings = { 'slack' => { 'metadata' => { 'issue' => { 'updated' => {
+      'status' => true, 'target_version' => true,
+      'custom_fields' => { 'default' => false, '42' => true }
+    } } } } }
+
+    RedmineSlackNotification.stub(:config, settings) do
+      fields = RedmineSlackNotification::Formatter.issue_payload(
+        issue, actor: nil, action: 'updated'
+      ).dig('attachments', 0, 'blocks').flat_map { |block| block.fetch('fields', []) }
+      assert_equal ["*Status*\nNot set", "*Target version*\nNot set", "*Customer*\nNot set"],
+                   fields.map { |entry| entry['text'] }
+    end
+  end
+
+  def test_updated_issue_metadata_shows_current_values_independent_of_changed_fields
     value = ->(string) { PresenceValue.new(string) }
     details = [
       OpenStruct.new(property: 'attr', prop_key: 'fixed_version_id', old_value: value.call('1'), value: value.call('2')),
-      OpenStruct.new(property: 'cf', prop_key: '42', old_value: value.call('A'), value: value.call('B')),
-      OpenStruct.new(property: 'cf', prop_key: '43', old_value: value.call('C'), value: value.call('D')),
-      OpenStruct.new(property: 'relation', prop_key: 'relates', old_value: value.call(''), value: value.call('12')),
       OpenStruct.new(property: 'attr', prop_key: 'description', old_value: value.call('before'), value: value.call('after'))
     ]
     issue = OpenStruct.new(id: 7, subject: 'Subject', description: 'after',
-                           project: OpenStruct.new(name: 'Agentic'), tracker: OpenStruct.new(name: 'Task'))
-    settings = { 'slack' => { 'issue_changes' => {
-      'target_version' => false, 'relations' => false, 'description' => false,
-      'custom_fields' => { 'default' => true, '42' => false }
-    } } }
+                           project: OpenStruct.new(name: 'Agentic'), tracker: OpenStruct.new(name: 'Task'),
+                           status: OpenStruct.new(name: 'In progress'),
+                           fixed_version: OpenStruct.new(name: 'Release 2'))
+    settings = { 'slack' => { 'metadata' => { 'issue' => {
+      'created' => { 'project' => true, 'status' => false },
+      'updated' => { 'project' => false, 'status' => true, 'target_version' => true }
+    } } } }
 
     RedmineSlackNotification.stub(:config, settings) do
-      blocks = RedmineSlackNotification::Formatter.issue_payload(
+      heading = ->(block) { block['text']['text'] if block['text'].is_a?(Hash) }
+      payload = RedmineSlackNotification::Formatter.issue_payload(
         issue, actor: OpenStruct.new(name: 'Kota'), action: 'updated', details: details
-      ).dig('attachments', 0, 'blocks')
+      )
+      blocks = payload.dig('attachments', 0, 'blocks')
       fields = blocks.flat_map { |block| block.fetch('fields', []) }.map { |entry| entry.fetch('text') }
-      assert_equal 1, fields.length
-      assert_includes fields.first, 'C → D'
-      refute blocks.any? { |block| block['type'] == 'markdown' && block['text'].include?('diff') }
+      assert fields.any? { |field| field == "*Status*\nIn progress" }
+      assert fields.any? { |field| field == "*Target version*\nRelease 2" }
+      assert fields.any? { |field| field.include?('旧版 → Release 2') || field.include?('旧版 → 新版') }
+      refute fields.any? { |field| field.start_with?('*Project*') }
+      assert blocks.any? { |block| heading.call(block) == '*Metadata*' }
+      assert blocks.any? { |block| heading.call(block) == '*Changes*' }
+
+      combined = RedmineSlackNotification::Formatter.journal_payload(
+        issue, actor: OpenStruct.new(name: 'Kota'), notes: 'Comment', details: details
+      ).dig('attachments', 0, 'blocks')
+      assert combined.any? { |block| heading.call(block) == '*Metadata*' }
+      assert combined.any? { |block| heading.call(block) == '*Changes*' }
+    end
+  end
+
+  def test_issue_change_details_switch_hides_deltas_but_keeps_updated_metadata_and_comment
+    value = ->(string) { PresenceValue.new(string) }
+    details = [
+      OpenStruct.new(property: 'attr', prop_key: 'description', old_value: value.call('before'), value: value.call('after')),
+      OpenStruct.new(property: 'attr', prop_key: 'fixed_version_id', old_value: value.call('1'), value: value.call('2'))
+    ]
+    issue = OpenStruct.new(id: 7, subject: 'Subject', description: 'after',
+                           project: OpenStruct.new(name: 'Agentic'), tracker: OpenStruct.new(name: 'Task'),
+                           fixed_version: OpenStruct.new(name: 'Release 2'))
+    settings = { 'slack' => { 'issue_change_details' => false,
+                              'metadata' => { 'issue' => { 'updated' => { 'target_version' => true } } } } }
+
+    RedmineSlackNotification.stub(:config, settings) do
+      heading = ->(block) { block['text']['text'] if block['text'].is_a?(Hash) }
+      [RedmineSlackNotification::Formatter.issue_payload(issue, actor: nil, action: 'updated', details: details),
+       RedmineSlackNotification::Formatter.journal_payload(issue, actor: nil, notes: 'Comment', details: details)].each do |payload|
+        blocks = payload.dig('attachments', 0, 'blocks')
+        assert blocks.flat_map { |block| block.fetch('fields', []) }
+                     .any? { |field| field['text'] == "*Target version*\nRelease 2" }
+        refute blocks.any? { |block| heading.call(block) == '*Changes*' }
+        refute blocks.any? { |block| block['type'] == 'markdown' && block['text'].include?('diff') }
+      end
+      combined_blocks = RedmineSlackNotification::Formatter.journal_payload(
+        issue, actor: nil, notes: 'Comment', details: details
+      ).dig('attachments', 0, 'blocks')
+      assert combined_blocks.any? { |block| heading.call(block).to_s.include?('Comment') }
+      metadata_only = RedmineSlackNotification::Formatter.journal_payload(
+        issue, actor: nil, notes: '', details: details
+      ).dig('attachments', 0, 'blocks')
+      assert_equal 1, metadata_only.count { |block| block['type'] == 'divider' }
     end
   end
 
