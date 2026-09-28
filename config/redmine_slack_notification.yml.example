@@ -9,51 +9,66 @@ slack:
   # Requires users:read and an app reinstall. Ambiguous names are not mentioned.
   auto_map_users_by_name: false
 
-# issue_updated is the parent switch for all Issue detail events below.
+# issue.updated.enabled is the parent switch for all Issue detail events below.
 # Setting it to false suppresses them even when an individual key is true.
 # Newly supported deletion events below default to false; other omitted events default to true.
 events:
-  issue_created: true
-  issue_updated: true
-  issue_deleted: true
-  comment_added: true
-  relation_added: true
-  relation_removed: true
-  status_changed: true
-  assignee_changed: true
-  priority_changed: true
-  due_date_changed: true
-  start_date_changed: true
-  version_changed: true # Issue target version; distinct from version_updated below
-  subject_changed: true
-  description_changed: true
-  custom_field_changed: true
-  attachment_added: true
-  attachment_removed: true
-  parent_changed: true
-  child_added: true
-  child_removed: true
-  wiki_created: true
-  wiki_updated: true
-  wiki_deleted: false
-  news_created: true
-  news_updated: true
-  news_deleted: false
-  news_comment_added: true
-  time_entry_created: true
-  time_entry_updated: true
-  time_entry_deleted: false
-  version_created: true
-  version_updated: true
-  version_deleted: false
-  project_updated: true
+  issue:
+    created: true
+    updated:
+      enabled: true
+      other_changed: true # Category, tracker, and other Issue details
+      relation:
+        added: true
+        removed: true
+      status_changed: true
+      assignee_changed: true
+      priority_changed: true
+      due_date_changed: true
+      start_date_changed: true
+      version_changed: true # Issue target version; distinct from events.version.updated
+      subject_changed: true
+      description_changed: true
+      custom_field_changed: true
+      attachment:
+        added: true
+        removed: true
+      parent_changed: true
+      child:
+        added: true
+        removed: true
+    deleted: true
+    comment:
+      added: true # Independent of issue.updated.enabled
+  wiki:
+    created: true
+    updated: true
+    deleted: false
+  news:
+    created: true
+    updated: true
+    deleted: false
+    comment:
+      added: true # Independent of news.updated
+  time_entry:
+    created: true
+    updated: true
+    deleted: false
+  version:
+    created: true
+    updated: true
+    deleted: false
+  project:
+    updated: true
 
 projects:
   agentic:
     channel_id: 'C0123456789'
-    # Project events override the global events above.
+    # Project event leaves override the matching global leaves.
     # events:
-    #   news_updated: false
+    #   issue:
+    #     updated:
+    #       status_changed: false
   another-project:
     channel_id: 'C0234567890'
 

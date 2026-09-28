@@ -7,20 +7,47 @@ require 'yaml'
 require 'digest'
 
 module RedmineSlackNotification
-  EVENT_KEYS = %w[
-    issue_created issue_updated issue_deleted comment_added relation_added relation_removed
-    status_changed assignee_changed priority_changed due_date_changed start_date_changed
-    version_changed subject_changed description_changed custom_field_changed
-    attachment_added attachment_removed parent_changed child_added child_removed
-    wiki_created wiki_updated wiki_deleted news_created news_updated news_deleted news_comment_added
-    time_entry_created time_entry_updated time_entry_deleted
-    version_created version_updated version_deleted project_updated
-  ].freeze
-  ISSUE_DETAIL_EVENTS = %w[
-    relation_added relation_removed status_changed assignee_changed priority_changed
-    due_date_changed start_date_changed version_changed subject_changed description_changed
-    custom_field_changed attachment_added attachment_removed parent_changed child_added child_removed
-  ].freeze
+  EVENT_PATHS = {
+    'issue_created' => %w[issue created],
+    'issue_updated' => %w[issue updated other_changed],
+    'issue_deleted' => %w[issue deleted],
+    'comment_added' => %w[issue comment added],
+    'relation_added' => %w[issue updated relation added],
+    'relation_removed' => %w[issue updated relation removed],
+    'status_changed' => %w[issue updated status_changed],
+    'assignee_changed' => %w[issue updated assignee_changed],
+    'priority_changed' => %w[issue updated priority_changed],
+    'due_date_changed' => %w[issue updated due_date_changed],
+    'start_date_changed' => %w[issue updated start_date_changed],
+    'version_changed' => %w[issue updated version_changed],
+    'subject_changed' => %w[issue updated subject_changed],
+    'description_changed' => %w[issue updated description_changed],
+    'custom_field_changed' => %w[issue updated custom_field_changed],
+    'attachment_added' => %w[issue updated attachment added],
+    'attachment_removed' => %w[issue updated attachment removed],
+    'parent_changed' => %w[issue updated parent_changed],
+    'child_added' => %w[issue updated child added],
+    'child_removed' => %w[issue updated child removed],
+    'wiki_created' => %w[wiki created],
+    'wiki_updated' => %w[wiki updated],
+    'wiki_deleted' => %w[wiki deleted],
+    'news_created' => %w[news created],
+    'news_updated' => %w[news updated],
+    'news_deleted' => %w[news deleted],
+    'news_comment_added' => %w[news comment added],
+    'time_entry_created' => %w[time_entry created],
+    'time_entry_updated' => %w[time_entry updated],
+    'time_entry_deleted' => %w[time_entry deleted],
+    'version_created' => %w[version created],
+    'version_updated' => %w[version updated],
+    'version_deleted' => %w[version deleted],
+    'project_updated' => %w[project updated]
+  }.transform_values(&:freeze).freeze
+  EVENT_KEYS = EVENT_PATHS.keys.freeze
+  ISSUE_DETAIL_EVENTS = EVENT_PATHS.select do |key, path|
+    key != 'issue_updated' && path.first(2) == %w[issue updated]
+  end.keys.freeze
+  ISSUE_UPDATE_PARENT_PATH = %w[issue updated enabled].freeze
   DEFAULT_DISABLED_EVENTS = %w[wiki_deleted news_deleted time_entry_deleted version_deleted].freeze
 
   class SlackApiError < StandardError
@@ -144,18 +171,35 @@ module RedmineSlackNotification
     project_config = projects[project.identifier.to_s] if projects.is_a?(Hash) && project
     project_events = project_config['events'] if project_config.is_a?(Hash)
     events = config['events']
-    if ISSUE_DETAIL_EVENTS.include?(key)
-      return false unless configured_event_enabled?(project_events, events, 'issue_updated', default: true)
+    if key == 'issue_updated' || ISSUE_DETAIL_EVENTS.include?(key)
+      return false unless configured_event_enabled?(project_events, events, ISSUE_UPDATE_PARENT_PATH,
+                                                    legacy_key: 'issue_updated', default: true)
     end
 
-    configured_event_enabled?(project_events, events, key, default: !DEFAULT_DISABLED_EVENTS.include?(key))
+    configured_event_enabled?(project_events, events, EVENT_PATHS.fetch(key),
+                              legacy_key: key == 'issue_updated' ? nil : key,
+                              default: !DEFAULT_DISABLED_EVENTS.include?(key))
   end
 
-  def configured_event_enabled?(project_events, events, key, default:)
-    return project_events[key] != false if project_events.is_a?(Hash) && project_events.key?(key)
-    return events[key] != false if events.is_a?(Hash) && events.key?(key)
+  def configured_event_enabled?(project_events, events, path, legacy_key:, default:)
+    [project_events, events].each do |scope|
+      next unless scope.is_a?(Hash)
+
+      found, value = nested_event_value(scope, path)
+      return value != false if found
+      return scope[legacy_key] != false if legacy_key && scope.key?(legacy_key)
+    end
 
     default
+  end
+
+  def nested_event_value(scope, path)
+    path.each do |part|
+      return [false, nil] unless scope.is_a?(Hash) && scope.key?(part)
+
+      scope = scope[part]
+    end
+    [true, scope]
   end
 
   def enqueue(payload, project:, event: nil, image_names: [], journal_id: nil)

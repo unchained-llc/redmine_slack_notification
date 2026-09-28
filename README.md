@@ -18,42 +18,34 @@ The plugin does not use interactive Slack elements such as buttons, menus, or wo
 
 ## Supported events
 
-| YAML event key | Redmine event | Slack label |
+| YAML path under `events` | Legacy flat key | Redmine event |
 |---|---|---|
-| `issue_created` | Issue created | 🆕 Issue created |
-| `issue_updated` | Parent switch for all Issue updates; also covers other details such as category or tracker | 🔄 Issue updated |
-| `issue_deleted` | Issue deleted | 🗑️ Issue deleted |
-| `comment_added` | Issue comment added | 💬 Comment added |
-| `relation_added` | Issue relation added | 🔄 Issue updated |
-| `relation_removed` | Issue relation removed | 🔄 Issue updated |
-| `status_changed` | Issue status changed | 🔄 Issue updated |
-| `assignee_changed` | Issue assignee changed | 🔄 Issue updated |
-| `priority_changed` | Issue priority changed | 🔄 Issue updated |
-| `due_date_changed` | Issue due date changed | 🔄 Issue updated |
-| `start_date_changed` | Issue start date changed | 🔄 Issue updated |
-| `version_changed` | Issue target version changed | 🔄 Issue updated |
-| `subject_changed` | Issue subject changed | 🔄 Issue updated |
-| `description_changed` | Issue description changed | 🔄 Issue updated |
-| `custom_field_changed` | Issue custom field changed | 🔄 Issue updated |
-| `attachment_added` / `attachment_removed` | Issue attachment added / removed | 🔄 Issue updated |
-| `parent_changed` | Issue parent changed | 🔄 Issue updated |
-| `child_added` / `child_removed` | Child Issue added / removed | 🔄 Issue updated |
-| `wiki_created` | Wiki page created | 📚 Wiki page created |
-| `wiki_updated` | Wiki page updated | ✏️ Wiki page updated |
-| `wiki_deleted` | Wiki page deleted | 🗑️ Wiki page deleted |
-| `news_created` | News created | 📰 News updated |
-| `news_updated` | News updated | 📰 News updated |
-| `news_deleted` | News deleted | 🗑️ News deleted |
-| `news_comment_added` | News comment added | 📰 News updated |
-| `time_entry_created` | Time entry created | ⏱️ Time entry updated |
-| `time_entry_updated` | Time entry updated | ⏱️ Time entry updated |
-| `time_entry_deleted` | Time entry deleted | 🗑️ Time entry deleted |
-| `version_created` | Version created | 🏷️ Version updated |
-| `version_updated` | Version updated | 🏷️ Version updated |
-| `version_deleted` | Version deleted | 🗑️ Version deleted |
-| `project_updated` | Project updated | 🗂️ Project updated |
+| `issue.created` | `issue_created` | Issue created |
+| `issue.updated.enabled` | `issue_updated` | Parent switch for Issue detail changes |
+| `issue.updated.other_changed` | — | Other Issue details, such as category or tracker |
+| `issue.deleted` | `issue_deleted` | Issue deleted |
+| `issue.comment.added` | `comment_added` | Issue comment added |
+| `issue.updated.relation.added` / `.removed` | `relation_added` / `relation_removed` | Issue relation added / removed |
+| `issue.updated.status_changed` | `status_changed` | Issue status changed |
+| `issue.updated.assignee_changed` | `assignee_changed` | Issue assignee changed |
+| `issue.updated.priority_changed` | `priority_changed` | Issue priority changed |
+| `issue.updated.due_date_changed` | `due_date_changed` | Issue due date changed |
+| `issue.updated.start_date_changed` | `start_date_changed` | Issue start date changed |
+| `issue.updated.version_changed` | `version_changed` | Issue target version changed |
+| `issue.updated.subject_changed` | `subject_changed` | Issue subject changed |
+| `issue.updated.description_changed` | `description_changed` | Issue description changed |
+| `issue.updated.custom_field_changed` | `custom_field_changed` | Issue custom field changed |
+| `issue.updated.attachment.added` / `.removed` | `attachment_added` / `attachment_removed` | Issue attachment added / removed |
+| `issue.updated.parent_changed` | `parent_changed` | Issue parent changed |
+| `issue.updated.child.added` / `.removed` | `child_added` / `child_removed` | Child Issue added / removed |
+| `wiki.created` / `.updated` / `.deleted` | `wiki_created` / `wiki_updated` / `wiki_deleted` | Wiki page created / updated / deleted |
+| `news.created` / `.updated` / `.deleted` | `news_created` / `news_updated` / `news_deleted` | News created / updated / deleted |
+| `news.comment.added` | `news_comment_added` | News comment added |
+| `time_entry.created` / `.updated` / `.deleted` | `time_entry_created` / `time_entry_updated` / `time_entry_deleted` | Time entry created / updated / deleted |
+| `version.created` / `.updated` / `.deleted` | `version_created` / `version_updated` / `version_deleted` | Version created / updated / deleted |
+| `project.updated` | `project_updated` | Project updated |
 
-When a comment, Issue attributes, attachments, and relations change in the same Journal, one notification contains only the enabled parts. If all parts are disabled, no notification is sent. `issue_updated` is the parent switch for every Issue detail key (from `relation_added` through `child_removed`): setting it to `false` suppresses all Issue changes even if a detail key is `true`. With `issue_updated: true`, each detail key can independently disable its change. `issue_updated` also covers other Issue details, such as category and tracker changes. `comment_added` remains independent, so a comment can still be sent when Issue updates are disabled. `version_changed` is the Issue target version; `version_updated` is an edit to a Version record.
+When a comment, Issue attributes, attachments, and relations change in the same Journal, one notification contains only the enabled parts. If all parts are disabled, no notification is sent. `events.issue.updated.enabled` is the parent switch for every Issue detail path: setting it to `false` suppresses all Issue detail changes even if a child is `true`. With the parent enabled, `other_changed` controls details without a specific key, such as category or tracker. `issue.comment.added` is independent, so a comment can still be sent when Issue updates are disabled. `news.comment.added` is likewise independent of `news.updated`. `issue.updated.version_changed` is an Issue target version change; `version.updated` is an edit to a Version record.
 
 Deletion of Wiki pages, News, Time entries, and Versions was not previously notified, so their new deletion keys default to `false`. Set a key to `true` to enable it. Deletion notifications link to the containing project view because the deleted record no longer has a usable page.
 
@@ -98,18 +90,28 @@ slack:
   auto_map_users_by_name: true
 
 events:
-  issue_created: true
-  issue_updated: true
-  issue_deleted: false
-  comment_added: false
-  relation_added: false
-  relation_removed: true
+  issue:
+    created: true
+    updated:
+      enabled: true
+      other_changed: true
+      status_changed: true
+      relation:
+        added: false
+        removed: true
+    deleted: false
+    comment:
+      added: false
+  wiki:
+    deleted: false
 
 projects:
   agentic:
     channel_id: 'C0123456789'
     events:
-      comment_added: true
+      issue:
+        comment:
+          added: true
   monitoring:
     channel_id: 'C0234567890'
 
@@ -122,7 +124,7 @@ users:
 
 `projects` keys must be Redmine project identifiers, not project display names. Channel IDs start with `C` for public channels and commonly `G` for private channels.
 
-Set any event key in the table above to `false` to suppress that notification. Missing keys default to `true`, except the new deletion keys that default to `false`. `projects.<identifier>.events` overrides the same global event key for that project. For Issue details, the effective project/global `issue_updated` setting must be enabled before the individual detail setting is considered. Use YAML booleans (`true` or `false`), not quoted strings. Restart Redmine and Sidekiq after editing the configuration; each process caches the YAML.
+Set a leaf in the table above to `false` to suppress that notification. Missing leaves default to `true`, except `wiki.deleted`, `news.deleted`, `time_entry.deleted`, and `version.deleted`, which default to `false`. `projects.<identifier>.events` overrides the matching global leaf; a project must also enable `issue.updated.enabled` to override a globally disabled Issue update parent. Existing flat event keys remain supported at both levels. At the same level, a nested leaf takes precedence over its flat key. For legacy YAML, `issue_updated` controls both the Issue update parent and other Issue details. Use YAML booleans (`true` or `false`), not quoted strings. Restart Redmine and Sidekiq after editing the configuration; each process caches the YAML.
 
 Slack configuration selection order:
 
