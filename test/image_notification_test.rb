@@ -453,7 +453,7 @@ class EventConfigurationTest < Minitest::Test
         'priority_id' => 'priority_changed', 'due_date' => 'due_date_changed',
         'start_date' => 'start_date_changed', 'fixed_version_id' => 'version_changed',
         'subject' => 'subject_changed', 'description' => 'description_changed',
-        'parent_id' => 'parent_changed', 'category_id' => 'issue_updated'
+        'parent_id' => 'parent_changed', 'category_id' => 'category_changed'
       },
       'cf' => { '42' => 'custom_field_changed' }
     }
@@ -488,6 +488,22 @@ class EventConfigurationTest < Minitest::Test
       details: [status, due_date], expected_payload: :comment, expected_details: [due_date],
       expected_event: 'due_date_changed', expected_images: ['screenshot.png'], expected_journal_id: 12
     )
+  end
+
+  def test_category_change_has_its_own_switch
+    category = OpenStruct.new(property: 'attr', prop_key: 'category_id', value: 3)
+    status = OpenStruct.new(property: 'attr', prop_key: 'status_id', value: 2)
+    assert_journal_notification(
+      { 'issue' => { 'updated' => { 'enabled' => true, 'other_changed' => true, 'category_changed' => false } } },
+      details: [category, status], notes: '', expected_payload: :update, expected_details: [status],
+      expected_event: 'status_changed', expected_images: [], expected_journal_id: nil
+    )
+    RedmineSlackNotification.stub(:config, {
+      'events' => { 'issue' => { 'updated' => { 'enabled' => true, 'other_changed' => false, 'category_changed' => true } } }
+    }) do
+      assert RedmineSlackNotification.event_enabled?(project, 'category_changed')
+      refute RedmineSlackNotification.event_enabled?(project, 'issue_updated')
+    end
   end
 
   def test_issue_comment_edit_and_removal_have_separate_events
@@ -1170,17 +1186,20 @@ class NotificationDisplaySettingsTest < Minitest::Test
     issue.define_singleton_method(:visible_custom_field_values) do
       [OpenStruct.new(custom_field: OpenStruct.new(id: 42, name: 'Customer'), value: '')]
     end
-    settings = { 'slack' => { 'metadata' => { 'issue' => { 'updated' => {
+    settings = { 'slack' => { 'metadata' => { 'issue' => {
+      'project' => false, 'updater' => false, 'tracker' => false, 'category' => false, 'priority' => false,
       'status' => true, 'target_version' => true,
       'custom_fields' => { 'default' => false, '42' => true }
-    } } } } }
+    } } } }
 
     RedmineSlackNotification.stub(:config, settings) do
-      fields = RedmineSlackNotification::Formatter.issue_payload(
-        issue, actor: nil, action: 'updated'
-      ).dig('attachments', 0, 'blocks').flat_map { |block| block.fetch('fields', []) }
-      assert_equal ["*Status*\nNot set", "*Target version*\nNot set", "*Customer*\nNot set"],
-                   fields.map { |entry| entry['text'] }
+      %w[created updated].each do |action|
+        fields = RedmineSlackNotification::Formatter.issue_payload(
+          issue, actor: nil, action: action
+        ).dig('attachments', 0, 'blocks').flat_map { |block| block.fetch('fields', []) }
+        assert_equal ["*Status*\nNot set", "*Target version*\nNot set", "*Customer*\nNot set"],
+                     fields.map { |entry| entry['text'] }, action
+      end
     end
   end
 
@@ -1195,8 +1214,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
                            status: OpenStruct.new(name: 'In progress'),
                            fixed_version: OpenStruct.new(name: 'Release 2'))
     settings = { 'slack' => { 'metadata' => { 'issue' => {
-      'created' => { 'project' => true, 'status' => false },
-      'updated' => { 'project' => false, 'status' => true, 'target_version' => true }
+      'project' => false, 'status' => true, 'target_version' => true
     } } } }
 
     RedmineSlackNotification.stub(:config, settings) do
@@ -1221,17 +1239,30 @@ class NotificationDisplaySettingsTest < Minitest::Test
     end
   end
 
-  def test_issue_change_details_switch_hides_deltas_but_keeps_updated_metadata_and_comment
+  def test_legacy_issue_metadata_action_maps_remain_readable
+    settings = { 'slack' => { 'metadata' => { 'issue' => {
+      'created' => { 'project' => true, 'status' => false },
+      'updated' => { 'project' => false, 'status' => true }
+    } } } }
+    RedmineSlackNotification.stub(:config, settings) do
+      assert RedmineSlackNotification::Formatter.metadata_enabled?('issue', 'project', action: 'created')
+      refute RedmineSlackNotification::Formatter.metadata_enabled?('issue', 'project', action: 'updated')
+      assert RedmineSlackNotification::Formatter.metadata_enabled?('issue', 'status', action: 'updated')
+    end
+  end
+
+  def test_hidden_issue_changes_switch_keeps_visible_changes_and_description_diff
     value = ->(string) { PresenceValue.new(string) }
     details = [
       OpenStruct.new(property: 'attr', prop_key: 'description', old_value: value.call('before'), value: value.call('after')),
-      OpenStruct.new(property: 'attr', prop_key: 'fixed_version_id', old_value: value.call('1'), value: value.call('2'))
+      OpenStruct.new(property: 'attr', prop_key: 'fixed_version_id', old_value: value.call('1'), value: value.call('2')),
+      OpenStruct.new(property: 'attr', prop_key: 'status_id', old_value: value.call('1'), value: value.call('2'))
     ]
     issue = OpenStruct.new(id: 7, subject: 'Subject', description: 'after',
                            project: OpenStruct.new(name: 'Agentic'), tracker: OpenStruct.new(name: 'Task'),
-                           fixed_version: OpenStruct.new(name: 'Release 2'))
-    settings = { 'slack' => { 'issue_change_details' => false,
-                              'metadata' => { 'issue' => { 'updated' => { 'target_version' => true } } } } }
+                           fixed_version: OpenStruct.new(name: 'Release 2'), status: OpenStruct.new(name: 'Closed'))
+    settings = { 'slack' => { 'issue_changes_when_hidden' => false,
+                              'metadata' => { 'issue' => { 'target_version' => true, 'status' => false } } } }
 
     RedmineSlackNotification.stub(:config, settings) do
       heading = ->(block) { block['text']['text'] if block['text'].is_a?(Hash) }
@@ -1240,17 +1271,16 @@ class NotificationDisplaySettingsTest < Minitest::Test
         blocks = payload.dig('attachments', 0, 'blocks')
         assert blocks.flat_map { |block| block.fetch('fields', []) }
                      .any? { |field| field['text'] == "*Target version*\nRelease 2" }
-        refute blocks.any? { |block| heading.call(block) == '*Changes*' }
-        refute blocks.any? { |block| block['type'] == 'markdown' && block['text'].include?('diff') }
+        assert blocks.any? { |block| heading.call(block) == '*Changes*' }
+        assert blocks.any? { |block| block['type'] == 'markdown' && block['text'].include?('diff') }
+        change_fields = blocks.flat_map { |block| block.fetch('fields', []) }.map { |field| field['text'] }
+        assert change_fields.any? { |field| field.start_with?('*Target version*') && field.include?('→') }
+        refute change_fields.any? { |field| field.start_with?('*Status*') }
       end
       combined_blocks = RedmineSlackNotification::Formatter.journal_payload(
         issue, actor: nil, notes: 'Comment', details: details
       ).dig('attachments', 0, 'blocks')
       assert combined_blocks.any? { |block| heading.call(block).to_s.include?('Comment') }
-      metadata_only = RedmineSlackNotification::Formatter.journal_payload(
-        issue, actor: nil, notes: '', details: details
-      ).dig('attachments', 0, 'blocks')
-      assert_equal 1, metadata_only.count { |block| block['type'] == 'divider' }
     end
   end
 
@@ -1350,7 +1380,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
     end
   end
 
-  def test_issue_metadata_is_shown_on_creation_but_not_repeated_on_updates_or_comments
+  def test_issue_metadata_is_shown_on_creation_and_updates_but_not_comments
     project = OpenStruct.new(name: 'Agentic')
     issue = OpenStruct.new(id: 7, subject: 'Subject', description: '', project: project,
                            tracker: OpenStruct.new(name: 'Task'))
@@ -1377,7 +1407,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
       )
       [updated, commented].each do |message|
         blocks = message.dig('attachments', 0, 'blocks')
-        refute blocks.any? { |block| block.dig('text', 'text') == '*Metadata*' }
+        assert blocks.any? { |block| block.dig('text', 'text') == '*Metadata*' }
         assert blocks.any? { |block| block.dig('text', 'text') == '*Changes*' }
       end
     end

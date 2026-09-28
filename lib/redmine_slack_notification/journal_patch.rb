@@ -83,6 +83,7 @@ module RedmineSlackNotification
           'status_id' => 'status_changed',
           'assigned_to_id' => 'assignee_changed',
           'priority_id' => 'priority_changed',
+          'category_id' => 'category_changed',
           'due_date' => 'due_date_changed',
           'start_date' => 'start_date_changed',
           'fixed_version_id' => 'version_changed',
