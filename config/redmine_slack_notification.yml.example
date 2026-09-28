@@ -30,6 +30,24 @@ slack:
       tracker: true
       category: true
       priority: true
+      # Additional Issue fields are opt-in to preserve the compact default card.
+      status: false
+      assignee: false
+      author: false
+      target_version: false
+      start_date: false
+      due_date: false
+      estimated_hours: false
+      done_ratio: false
+      parent_issue: false
+      children: false
+      relations: false
+      attachments: false
+      watchers: false
+      # true shows all visible fields; or use IDs to choose individual fields.
+      custom_fields:
+        default: false
+        '42': false
     wiki:
       project: true
       updater: true
@@ -53,6 +71,27 @@ slack:
     project:
       project: true
       updater: true
+  # Issue updates have a separate Changes section. All keys default to true.
+  issue_changes:
+    status: true
+    assignee: true
+    priority: true
+    category: true
+    tracker: true
+    target_version: true
+    start_date: true
+    due_date: true
+    estimated_hours: true
+    done_ratio: true
+    parent_issue: true
+    child_issue: true
+    subject: true
+    description: true
+    attachments: true
+    relations: true
+    custom_fields:
+      default: true
+      '42': true
 
 # All displayed notification wording is optional. The values below reproduce
 # the built-in defaults; edit individual keys as needed. %{...} are placeholders.
@@ -150,6 +189,13 @@ messages:
     location: Changed location
     hours: Hours
     spent_on: Spent on
+    author: Author
+    estimated_hours: Estimated hours
+    done_ratio: Done ratio
+    children: Child issues
+    relations: Related issues
+    attachments: Attachments
+    watchers: Watchers
   relations:
     relates: Related
     duplicates: Duplicates
