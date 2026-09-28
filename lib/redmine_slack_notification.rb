@@ -6,6 +6,12 @@ require 'uri'
 require 'yaml'
 
 module RedmineSlackNotification
+  EVENT_KEYS = %w[
+    issue_created issue_updated issue_deleted comment_added
+    wiki_created wiki_updated news_created news_updated news_comment_added
+    time_entry_created time_entry_updated version_created version_updated project_updated
+  ].freeze
+
   class SlackApiError < StandardError
     attr_reader :code
 
@@ -68,8 +74,24 @@ module RedmineSlackNotification
     bot_token.present? && channel_id(project).present?
   end
 
-  def enqueue(payload, project:, image_names: [], journal_id: nil)
+  def event_enabled?(project, event)
+    key = event.to_s
+    raise ArgumentError, "Unknown Slack notification event: #{key}" unless EVENT_KEYS.include?(key)
+
+    projects = config['projects']
+    project_config = projects[project.identifier.to_s] if projects.is_a?(Hash) && project
+    project_events = project_config['events'] if project_config.is_a?(Hash)
+    return project_events[key] != false if project_events.is_a?(Hash) && project_events.key?(key)
+
+    events = config['events']
+    return events[key] != false if events.is_a?(Hash) && events.key?(key)
+
+    true
+  end
+
+  def enqueue(payload, project:, event: nil, image_names: [], journal_id: nil)
     return unless project
+    return if event && !event_enabled?(project, event)
 
     RedmineSlackNotificationJob.perform_later(payload, project.id, image_names, journal_id)
   end

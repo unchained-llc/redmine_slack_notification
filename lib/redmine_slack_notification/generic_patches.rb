@@ -22,7 +22,7 @@ module RedmineSlackNotification
           project: project, actor: respond_to?(:author) ? author : User.current,
           summary: respond_to?(:description) ? description : nil,
           notes: nil
-        ), project: project
+        ), project: project, event: "news_#{action}"
       )
     end
   end
@@ -44,7 +44,7 @@ module RedmineSlackNotification
         RedmineSlackNotification::Formatter.generic_payload(
           noun: noun, action: action, subject: "##{id}", url: RedmineSlackNotification::Formatter.url("/projects/#{project.identifier}/time_entries"),
           project: project, actor: user || User.current, fields: fields, notes: comments
-        ), project: project
+        ), project: project, event: "time_entry_#{action}"
       )
     end
   end
@@ -66,7 +66,7 @@ module RedmineSlackNotification
         RedmineSlackNotification::Formatter.generic_payload(
           noun: noun, action: action, subject: name, url: RedmineSlackNotification::Formatter.url("/versions/#{id}"),
           project: project, actor: User.current, fields: fields, summary: description
-        ), project: project
+        ), project: project, event: "version_#{action}"
       )
     end
   end
@@ -100,7 +100,7 @@ module RedmineSlackNotification
           url: RedmineSlackNotification::Formatter.url("/news/#{news.id}"), project: project,
           actor: respond_to?(:author) ? author : User.current,
           notes: comment_body
-        ), project: project
+        ), project: project, event: 'news_comment_added'
       )
     end
   end
@@ -118,7 +118,7 @@ module RedmineSlackNotification
           noun: 'Project', action: 'updated', subject: name,
           url: RedmineSlackNotification::Formatter.url("/projects/#{identifier}"), project: self,
           actor: User.current, summary: description
-        ), project: self
+        ), project: self, event: 'project_updated'
       )
     end
   end

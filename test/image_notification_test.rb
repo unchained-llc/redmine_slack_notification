@@ -11,6 +11,7 @@ end
 
 class Issue
   attr_reader :id
+  attr_accessor :project
 
   def initialize(id, private_issue: false)
     @id = id
@@ -22,9 +23,133 @@ class Issue
   end
 end
 
+class RedmineSlackNotificationJob
+  def self.perform_later(*)
+  end
+end
+
 class Journal
   def self.find_by(id:)
     nil
+  end
+end
+
+require_relative '../lib/redmine_slack_notification'
+
+class EventConfigurationTest < Minitest::Test
+  class TestJournal < Journal
+    attr_accessor :journalized, :notes, :details, :user, :id
+
+    def private_notes?
+      false
+    end
+
+    def self.after_create_commit(*)
+    end
+
+    include RedmineSlackNotification::JournalPatch
+  end
+
+  def project
+    OpenStruct.new(id: 7, identifier: 'agentic')
+  end
+
+  def journal
+    issue = Issue.new(7098)
+    issue.project = project
+    item = TestJournal.new
+    item.journalized = issue
+    item.notes = 'Comment ![](screenshot.png)'
+    item.details = [:changed]
+    item.user = OpenStruct.new(name: 'Kota')
+    item.id = 12
+    item
+  end
+
+  def test_events_default_to_enabled_and_project_overrides_global_setting
+    settings = {
+      'events' => { 'comment_added' => false, 'issue_updated' => true },
+      'projects' => { 'agentic' => { 'events' => { 'comment_added' => true, 'issue_updated' => false } } }
+    }
+    RedmineSlackNotification.stub(:config, settings) do
+      assert RedmineSlackNotification.event_enabled?(project, 'comment_added')
+      refute RedmineSlackNotification.event_enabled?(project, 'issue_updated')
+      assert RedmineSlackNotification.event_enabled?(project, 'wiki_created')
+      refute RedmineSlackNotification.event_enabled?(OpenStruct.new(identifier: 'other'), 'comment_added')
+    end
+  end
+
+  def test_example_yaml_lists_every_supported_event
+    example = YAML.safe_load(File.read(File.expand_path('../config/redmine_slack_notification.yml.example', __dir__)))
+    assert_equal RedmineSlackNotification::EVENT_KEYS.sort, example.fetch('events').keys.sort
+    assert example.fetch('events').values.all? { |value| value == true }
+  end
+
+  def test_disabled_event_is_not_enqueued
+    RedmineSlackNotification.stub(:config, { 'events' => { 'issue_created' => false } }) do
+      RedmineSlackNotificationJob.stub(:perform_later, ->(*) { flunk 'disabled event was enqueued' }) do
+        RedmineSlackNotification.enqueue({ 'text' => 'issue' }, project: project, event: 'issue_created')
+      end
+    end
+  end
+
+  def test_comment_only_event_omits_issue_changes
+    assert_journal_notification(
+      { 'issue_updated' => false },
+      expected_payload: :comment, expected_details: [], expected_event: 'comment_added',
+      expected_images: ['screenshot.png'], expected_journal_id: 12
+    )
+  end
+
+  def test_issue_update_only_event_omits_comment_and_image
+    assert_journal_notification(
+      { 'comment_added' => false },
+      expected_payload: :update, expected_details: [:changed], expected_event: 'issue_updated',
+      expected_images: [], expected_journal_id: nil
+    )
+  end
+
+  def test_both_enabled_keep_combined_notification
+    assert_journal_notification(
+      {}, expected_payload: :comment, expected_details: [:changed],
+      expected_event: 'issue_updated', expected_images: ['screenshot.png'], expected_journal_id: 12
+    )
+  end
+
+  def test_both_disabled_send_nothing
+    RedmineSlackNotification.stub(:config, { 'events' => { 'comment_added' => false, 'issue_updated' => false } }) do
+      RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'disabled journal was enqueued' }) do
+        journal.send(:notify_slack_journal_created)
+      end
+    end
+  end
+
+  private
+
+  def assert_journal_notification(settings, expected_payload:, expected_details:, expected_event:, expected_images:, expected_journal_id:)
+    calls = []
+    comment_payload = ->(_issue, actor:, notes:, details:) { calls << [:comment, details, notes]; :comment }
+    update_payload = ->(_issue, actor:, action:, details:) { calls << [:update, details, action]; :update }
+    enqueue = ->(payload, **options) { calls << [:enqueue, payload, options] }
+    RedmineSlackNotification.stub(:config, { 'events' => settings }) do
+      RedmineSlackNotification::Formatter.stub(:journal_payload, comment_payload) do
+        RedmineSlackNotification::Formatter.stub(:issue_payload, update_payload) do
+          RedmineSlackNotification.stub(:enqueue, enqueue) do
+            journal.send(:notify_slack_journal_created)
+          end
+        end
+      end
+    end
+    assert_equal expected_payload, calls[0][0]
+    assert_equal expected_details, calls[0][1]
+    assert_equal expected_payload, calls[1][1]
+    assert_equal expected_event, calls[1][2][:event]
+    assert_equal expected_images, calls[1][2][:image_names]
+    if expected_journal_id.nil?
+      assert_nil calls[1][2][:journal_id]
+    else
+      assert_equal expected_journal_id, calls[1][2][:journal_id]
+    end
   end
 end
 
@@ -37,8 +162,6 @@ module Setting
     'wac.example.com'
   end
 end
-
-require_relative '../lib/redmine_slack_notification'
 
 class ImageNotificationTest < Minitest::Test
   def payload

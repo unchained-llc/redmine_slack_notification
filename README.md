@@ -18,20 +18,24 @@ The plugin does not use interactive Slack elements such as buttons, menus, or wo
 
 ## Supported events
 
-| Redmine event | Slack label |
-|---|---|
-| Issue created | 🆕 Issue created |
-| Issue updated | 🔄 Issue updated |
-| Issue deleted | 🗑️ Issue deleted |
-| Comment added | 💬 Comment added |
-| Wiki page created | 📚 Wiki page created |
-| Wiki page updated | ✏️ Wiki page updated |
-| News created or updated | 📰 News updated |
-| Time entry created or updated | ⏱️ Time entry updated |
-| Version created or updated | 🏷️ Version updated |
-| Project updated | 🗂️ Project updated |
+| YAML event key | Redmine event | Slack label |
+|---|---|---|
+| `issue_created` | Issue created | 🆕 Issue created |
+| `issue_updated` | Issue attributes updated | 🔄 Issue updated |
+| `issue_deleted` | Issue deleted | 🗑️ Issue deleted |
+| `comment_added` | Issue comment added | 💬 Comment added |
+| `wiki_created` | Wiki page created | 📚 Wiki page created |
+| `wiki_updated` | Wiki page updated | ✏️ Wiki page updated |
+| `news_created` | News created | 📰 News updated |
+| `news_updated` | News updated | 📰 News updated |
+| `news_comment_added` | News comment added | 📰 News updated |
+| `time_entry_created` | Time entry created | ⏱️ Time entry updated |
+| `time_entry_updated` | Time entry updated | ⏱️ Time entry updated |
+| `version_created` | Version created | 🏷️ Version updated |
+| `version_updated` | Version updated | 🏷️ Version updated |
+| `project_updated` | Project updated | 🗂️ Project updated |
 
-When a comment and Issue attributes are changed in the same Journal, one notification contains both the comment and the attribute changes.
+When a comment and Issue attributes are changed in the same Journal, one notification contains both if both events are enabled. If only one is enabled, the notification contains only that part. If both are disabled, no notification is sent.
 
 Wiki notifications do not include the full Wiki body. They include the Wiki edit comment when one is provided; otherwise, they report that the Wiki content was updated.
 
@@ -72,9 +76,16 @@ slack:
   bot_token: 'xoxb-REPLACE-ME'
   default_channel_id: 'C0123456789'
 
+events:
+  issue_created: true
+  issue_updated: true
+  comment_added: false
+
 projects:
   agentic:
     channel_id: 'C0123456789'
+    events:
+      comment_added: true
   monitoring:
     channel_id: 'C0234567890'
 
@@ -85,6 +96,8 @@ users:
 ```
 
 `projects` keys must be Redmine project identifiers, not project display names. Channel IDs start with `C` for public channels and commonly `G` for private channels.
+
+Set any event key in the table above to `false` to suppress that notification. Missing keys default to `true`. `projects.<identifier>.events` overrides the global `events` value for that project. Use YAML booleans (`true` or `false`), not quoted strings. Restart Redmine and Sidekiq after editing the configuration; each process caches the YAML.
 
 Slack configuration selection order:
 

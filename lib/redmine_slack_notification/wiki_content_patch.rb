@@ -28,7 +28,7 @@ module RedmineSlackNotification
       author = respond_to?(:author) ? self.author : User.current
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.wiki_payload(self, project, actor: author, action: action),
-        project: project
+        project: project, event: "wiki_#{action}"
       )
     end
   end

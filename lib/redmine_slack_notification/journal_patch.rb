@@ -17,28 +17,26 @@ module RedmineSlackNotification
       return unless issue.is_a?(Issue)
       return if issue.is_private? || private_notes?
 
-      payload = if notes.to_s.strip.present?
+      comment_enabled = !notes.to_s.strip.empty? && RedmineSlackNotification.event_enabled?(issue.project, 'comment_added')
+      update_enabled = details.any? && RedmineSlackNotification.event_enabled?(issue.project, 'issue_updated')
+      return unless comment_enabled || update_enabled
+
+      payload = if comment_enabled
                   RedmineSlackNotification::Formatter.journal_payload(
-                    issue,
-                    actor: user,
-                    notes: notes,
-                    details: details
-                  )
-                elsif details.any?
-                  RedmineSlackNotification::Formatter.issue_payload(
-                    issue,
-                    actor: user,
-                    action: 'updated',
-                    details: details
+                    issue, actor: user, notes: notes,
+                    details: update_enabled ? details : []
                   )
                 else
-                  return
+                  RedmineSlackNotification::Formatter.issue_payload(
+                    issue, actor: user, action: 'updated', details: details
+                  )
                 end
       RedmineSlackNotification.enqueue(
         payload,
         project: issue.project,
-        image_names: RedmineSlackNotification::Formatter.image_references(notes),
-        journal_id: id
+        event: update_enabled ? 'issue_updated' : 'comment_added',
+        image_names: comment_enabled ? RedmineSlackNotification::Formatter.image_references(notes) : [],
+        journal_id: comment_enabled ? id : nil
       )
     end
   end
