@@ -56,7 +56,8 @@ module RedmineSlackNotification
         'hours' => 'Hours', 'spent_on' => 'Spent on', 'author' => 'Author',
         'estimated_hours' => 'Estimated hours', 'done_ratio' => 'Done ratio',
         'children' => 'Child issues', 'relations' => 'Related issues',
-        'attachments' => 'Attachments', 'watchers' => 'Watchers'
+        'attachments' => 'Attachments', 'watchers' => 'Watchers',
+        'custom_fields' => 'Custom fields'
       },
       'relations' => {
         'relates' => 'Related', 'duplicates' => 'Duplicates', 'duplicated' => 'Duplicated by', 'blocks' => 'Blocks',
@@ -209,21 +210,21 @@ module RedmineSlackNotification
           blocks.insert(2, { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => "*#{text(section_label('comment'))}*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}" } })
         end
       end
-      if action != 'created' && description_detail && issue_change_enabled?(description_detail)
+      if action != 'created' && description_detail && issue_change_details?
         blocks.insert(2, *updated_body_blocks(section_label('description'), description_detail.old_value, description_detail.value,
                                               blocks: blocks, full_heading: section_label('summary'), full_text: description,
                                               diff_kind: :issue_description))
       end
 
-      changes = change_fields(issue, details)
+      changes = issue_change_details? ? change_fields(issue, details) : []
       if changes.present?
         blocks << { 'type' => 'divider' }
         blocks << section_text("*#{text(section_label('changes'))}*")
         blocks.concat(change_field_blocks(changes))
       end
 
-      if action == 'created'
-        append_metadata(blocks, 'issue', metadata_fields(issue, actor))
+      if %w[created updated].include?(action)
+        append_metadata(blocks, 'issue', metadata_fields(issue, actor, action), action: action)
       end
 
       payload(title, blocks: blocks)
@@ -257,16 +258,17 @@ module RedmineSlackNotification
       end
 
       description_detail = details.find { |detail| detail.property == 'attr' && detail.prop_key == 'description' }
-      if description_detail && issue_change_enabled?(description_detail)
+      if description_detail && issue_change_details?
         blocks.concat(updated_body_blocks(section_label('description'), description_detail.old_value, description_detail.value,
                                           blocks: blocks, full_heading: section_label('summary'), diff_kind: :issue_description))
       end
-      changes = change_fields(issue, details)
+      changes = issue_change_details? ? change_fields(issue, details) : []
       if changes.present?
         blocks << { 'type' => 'divider' }
         blocks << section_text("*#{text(section_label('changes'))}*")
         blocks.concat(change_field_blocks(changes))
       end
+      append_metadata(blocks, 'issue', metadata_fields(issue, actor, 'updated'), action: 'updated') if combined_update
       payload(fallback, blocks: blocks)
     end
 
@@ -486,7 +488,7 @@ module RedmineSlackNotification
       { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => value } }
     end
 
-    def metadata_enabled?(kind, key)
+    def metadata_enabled?(kind, key, action: nil)
       slack = RedmineSlackNotification.config['slack']
       settings = slack['metadata'] if slack.is_a?(Hash)
       return false if settings == false
@@ -494,28 +496,39 @@ module RedmineSlackNotification
       group = settings[kind] if settings.is_a?(Hash)
       return false if group == false
 
-      if kind == 'issue' && ISSUE_OPTIONAL_METADATA_KEYS.include?(key)
+      if kind == 'issue'
+        group = if group.is_a?(Hash) && group.key?(action)
+                  group[action]
+                elsif action == 'created'
+                  group # Legacy flat issue metadata settings apply to creation only.
+                end
+        return false if group == false
+        return true if group == true
+
+        default = action == 'created' && !ISSUE_OPTIONAL_METADATA_KEYS.include?(key)
         value = group[key] if group.is_a?(Hash)
+        return default if value.nil?
+
         return value == true || (key == 'custom_fields' && value.is_a?(Hash))
       end
 
       !group.is_a?(Hash) || group[key] != false
     end
 
-    def append_metadata(blocks, kind, entries)
+    def append_metadata(blocks, kind, entries, action: nil)
       shown = entries.each_with_object([]) do |(key, value, label), visible|
-        visible << field(label || field_label(key), value) if metadata_enabled?(kind, key)
+        visible << field(label || field_label(key), value) if metadata_enabled?(kind, key, action: action)
       end
       return if shown.empty?
 
-      blocks << { 'type' => 'divider' }
+      blocks << { 'type' => 'divider' } unless blocks.last&.dig('type') == 'divider'
       blocks << section_text("*#{text(section_label('metadata'))}*")
       shown.each_slice(10) do |slice|
         blocks << { 'type' => 'section', 'expand' => true, 'fields' => slice }
       end
     end
 
-    def metadata_fields(issue, actor)
+    def metadata_fields(issue, actor, action)
       fields = [
         ['project', text(issue.project.name)],
         ['updater', text(actor&.name || message('values', 'unknown'))],
@@ -539,22 +552,28 @@ module RedmineSlackNotification
         'watchers' => -> { issue.visible_watcher_users.map { |watcher| text(watcher.name) }.join(', ') }
       }
       optional.each do |key, getter|
-        next unless metadata_enabled?('issue', key)
+        next unless metadata_enabled?('issue', key, action: action)
         accessor = { 'parent_issue' => :parent, 'target_version' => :fixed_version,
                      'assignee' => :assigned_to, 'watchers' => :visible_watcher_users }.fetch(key, key)
         next unless issue.respond_to?(accessor)
 
         value = getter.call
-        fields << [key, value.to_s[0, 1800]] unless value.nil? || value.to_s.empty?
+        fallback = %w[children relations attachments watchers].include?(key) ? 'none' : 'unset'
+        fields << [key, value.to_s.empty? ? text(message('values', fallback)) : value.to_s[0, 1800]]
       end
-      if issue.respond_to?(:visible_custom_field_values) && metadata_enabled?('issue', 'custom_fields')
+      if issue.respond_to?(:visible_custom_field_values) && metadata_enabled?('issue', 'custom_fields', action: action)
+        count = fields.length
         issue.visible_custom_field_values.each do |custom_value|
           custom_field = custom_value.custom_field
-          next unless custom_field && custom_field_enabled?('metadata', custom_field.id)
+          next unless custom_field && custom_field_enabled?(action, custom_field.id)
 
           value = Array(custom_value.value).reject { |item| item.to_s.empty? }.join(', ')
-          fields << ['custom_fields', text(value[0, 1800]), custom_field.name] unless value.empty?
+          fields << ['custom_fields', value.empty? ? text(message('values', 'unset')) : text(value[0, 1800]), custom_field.name]
         end
+        group = RedmineSlackNotification.config.dig('slack', 'metadata', 'issue')
+        setting = group[action]['custom_fields'] if group.is_a?(Hash) && group[action].is_a?(Hash)
+        setting = true if group.is_a?(Hash) && group[action] == true
+        fields << ['custom_fields', text(message('values', 'none'))] if setting == true && fields.length == count
       end
       fields
     end
@@ -578,35 +597,24 @@ module RedmineSlackNotification
       end.compact.join("\n")
     end
 
-    def custom_field_enabled?(section, id)
-      path = section == 'metadata' ? %w[slack metadata issue custom_fields] : %w[slack issue_changes custom_fields]
-      settings = RedmineSlackNotification.config.dig(*path)
+    def custom_field_enabled?(action, id)
+      group = RedmineSlackNotification.config.dig('slack', 'metadata', 'issue')
+      settings = if group.is_a?(Hash) && group[action].is_a?(Hash) && group[action].key?('custom_fields')
+                   group[action]['custom_fields']
+                 elsif action == 'created' && group.is_a?(Hash)
+                   group['custom_fields']
+                 end
       return settings != false unless settings.is_a?(Hash)
 
       settings.fetch(id.to_s, settings.fetch('default', true)) != false
     end
 
-    def issue_change_enabled?(detail)
-      settings = RedmineSlackNotification.config.dig('slack', 'issue_changes')
-      return false if settings == false
-      return true unless settings.is_a?(Hash)
-
-      key = case detail.property
-            when 'cf' then 'custom_fields'
-            when 'relation' then 'relations'
-            when 'attachment' then 'attachments'
-            else DETAIL_FIELD_KEYS[detail.prop_key]
-            end
-      return true unless key
-      return custom_field_enabled?('issue_changes', detail.prop_key) if key == 'custom_fields'
-
-      settings[key] != false
+    def issue_change_details?
+      RedmineSlackNotification.config.dig('slack', 'issue_change_details') != false
     end
 
     def change_fields(issue, details)
       details.each_with_object([]) do |detail, changes|
-        next unless issue_change_enabled?(detail)
-
         label = detail_label(detail)
         next unless label
 
