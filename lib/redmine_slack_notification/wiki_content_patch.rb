@@ -32,4 +32,25 @@ module RedmineSlackNotification
       )
     end
   end
+
+  module WikiPagePatch
+    def self.included(base)
+      base.after_destroy_commit :notify_slack_wiki_deleted
+    end
+
+    private
+
+    def notify_slack_wiki_deleted
+      project = self.project
+      return unless project
+
+      RedmineSlackNotification.enqueue(
+        RedmineSlackNotification::Formatter.generic_payload(
+          noun: 'Wiki page', action: 'deleted', subject: title,
+          url: RedmineSlackNotification::Formatter.url("/projects/#{project.identifier}/wiki"),
+          project: project, actor: User.current
+        ), project: project, event: 'wiki_deleted'
+      )
+    end
+  end
 end

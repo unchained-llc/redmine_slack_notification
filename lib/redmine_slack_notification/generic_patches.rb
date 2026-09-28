@@ -8,6 +8,7 @@ module RedmineSlackNotification
     def self.included(base)
       base.after_create { notify_slack_generic('News', 'created') }
       base.after_update { notify_slack_generic('News', 'updated') }
+      base.after_destroy_commit { notify_slack_generic('News', 'deleted') }
     end
 
     private
@@ -18,8 +19,9 @@ module RedmineSlackNotification
 
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.generic_payload(
-          noun: noun, action: action, subject: title, url: RedmineSlackNotification::Formatter.url("/news/#{id}"),
-          project: project, actor: respond_to?(:author) ? author : User.current,
+          noun: noun, action: action, subject: title,
+          url: RedmineSlackNotification::Formatter.url(action == 'deleted' ? "/projects/#{project.identifier}/news" : "/news/#{id}"),
+          project: project, actor: action == 'deleted' ? User.current : (respond_to?(:author) ? author : User.current),
           summary: respond_to?(:description) ? description : nil,
           notes: nil
         ), project: project, event: "news_#{action}"
@@ -31,6 +33,7 @@ module RedmineSlackNotification
     def self.included(base)
       base.after_create { notify_slack_generic('Time entry', 'created') }
       base.after_update { notify_slack_generic('Time entry', 'updated') }
+      base.after_destroy_commit { notify_slack_generic('Time entry', 'deleted') }
     end
 
     private
@@ -43,7 +46,7 @@ module RedmineSlackNotification
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.generic_payload(
           noun: noun, action: action, subject: "##{id}", url: RedmineSlackNotification::Formatter.url("/projects/#{project.identifier}/time_entries"),
-          project: project, actor: user || User.current, fields: fields, notes: comments
+          project: project, actor: action == 'deleted' ? User.current : (user || User.current), fields: fields, notes: comments
         ), project: project, event: "time_entry_#{action}"
       )
     end
@@ -53,6 +56,7 @@ module RedmineSlackNotification
     def self.included(base)
       base.after_create { notify_slack_generic('Version', 'created') }
       base.after_update { notify_slack_generic('Version', 'updated') }
+      base.after_destroy_commit { notify_slack_generic('Version', 'deleted') }
     end
 
     private
@@ -64,7 +68,8 @@ module RedmineSlackNotification
       fields = [['ステータス', status.to_s], ['期日', effective_date.to_s]]
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.generic_payload(
-          noun: noun, action: action, subject: name, url: RedmineSlackNotification::Formatter.url("/versions/#{id}"),
+          noun: noun, action: action, subject: name,
+          url: RedmineSlackNotification::Formatter.url(action == 'deleted' ? "/projects/#{project.identifier}/versions" : "/versions/#{id}"),
           project: project, actor: User.current, fields: fields, summary: description
         ), project: project, event: "version_#{action}"
       )

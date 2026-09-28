@@ -110,7 +110,7 @@ module RedmineSlackNotification
       if changes.present?
         blocks << { 'type' => 'divider' }
         blocks << { 'type' => 'section', 'expand' => true, 'text' => { 'type' => 'mrkdwn', 'text' => '*変更内容*' } }
-        blocks << { 'type' => 'section', 'expand' => true, 'fields' => changes.map { |label, value| field(label, value) } }
+        blocks.concat(change_field_blocks(changes))
       end
 
       blocks << { 'type' => 'divider' }
@@ -139,7 +139,7 @@ module RedmineSlackNotification
       if changes.present?
         blocks << { 'type' => 'divider' }
         blocks << section_text('*変更内容*')
-        blocks << { 'type' => 'section', 'expand' => true, 'fields' => changes.map { |label, value| field(label, value) } }
+        blocks.concat(change_field_blocks(changes))
       end
       blocks.concat([
         { 'type' => 'divider' },
@@ -193,6 +193,7 @@ module RedmineSlackNotification
     end
 
     def event_label(noun, action)
+      return "#{noun} deleted" if action == 'deleted'
       return 'News updated' if noun == 'News'
       return 'Time entry updated' if noun == 'Time entry'
       return 'Version updated' if noun == 'Version'
@@ -204,10 +205,10 @@ module RedmineSlackNotification
     def event_icon(action, noun: 'Issue')
       icons = {
         'Issue' => { 'created' => '🆕', 'updated' => '🔄', 'deleted' => '🗑️' },
-        'Wiki page' => { 'created' => '📚', 'updated' => '✏️' },
-        'News' => { 'created' => '📰', 'updated' => '📰' },
-        'Time entry' => { 'created' => '⏱️', 'updated' => '⏱️' },
-        'Version' => { 'created' => '🏷️', 'updated' => '🏷️' },
+        'Wiki page' => { 'created' => '📚', 'updated' => '✏️', 'deleted' => '🗑️' },
+        'News' => { 'created' => '📰', 'updated' => '📰', 'deleted' => '🗑️' },
+        'Time entry' => { 'created' => '⏱️', 'updated' => '⏱️', 'deleted' => '🗑️' },
+        'Version' => { 'created' => '🏷️', 'updated' => '🏷️', 'deleted' => '🗑️' },
         'Project' => { 'updated' => '🗂️' }
       }
       icons.fetch(noun, {}).fetch(action, '🔧')
@@ -250,20 +251,37 @@ module RedmineSlackNotification
     end
 
     def change_fields(issue, details)
-      details.filter_map do |detail|
+      details.each_with_object([]) do |detail, changes|
         label = detail_label(detail)
         next unless label
 
-        if detail.property == 'relation'
-          relation_id = detail.value.presence || detail.old_value
-          action = detail.value.present? ? '追加' : '削除'
-          [label, "#{action}: #{relation_issue_link(relation_id)}"]
-        elsif detail.property == 'attr' && detail.prop_key == 'description'
-          [label, '変更あり']
-        else
-          [label, "#{detail_old_value(detail)} → #{detail_new_value(issue, detail)}"]
-        end
-      end.uniq { |label, _value| label }
+        value = if detail.property == 'relation'
+                  relation_id = detail.value.presence || detail.old_value
+                  action = detail.value.present? ? '追加' : '削除'
+                  "#{action}: #{relation_issue_link(relation_id)}"
+                elsif detail.property == 'attachment'
+                  action = detail.value.present? ? '追加' : '削除'
+                  filename = detail.value.presence || detail.old_value
+                  "#{action}: #{text(filename)}"
+                elsif detail.property == 'attr' && detail.prop_key == 'description'
+                  '変更あり'
+                elsif detail.property == 'attr' && %w[parent_id child_id].include?(detail.prop_key)
+                  "#{issue_reference(detail.old_value)} → #{issue_reference(detail.value)}"
+                else
+                  "#{detail_old_value(detail)} → #{detail_new_value(issue, detail)}"
+                end
+        changes << [label, value]
+      end
+    end
+
+    def change_field_blocks(changes)
+      changes.each_slice(10).map do |slice|
+        { 'type' => 'section', 'expand' => true, 'fields' => slice.map { |label, value| field(label, value) } }
+      end
+    end
+
+    def issue_reference(issue_id)
+      issue_id.present? ? relation_issue_link(issue_id) : 'なし'
     end
 
     def issue_fields(issue, details)
@@ -296,8 +314,9 @@ module RedmineSlackNotification
     end
 
     def detail_label(detail)
-      return detail.prop_key if detail.property == 'cf'
+      return CustomField.find_by(id: detail.prop_key)&.name || detail.prop_key.to_s if detail.property == 'cf'
       return "関連チケット（#{relation_type_label(detail.prop_key)}）" if detail.property == 'relation'
+      return '添付ファイル' if detail.property == 'attachment'
 
       {
         'status_id' => 'ステータス',
@@ -305,6 +324,9 @@ module RedmineSlackNotification
         'assigned_to_id' => '担当者',
         'category_id' => 'カテゴリー',
         'tracker_id' => 'トラッカー',
+        'fixed_version_id' => '対象バージョン',
+        'parent_id' => '親チケット',
+        'child_id' => '子チケット',
         'subject' => '題名',
         'description' => '説明',
         'start_date' => '開始日',
@@ -321,6 +343,7 @@ module RedmineSlackNotification
       when 'assigned_to_id' then user_mention(issue.assigned_to)
       when 'category_id' then text(issue.category&.name || 'なし')
       when 'tracker_id' then text(issue.tracker&.name || 'なし')
+      when 'fixed_version_id' then text(issue.fixed_version&.name || 'なし')
       else text(detail.value.presence || 'なし')
       end
     end
@@ -335,6 +358,7 @@ module RedmineSlackNotification
                when 'assigned_to_id' then User.find_by(id: value)
                when 'category_id' then IssueCategory.find_by(id: value)
                when 'tracker_id' then Tracker.find_by(id: value)
+               when 'fixed_version_id' then Version.find_by(id: value)
                end
       record ? text(record.name) : text(value)
     end

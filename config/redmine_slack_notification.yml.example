@@ -7,7 +7,8 @@ slack:
   bot_token: 'xoxb-REPLACE-ME'
   default_channel_id: 'C0123456789'
 
-# Omitted events default to true. Set an event to false to suppress it.
+# Issue detail events inherit issue_updated when omitted. Newly supported
+# deletion events below default to false; other omitted events default to true.
 events:
   issue_created: true
   issue_updated: true
@@ -15,15 +16,33 @@ events:
   comment_added: true
   relation_added: true
   relation_removed: true
+  status_changed: true
+  assignee_changed: true
+  priority_changed: true
+  due_date_changed: true
+  start_date_changed: true
+  version_changed: true # Issue target version; distinct from version_updated below
+  subject_changed: true
+  description_changed: true
+  custom_field_changed: true
+  attachment_added: true
+  attachment_removed: true
+  parent_changed: true
+  child_added: true
+  child_removed: true
   wiki_created: true
   wiki_updated: true
+  wiki_deleted: false
   news_created: true
   news_updated: true
+  news_deleted: false
   news_comment_added: true
   time_entry_created: true
   time_entry_updated: true
+  time_entry_deleted: false
   version_created: true
   version_updated: true
+  version_deleted: false
   project_updated: true
 
 projects:

@@ -21,23 +21,41 @@ The plugin does not use interactive Slack elements such as buttons, menus, or wo
 | YAML event key | Redmine event | Slack label |
 |---|---|---|
 | `issue_created` | Issue created | 🆕 Issue created |
-| `issue_updated` | Issue attributes updated | 🔄 Issue updated |
+| `issue_updated` | Other Issue details updated (for example category or tracker) | 🔄 Issue updated |
 | `issue_deleted` | Issue deleted | 🗑️ Issue deleted |
 | `comment_added` | Issue comment added | 💬 Comment added |
 | `relation_added` | Issue relation added | 🔄 Issue updated |
 | `relation_removed` | Issue relation removed | 🔄 Issue updated |
+| `status_changed` | Issue status changed | 🔄 Issue updated |
+| `assignee_changed` | Issue assignee changed | 🔄 Issue updated |
+| `priority_changed` | Issue priority changed | 🔄 Issue updated |
+| `due_date_changed` | Issue due date changed | 🔄 Issue updated |
+| `start_date_changed` | Issue start date changed | 🔄 Issue updated |
+| `version_changed` | Issue target version changed | 🔄 Issue updated |
+| `subject_changed` | Issue subject changed | 🔄 Issue updated |
+| `description_changed` | Issue description changed | 🔄 Issue updated |
+| `custom_field_changed` | Issue custom field changed | 🔄 Issue updated |
+| `attachment_added` / `attachment_removed` | Issue attachment added / removed | 🔄 Issue updated |
+| `parent_changed` | Issue parent changed | 🔄 Issue updated |
+| `child_added` / `child_removed` | Child Issue added / removed | 🔄 Issue updated |
 | `wiki_created` | Wiki page created | 📚 Wiki page created |
 | `wiki_updated` | Wiki page updated | ✏️ Wiki page updated |
+| `wiki_deleted` | Wiki page deleted | 🗑️ Wiki page deleted |
 | `news_created` | News created | 📰 News updated |
 | `news_updated` | News updated | 📰 News updated |
+| `news_deleted` | News deleted | 🗑️ News deleted |
 | `news_comment_added` | News comment added | 📰 News updated |
 | `time_entry_created` | Time entry created | ⏱️ Time entry updated |
 | `time_entry_updated` | Time entry updated | ⏱️ Time entry updated |
+| `time_entry_deleted` | Time entry deleted | 🗑️ Time entry deleted |
 | `version_created` | Version created | 🏷️ Version updated |
 | `version_updated` | Version updated | 🏷️ Version updated |
+| `version_deleted` | Version deleted | 🗑️ Version deleted |
 | `project_updated` | Project updated | 🗂️ Project updated |
 
-When a comment, Issue attributes, and relations change in the same Journal, one notification contains only the enabled parts. If all parts are disabled, no notification is sent. `issue_deleted` controls deletion of an Issue; `relation_removed` controls removal of an Issue relation. When a relation key is omitted, it inherits `issue_updated` to preserve existing configurations. An explicit relation key overrides that inherited setting.
+When a comment, Issue attributes, attachments, and relations change in the same Journal, one notification contains only the enabled parts. If all parts are disabled, no notification is sent. Issue detail keys (from `relation_added` through `child_removed`) inherit `issue_updated` when omitted, preserving existing configurations. An explicit detail key overrides that inherited setting. `issue_updated` still controls other Issue details, such as category and tracker changes. `version_changed` is the Issue target version; `version_updated` is an edit to a Version record.
+
+Deletion of Wiki pages, News, Time entries, and Versions was not previously notified, so their new deletion keys default to `false`. Set a key to `true` to enable it. Deletion notifications link to the containing project view because the deleted record no longer has a usable page.
 
 Wiki notifications do not include the full Wiki body. They include the Wiki edit comment when one is provided; otherwise, they report that the Wiki content was updated.
 
@@ -102,7 +120,7 @@ users:
 
 `projects` keys must be Redmine project identifiers, not project display names. Channel IDs start with `C` for public channels and commonly `G` for private channels.
 
-Set any event key in the table above to `false` to suppress that notification. Missing keys default to `true`, except relation keys that inherit `issue_updated` when omitted. `projects.<identifier>.events` overrides the global `events` value for that project. Use YAML booleans (`true` or `false`), not quoted strings. Restart Redmine and Sidekiq after editing the configuration; each process caches the YAML.
+Set any event key in the table above to `false` to suppress that notification. Missing keys default to `true`, except Issue detail keys that inherit `issue_updated` and the new deletion keys that default to `false`. `projects.<identifier>.events` overrides the global `events` value for that project; a project-specific `issue_updated` also takes precedence over global detail keys unless that project sets the detail key explicitly. Use YAML booleans (`true` or `false`), not quoted strings. Restart Redmine and Sidekiq after editing the configuration; each process caches the YAML.
 
 Slack configuration selection order:
 
