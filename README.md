@@ -41,19 +41,21 @@ The plugin does not use interactive Slack elements such as buttons, menus, or wo
 | `issue.updated.child.added` / `.removed` | `child_added` / `child_removed` | Child Issue added / removed |
 | `wiki.created` / `.updated` / `.deleted` | `wiki_created` / `wiki_updated` / `wiki_deleted` | Wiki page created / updated / deleted |
 | `news.created` / `.updated` / `.deleted` | `news_created` / `news_updated` / `news_deleted` | News created / updated / deleted |
-| `news.comment.added` | `news_comment_added` | News comment added |
+| `news.comment.added` / `.updated` | `news_comment_added` / `news_comment_updated` | News comment added / edited |
 | `news.comment.deleted` | `news_comment_deleted` | News comment removed |
 | `time_entry.created` / `.updated` / `.deleted` | `time_entry_created` / `time_entry_updated` / `time_entry_deleted` | Time entry created / updated / deleted |
 | `version.created` / `.updated` / `.deleted` | `version_created` / `version_updated` / `version_deleted` | Version created / updated / deleted |
 | `project.updated` | `project_updated` | Project updated |
 
-When a comment, Issue attributes, attachments, and relations change in the same Journal, one notification contains only the enabled parts. If all parts are disabled, no notification is sent. `events.issue.updated.enabled` is the parent switch for every Issue detail path: setting it to `false` suppresses all Issue detail changes even if a child is `true`. With the parent enabled, `other_changed` controls details without a specific key, such as category or tracker. `issue.comment` settings are independent, so a comment can still be sent when Issue details are disabled. `news.comment` settings are likewise independent of `news.updated`. Redmine edits an Issue comment by updating its Journal; clearing the Journal notes produces `issue.comment.deleted`. News comments have create and destroy actions but no edit action. Deletion notifications do not repeat the removed text. `issue.updated.version_changed` is an Issue target version change; `version.updated` is an edit to a Version record.
+When a comment, Issue attributes, attachments, and relations change in the same Journal, one notification contains only the enabled parts. If all parts are disabled, no notification is sent. `events.issue.updated.enabled` is the parent switch for every Issue detail path: setting it to `false` suppresses all Issue detail changes even if a child is `true`. With the parent enabled, `other_changed` controls details without a specific key, such as category or tracker. `issue.comment` settings are independent, so a comment can still be sent when Issue details are disabled. `news.comment` settings are likewise independent of `news.updated`. Redmine edits an Issue comment by updating its Journal; clearing the Journal notes produces `issue.comment.deleted`. Standard Redmine News screens do not provide comment editing, but updates to a News Comment record trigger `news.comment.updated`. Deletion notifications do not repeat the removed text. `issue.updated.version_changed` is an Issue target version change; `version.updated` is an edit to a Version record.
 
 Deletion of Wiki pages, News, Time entries, and Versions was not previously notified, so their new deletion keys default to `false`. Set a key to `true` to enable it. Deletion notifications link to the containing project view because the deleted record no longer has a usable page.
 
 Wiki notifications do not include the full Wiki body. They include the Wiki edit comment when one is provided; otherwise, they report that the Wiki content was updated.
 
 When an Issue description, News description, or Wiki body changes, its notification includes a line diff inside the existing colored card. A Markdown `diff` code block marks removed lines with `-` and added lines with `+`, with two unchanged lines of context. The full updated body is not repeated. Long lines and large diffs are shortened with an omission notice; the Issue, News, or Wiki title still links to the full content. Wiki comment-only edits do not produce a body diff.
+
+Edited Issue and News comments use the same line diff format. New comments still show their full text; deletion notifications omit removed text.
 
 ## Installation
 

@@ -85,6 +85,7 @@ module RedmineSlackNotification
     def self.included(base)
 
       base.after_create { notify_slack_news_comment }
+      base.after_update_commit :notify_slack_news_comment_updated
       base.after_destroy_commit :notify_slack_news_comment_deleted
     end
 
@@ -128,6 +129,24 @@ module RedmineSlackNotification
           url: RedmineSlackNotification::Formatter.url("/news/#{news.id}"), project: project,
           actor: User.current
         ), project: project, event: 'news_comment_deleted'
+      )
+    end
+
+    def notify_slack_news_comment_updated
+      return unless saved_change_to_content?
+
+      news = respond_to?(:commented) ? commented : nil
+      return unless news.is_a?(News)
+
+      project = news.project
+      return unless project
+
+      RedmineSlackNotification.enqueue(
+        RedmineSlackNotification::Formatter.generic_payload(
+          noun: 'News comment', action: 'updated', subject: news.title,
+          url: RedmineSlackNotification::Formatter.url("/news/#{news.id}"), project: project,
+          actor: User.current, body_diff: [content_before_last_save, content], body_diff_label: 'コメント'
+        ), project: project, event: 'news_comment_updated'
       )
     end
   end

@@ -37,6 +37,7 @@ module RedmineSlackNotification
     'news_updated' => %w[news updated],
     'news_deleted' => %w[news deleted],
     'news_comment_added' => %w[news comment added],
+    'news_comment_updated' => %w[news comment updated],
     'news_comment_deleted' => %w[news comment deleted],
     'time_entry_created' => %w[time_entry created],
     'time_entry_updated' => %w[time_entry updated],
@@ -295,7 +296,7 @@ module RedmineSlackNotification
       markdown_block = block['type'] == 'markdown'
       content = markdown_block ? block['text'] : block.dig('text', 'text')
       next [block] unless content.is_a?(String)
-      next [block] if content.match?(/\A\*{1,2}(?:説明|本文)の差分\*{1,2}\n\n?`{3,}(?:diff)?\n/)
+      next [block] if content.match?(/\A\*{1,2}(?:説明|本文|コメント)の差分\*{1,2}\n\n?`{3,}(?:diff)?\n/)
 
       with_text = lambda do |value|
         markdown_block ? block.merge('text' => value) : block.merge('text' => block['text'].merge('text' => value))
