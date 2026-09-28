@@ -6,7 +6,7 @@ module RedmineSlackNotification
   module JournalPatch
     def self.included(base)
 
-      base.after_create :notify_slack_journal_created
+      base.after_create_commit :notify_slack_journal_created
     end
 
     private
@@ -34,7 +34,12 @@ module RedmineSlackNotification
                 else
                   return
                 end
-      RedmineSlackNotification.enqueue(payload, project: issue.project)
+      RedmineSlackNotification.enqueue(
+        payload,
+        project: issue.project,
+        image_names: RedmineSlackNotification::Formatter.image_references(notes),
+        journal_id: id
+      )
     end
   end
 end

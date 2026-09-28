@@ -11,6 +11,7 @@ The plugin does not use interactive Slack elements such as buttons, menus, or wo
 - Issue, Journal, Wiki, News, Time entry, Version, and Project notifications
 - Slack user mentions when an assignee changes
 - Markdown-to-Slack-mrkdwn conversion for descriptions, comments, and Wiki edit comments
+- Inline PNG/JPEG/GIF images attached to a public Issue comment are shown in Slack
 - Sidekiq-based asynchronous delivery
 - Private Issues and private comments are not sent to Slack
 - Slack API failures do not fail the original Redmine transaction
@@ -93,7 +94,9 @@ Slack configuration selection order:
 4. `slack.default_channel_id`
 5. No notification if the token or channel is missing
 
-The Bot Token requires the `chat:write` scope. The bot must be a member of each target channel.
+The Bot Token requires the `chat:write` scope. To show images from Issue comments, add `files:write` and reinstall the Slack app so the Bot Token gains that scope. The bot must be a member of each target channel.
+
+Comment images are uploaded from the attachments added in the same public Journal, then included in the notification as top-level Slack image blocks at their original Markdown positions. A successful image replaces the source Markdown without an extra attachment link. Image notifications use top-level blocks rather than the colored attachment card. Images over 20 MB and failed uploads remain clickable Redmine attachment links. Images in private Issues or private comments are never uploaded. Already posted Slack notifications are not changed automatically by installing this version.
 
 The configuration file contains credentials and must not be committed to Git. The example file is safe to commit; replace all placeholder values before use.
 
@@ -112,7 +115,7 @@ production:
   - slack
 ```
 
-Slack API delivery errors are logged by the Job and do not make the original Redmine operation fail.
+Slack API delivery errors are logged and retried by Sidekiq; they do not make the original Redmine operation fail. If Slack has not made a newly uploaded image available to Block Kit yet, the same message is retried briefly before the Job fails.
 
 ### Running without Sidekiq
 
