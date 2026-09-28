@@ -21,10 +21,42 @@ class Issue
   def is_private?
     @private_issue
   end
+
+  def self.find_by(id:)
+    nil
+  end
+end
+
+class CustomField
+  def self.find_by(id:)
+    OpenStruct.new(name: '顧客分類')
+  end
+end
+
+class Version
+  def self.find_by(id:)
+    OpenStruct.new(name: '旧版')
+  end
+end
+
+class PresenceValue < String
+  def present?
+    !empty?
+  end
+
+  def presence
+    present? ? self : nil
+  end
 end
 
 class RedmineSlackNotificationJob
   def self.perform_later(*)
+  end
+end
+
+class User
+  def self.current
+    OpenStruct.new(name: 'Kota')
   end
 end
 
@@ -92,7 +124,81 @@ class EventConfigurationTest < Minitest::Test
   def test_example_yaml_lists_every_supported_event
     example = YAML.safe_load(File.read(File.expand_path('../config/redmine_slack_notification.yml.example', __dir__)))
     assert_equal RedmineSlackNotification::EVENT_KEYS.sort, example.fetch('events').keys.sort
-    assert example.fetch('events').values.all? { |value| value == true }
+    assert_equal RedmineSlackNotification::DEFAULT_DISABLED_EVENTS.sort,
+                 example.fetch('events').select { |_key, value| value == false }.keys.sort
+  end
+
+  def test_new_deletion_events_default_to_disabled_and_can_be_overridden
+    RedmineSlackNotification.stub(:config, {}) do
+      RedmineSlackNotification::DEFAULT_DISABLED_EVENTS.each do |event|
+        refute RedmineSlackNotification.event_enabled?(project, event)
+      end
+    end
+    RedmineSlackNotification.stub(:config, { 'projects' => { 'agentic' => { 'events' => { 'wiki_deleted' => true } } } }) do
+      assert RedmineSlackNotification.event_enabled?(project, 'wiki_deleted')
+    end
+  end
+
+  def test_issue_detail_keys_inherit_issue_updated_when_omitted
+    RedmineSlackNotification.stub(:config, { 'events' => { 'issue_updated' => false } }) do
+      RedmineSlackNotification::ISSUE_DETAIL_EVENTS.each do |event|
+        refute RedmineSlackNotification.event_enabled?(project, event), event
+      end
+    end
+  end
+
+  def test_project_can_enable_one_detail_when_global_issue_updates_are_disabled
+    settings = {
+      'events' => { 'issue_updated' => false },
+      'projects' => { 'agentic' => { 'events' => { 'status_changed' => true } } }
+    }
+    RedmineSlackNotification.stub(:config, settings) do
+      assert RedmineSlackNotification.event_enabled?(project, 'status_changed')
+      refute RedmineSlackNotification.event_enabled?(project, 'assignee_changed')
+    end
+  end
+
+  def test_project_issue_update_fallback_takes_precedence_over_global_detail
+    settings = {
+      'events' => { 'status_changed' => true },
+      'projects' => { 'agentic' => { 'events' => { 'issue_updated' => false } } }
+    }
+    RedmineSlackNotification.stub(:config, settings) do
+      refute RedmineSlackNotification.event_enabled?(project, 'status_changed')
+    end
+  end
+
+  def test_each_journal_detail_maps_to_an_independent_event
+    examples = {
+      'attr' => {
+        'status_id' => 'status_changed', 'assigned_to_id' => 'assignee_changed',
+        'priority_id' => 'priority_changed', 'due_date' => 'due_date_changed',
+        'start_date' => 'start_date_changed', 'fixed_version_id' => 'version_changed',
+        'subject' => 'subject_changed', 'description' => 'description_changed',
+        'parent_id' => 'parent_changed', 'category_id' => 'issue_updated'
+      },
+      'cf' => { '42' => 'custom_field_changed' }
+    }
+    item = journal
+    examples.each do |property, fields|
+      fields.each do |key, event|
+        assert_equal event, item.send(:slack_event_for_detail, OpenStruct.new(property: property, prop_key: key, value: 'new'))
+      end
+    end
+    assert_equal 'attachment_added', item.send(:slack_event_for_detail, OpenStruct.new(property: 'attachment', value: 'new.png'))
+    assert_equal 'attachment_removed', item.send(:slack_event_for_detail, OpenStruct.new(property: 'attachment', value: nil))
+    assert_equal 'child_added', item.send(:slack_event_for_detail, OpenStruct.new(property: 'attr', prop_key: 'child_id', value: 7))
+    assert_equal 'child_removed', item.send(:slack_event_for_detail, OpenStruct.new(property: 'attr', prop_key: 'child_id', value: nil))
+  end
+
+  def test_disabled_detail_does_not_hide_enabled_detail
+    status = OpenStruct.new(property: 'attr', prop_key: 'status_id', value: 2)
+    due_date = OpenStruct.new(property: 'attr', prop_key: 'due_date', value: '2026-10-01')
+    assert_journal_notification(
+      { 'status_changed' => false }, details: [status, due_date], notes: '',
+      expected_payload: :update, expected_details: [due_date],
+      expected_event: 'due_date_changed', expected_images: [], expected_journal_id: nil
+    )
   end
 
   def test_disabled_event_is_not_enqueued
@@ -213,6 +319,45 @@ class EventConfigurationTest < Minitest::Test
   end
 end
 
+class DeletionNotificationTest < Minitest::Test
+  def project
+    OpenStruct.new(id: 7, identifier: 'agentic', name: 'Agentic')
+  end
+
+  def test_deleted_records_have_independent_events_and_project_links
+    cases = [
+      [RedmineSlackNotification::NewsPatch, 'news_deleted', { title: 'News', id: 1, description: 'Body' }, 'News', '/news'],
+      [RedmineSlackNotification::TimeEntryPatch, 'time_entry_deleted', { id: 2, hours: 1, spent_on: '2026-09-28', comments: '' }, 'Time entry', '/time_entries'],
+      [RedmineSlackNotification::VersionPatch, 'version_deleted', { id: 3, name: 'v1', status: 'open', effective_date: nil, description: '' }, 'Version', '/versions']
+    ]
+    cases.each do |patch, event, attributes, noun, path|
+      record = OpenStruct.new(attributes.merge(project: project))
+      record.extend(patch)
+      assert_deleted_event(record, :notify_slack_generic, [noun, 'deleted'], event, path)
+    end
+    page = OpenStruct.new(project: project, title: 'Home')
+    page.extend(RedmineSlackNotification::WikiPagePatch)
+    assert_deleted_event(page, :notify_slack_wiki_deleted, [], 'wiki_deleted', '/wiki')
+  end
+
+  private
+
+  def assert_deleted_event(record, method, args, event, path)
+    captured = []
+    payload = ->(**kwargs) { captured << [:payload, kwargs]; :message }
+    enqueue = ->(message, **kwargs) { captured << [:enqueue, message, kwargs] }
+    RedmineSlackNotification::Formatter.stub(:generic_payload, payload) do
+      RedmineSlackNotification.stub(:enqueue, enqueue) do
+        record.send(method, *args)
+      end
+    end
+    assert_equal 'deleted', captured[0][1][:action]
+    assert_includes captured[0][1][:url], path
+    assert_equal event, captured[1][2][:event]
+    assert_equal :message, captured[1][1]
+  end
+end
+
 module Setting
   def self.protocol
     'https'
@@ -247,6 +392,36 @@ class ImageNotificationTest < Minitest::Test
     assert_equal '#6D5DFB', message.dig('attachments', 0, 'color')
     assert_equal [{ 'type' => 'markdown', 'text' => "**追加コメント**\n\n#{notes}" }], message.dig('attachments', 0, 'blocks')
     assert_nil message['blocks']
+  end
+
+  def test_change_fields_are_split_to_fit_slack_section_limit
+    changes = 12.times.map { |index| ["項目#{index}", '変更'] }
+    blocks = RedmineSlackNotification::Formatter.change_field_blocks(changes)
+    assert_equal [10, 2], blocks.map { |block| block.fetch('fields').length }
+    assert_includes blocks.last.fetch('fields').last.fetch('text'), '項目11'
+  end
+
+  def test_deleted_labels_are_distinct_from_updates
+    assert_equal 'News deleted', RedmineSlackNotification::Formatter.event_label('News', 'deleted')
+    assert_equal '🗑️', RedmineSlackNotification::Formatter.event_icon('deleted', noun: 'Wiki page')
+  end
+
+  def test_attachment_parent_version_and_custom_field_changes_have_readable_details
+    value = ->(text) { PresenceValue.new(text) }
+    details = [
+      OpenStruct.new(property: 'attachment', prop_key: '1', old_value: value.call(''), value: value.call('one.png')),
+      OpenStruct.new(property: 'attachment', prop_key: '2', old_value: value.call(''), value: value.call('two.png')),
+      OpenStruct.new(property: 'attr', prop_key: 'parent_id', old_value: value.call(''), value: value.call('7011')),
+      OpenStruct.new(property: 'attr', prop_key: 'fixed_version_id', old_value: value.call('1'), value: value.call('2')),
+      OpenStruct.new(property: 'cf', prop_key: '42', old_value: value.call('A'), value: value.call('B'))
+    ]
+    issue = OpenStruct.new(fixed_version: OpenStruct.new(name: '新版'))
+    changes = RedmineSlackNotification::Formatter.change_fields(issue, details)
+    assert_equal ['添付ファイル', '添付ファイル', '親チケット', '対象バージョン', '顧客分類'], changes.map(&:first)
+    assert_equal ['追加: one.png', '追加: two.png'], changes.first(2).map(&:last)
+    assert_equal 'なし → #7011', changes[2][1]
+    assert_equal '旧版 → 新版', changes[3][1]
+    assert_equal 'A → B', changes[4][1]
   end
 
   def test_long_ordered_list_keeps_the_existing_section_format

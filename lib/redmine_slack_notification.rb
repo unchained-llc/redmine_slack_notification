@@ -8,10 +8,20 @@ require 'yaml'
 module RedmineSlackNotification
   EVENT_KEYS = %w[
     issue_created issue_updated issue_deleted comment_added relation_added relation_removed
-    wiki_created wiki_updated news_created news_updated news_comment_added
-    time_entry_created time_entry_updated version_created version_updated project_updated
+    status_changed assignee_changed priority_changed due_date_changed start_date_changed
+    version_changed subject_changed description_changed custom_field_changed
+    attachment_added attachment_removed parent_changed child_added child_removed
+    wiki_created wiki_updated wiki_deleted news_created news_updated news_deleted news_comment_added
+    time_entry_created time_entry_updated time_entry_deleted
+    version_created version_updated version_deleted project_updated
   ].freeze
-  EVENT_FALLBACKS = { 'relation_added' => 'issue_updated', 'relation_removed' => 'issue_updated' }.freeze
+  ISSUE_DETAIL_EVENTS = %w[
+    relation_added relation_removed status_changed assignee_changed priority_changed
+    due_date_changed start_date_changed version_changed subject_changed description_changed
+    custom_field_changed attachment_added attachment_removed parent_changed child_added child_removed
+  ].freeze
+  EVENT_FALLBACKS = ISSUE_DETAIL_EVENTS.to_h { |event| [event, 'issue_updated'] }.freeze
+  DEFAULT_DISABLED_EVENTS = %w[wiki_deleted news_deleted time_entry_deleted version_deleted].freeze
 
   class SlackApiError < StandardError
     attr_reader :code
@@ -82,14 +92,19 @@ module RedmineSlackNotification
     projects = config['projects']
     project_config = projects[project.identifier.to_s] if projects.is_a?(Hash) && project
     project_events = project_config['events'] if project_config.is_a?(Hash)
-    return project_events[key] != false if project_events.is_a?(Hash) && project_events.key?(key)
+    fallback = EVENT_FALLBACKS[key]
+    if project_events.is_a?(Hash)
+      return project_events[key] != false if project_events.key?(key)
+      return project_events[fallback] != false if fallback && project_events.key?(fallback)
+    end
 
     events = config['events']
-    return events[key] != false if events.is_a?(Hash) && events.key?(key)
+    if events.is_a?(Hash)
+      return events[key] != false if events.key?(key)
+      return events[fallback] != false if fallback && events.key?(fallback)
+    end
 
-    return event_enabled?(project, EVENT_FALLBACKS[key]) if EVENT_FALLBACKS.key?(key)
-
-    true
+    !DEFAULT_DISABLED_EVENTS.include?(key)
   end
 
   def enqueue(payload, project:, event: nil, image_names: [], journal_id: nil)
@@ -294,6 +309,7 @@ module RedmineSlackNotification
     Issue.include RedmineSlackNotification::IssuePatch if defined?(Issue) && !(Issue < RedmineSlackNotification::IssuePatch)
     Journal.include RedmineSlackNotification::JournalPatch if defined?(Journal) && !(Journal < RedmineSlackNotification::JournalPatch)
     WikiContent.include RedmineSlackNotification::WikiContentPatch if defined?(WikiContent) && !(WikiContent < RedmineSlackNotification::WikiContentPatch)
+    WikiPage.include RedmineSlackNotification::WikiPagePatch if defined?(WikiPage) && !(WikiPage < RedmineSlackNotification::WikiPagePatch)
     News.include RedmineSlackNotification::NewsPatch if defined?(News) && !(News < RedmineSlackNotification::NewsPatch)
     TimeEntry.include RedmineSlackNotification::TimeEntryPatch if defined?(TimeEntry) && !(TimeEntry < RedmineSlackNotification::TimeEntryPatch)
     Version.include RedmineSlackNotification::VersionPatch if defined?(Version) && !(Version < RedmineSlackNotification::VersionPatch)

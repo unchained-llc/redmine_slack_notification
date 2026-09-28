@@ -43,9 +43,36 @@ module RedmineSlackNotification
     end
 
     def slack_event_for_detail(detail)
-      return 'issue_updated' unless detail.respond_to?(:property) && detail.property == 'relation'
+      return 'issue_updated' unless detail.respond_to?(:property)
 
-      detail.value.to_s.empty? ? 'relation_removed' : 'relation_added'
+      case detail.property
+      when 'relation'
+        detail.value.to_s.empty? ? 'relation_removed' : 'relation_added'
+      when 'attachment'
+        detail.value.to_s.empty? ? 'attachment_removed' : 'attachment_added'
+      when 'cf'
+        'custom_field_changed'
+      when 'attr'
+        {
+          'status_id' => 'status_changed',
+          'assigned_to_id' => 'assignee_changed',
+          'priority_id' => 'priority_changed',
+          'due_date' => 'due_date_changed',
+          'start_date' => 'start_date_changed',
+          'fixed_version_id' => 'version_changed',
+          'subject' => 'subject_changed',
+          'description' => 'description_changed',
+          'parent_id' => 'parent_changed'
+        }.fetch(detail.prop_key.to_s) do
+          if detail.prop_key.to_s == 'child_id'
+            detail.value.to_s.empty? ? 'child_removed' : 'child_added'
+          else
+            'issue_updated'
+          end
+        end
+      else
+        'issue_updated'
+      end
     end
   end
 end
