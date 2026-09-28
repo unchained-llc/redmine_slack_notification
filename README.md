@@ -10,7 +10,7 @@ The plugin does not use interactive Slack elements such as buttons, menus, or wo
 - A default Slack channel for projects without a project-specific channel
 - Issue, Journal, Wiki, News, Time entry, Version, and Project notifications
 - Slack user mentions when an assignee changes
-- Slack Markdown blocks for all notification text, including descriptions, comments, changes, and metadata
+- Markdown-to-Slack-mrkdwn conversion for descriptions, comments, and Wiki edit comments
 - Inline PNG/JPEG/GIF images attached to a public Issue comment are shown in Slack
 - Sidekiq-based asynchronous delivery
 - Private Issues and private comments are not sent to Slack
@@ -96,9 +96,9 @@ Slack configuration selection order:
 
 The Bot Token requires the `chat:write` scope. To show images from Issue comments, add `files:write` and reinstall the Slack app so the Bot Token gains that scope. The bot must be a member of each target channel.
 
-Comment images are uploaded from the attachments added in the same public Journal, then included in the notification as top-level Slack image blocks at their original Markdown positions. A successful image replaces the source Markdown without an extra attachment link. Images over 20 MB and failed uploads remain clickable Redmine attachment links. Images in private Issues or private comments are never uploaded. Already posted Slack notifications are not changed automatically by installing this version.
+Comment images are uploaded from the attachments added in the same public Journal, then included in the notification as top-level Slack image blocks at their original Markdown positions. A successful image replaces the source Markdown without an extra attachment link. Image notifications use top-level blocks rather than the colored attachment card. Images over 20 MB and failed uploads remain clickable Redmine attachment links. Images in private Issues or private comments are never uploaded. Already posted Slack notifications are not changed automatically by installing this version.
 
-All notification text is sent in top-level Slack `markdown` blocks. Redmine Markdown in descriptions and comments is passed through, so repeated `1.` markers render as a numbered list. Metadata and changes are also formatted as Markdown. Slack limits Markdown blocks to 12,000 characters per message; longer notifications are shortened and end with a link to the full Redmine item.
+Redmine text containing an ordered Markdown list is sent in a Slack `markdown` block inside the existing colored attachment card. Slack renders repeated `1.` markers as a numbered list, as Redmine does. The card header, dividers, and metadata fields keep their existing layout. Uploaded images still appear at their positions between text blocks; because Slack rejects secure image blocks inside a legacy attachment, notifications with images use top-level blocks. Slack limits Markdown blocks to 12,000 characters per message, so longer text uses the existing `mrkdwn` section format.
 
 The configuration file contains credentials and must not be committed to Git. The example file is safe to commit; replace all placeholder values before use.
 
