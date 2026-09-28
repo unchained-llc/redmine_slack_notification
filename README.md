@@ -21,7 +21,7 @@ The plugin does not use interactive Slack elements such as buttons, menus, or wo
 | YAML event key | Redmine event | Slack label |
 |---|---|---|
 | `issue_created` | Issue created | 🆕 Issue created |
-| `issue_updated` | Other Issue details updated (for example category or tracker) | 🔄 Issue updated |
+| `issue_updated` | Parent switch for all Issue updates; also covers other details such as category or tracker | 🔄 Issue updated |
 | `issue_deleted` | Issue deleted | 🗑️ Issue deleted |
 | `comment_added` | Issue comment added | 💬 Comment added |
 | `relation_added` | Issue relation added | 🔄 Issue updated |
@@ -53,7 +53,7 @@ The plugin does not use interactive Slack elements such as buttons, menus, or wo
 | `version_deleted` | Version deleted | 🗑️ Version deleted |
 | `project_updated` | Project updated | 🗂️ Project updated |
 
-When a comment, Issue attributes, attachments, and relations change in the same Journal, one notification contains only the enabled parts. If all parts are disabled, no notification is sent. Issue detail keys (from `relation_added` through `child_removed`) inherit `issue_updated` when omitted, preserving existing configurations. An explicit detail key overrides that inherited setting. `issue_updated` still controls other Issue details, such as category and tracker changes. `version_changed` is the Issue target version; `version_updated` is an edit to a Version record.
+When a comment, Issue attributes, attachments, and relations change in the same Journal, one notification contains only the enabled parts. If all parts are disabled, no notification is sent. `issue_updated` is the parent switch for every Issue detail key (from `relation_added` through `child_removed`): setting it to `false` suppresses all Issue changes even if a detail key is `true`. With `issue_updated: true`, each detail key can independently disable its change. `issue_updated` also covers other Issue details, such as category and tracker changes. `comment_added` remains independent, so a comment can still be sent when Issue updates are disabled. `version_changed` is the Issue target version; `version_updated` is an edit to a Version record.
 
 Deletion of Wiki pages, News, Time entries, and Versions was not previously notified, so their new deletion keys default to `false`. Set a key to `true` to enable it. Deletion notifications link to the containing project view because the deleted record no longer has a usable page.
 
@@ -122,7 +122,7 @@ users:
 
 `projects` keys must be Redmine project identifiers, not project display names. Channel IDs start with `C` for public channels and commonly `G` for private channels.
 
-Set any event key in the table above to `false` to suppress that notification. Missing keys default to `true`, except Issue detail keys that inherit `issue_updated` and the new deletion keys that default to `false`. `projects.<identifier>.events` overrides the global `events` value for that project; a project-specific `issue_updated` also takes precedence over global detail keys unless that project sets the detail key explicitly. Use YAML booleans (`true` or `false`), not quoted strings. Restart Redmine and Sidekiq after editing the configuration; each process caches the YAML.
+Set any event key in the table above to `false` to suppress that notification. Missing keys default to `true`, except the new deletion keys that default to `false`. `projects.<identifier>.events` overrides the same global event key for that project. For Issue details, the effective project/global `issue_updated` setting must be enabled before the individual detail setting is considered. Use YAML booleans (`true` or `false`), not quoted strings. Restart Redmine and Sidekiq after editing the configuration; each process caches the YAML.
 
 Slack configuration selection order:
 

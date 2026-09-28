@@ -21,7 +21,6 @@ module RedmineSlackNotification
     due_date_changed start_date_changed version_changed subject_changed description_changed
     custom_field_changed attachment_added attachment_removed parent_changed child_added child_removed
   ].freeze
-  EVENT_FALLBACKS = ISSUE_DETAIL_EVENTS.to_h { |event| [event, 'issue_updated'] }.freeze
   DEFAULT_DISABLED_EVENTS = %w[wiki_deleted news_deleted time_entry_deleted version_deleted].freeze
 
   class SlackApiError < StandardError
@@ -144,19 +143,19 @@ module RedmineSlackNotification
     projects = config['projects']
     project_config = projects[project.identifier.to_s] if projects.is_a?(Hash) && project
     project_events = project_config['events'] if project_config.is_a?(Hash)
-    fallback = EVENT_FALLBACKS[key]
-    if project_events.is_a?(Hash)
-      return project_events[key] != false if project_events.key?(key)
-      return project_events[fallback] != false if fallback && project_events.key?(fallback)
-    end
-
     events = config['events']
-    if events.is_a?(Hash)
-      return events[key] != false if events.key?(key)
-      return events[fallback] != false if fallback && events.key?(fallback)
+    if ISSUE_DETAIL_EVENTS.include?(key)
+      return false unless configured_event_enabled?(project_events, events, 'issue_updated', default: true)
     end
 
-    !DEFAULT_DISABLED_EVENTS.include?(key)
+    configured_event_enabled?(project_events, events, key, default: !DEFAULT_DISABLED_EVENTS.include?(key))
+  end
+
+  def configured_event_enabled?(project_events, events, key, default:)
+    return project_events[key] != false if project_events.is_a?(Hash) && project_events.key?(key)
+    return events[key] != false if events.is_a?(Hash) && events.key?(key)
+
+    default
   end
 
   def enqueue(payload, project:, event: nil, image_names: [], journal_id: nil)
