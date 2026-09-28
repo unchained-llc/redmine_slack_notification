@@ -80,6 +80,9 @@ class Journal
   end
 end
 
+class News < OpenStruct
+end
+
 require_relative '../lib/redmine_slack_notification'
 
 class AutomaticUserMappingTest < Minitest::Test
@@ -195,13 +198,28 @@ end
 
 class EventConfigurationTest < Minitest::Test
   class TestJournal < Journal
-    attr_accessor :journalized, :notes, :details, :user, :id
+    attr_accessor :journalized, :notes, :details, :user, :id, :updated_by, :previous_notes, :previous_private_notes
 
     def private_notes?
       false
     end
 
     def self.after_create_commit(*)
+    end
+
+    def self.after_update_commit(*)
+    end
+
+    def saved_change_to_notes?
+      previous_notes != notes
+    end
+
+    def notes_before_last_save
+      previous_notes
+    end
+
+    def attribute_before_last_save(name)
+      previous_private_notes if name == 'private_notes'
     end
 
     include RedmineSlackNotification::JournalPatch
@@ -266,7 +284,7 @@ class EventConfigurationTest < Minitest::Test
       'events' => {
         'issue' => {
           'updated' => { 'enabled' => false, 'status_changed' => true },
-          'comment' => { 'added' => true }
+          'comment' => { 'added' => true, 'deleted' => true }
         }
       }
     }
@@ -274,6 +292,7 @@ class EventConfigurationTest < Minitest::Test
       refute RedmineSlackNotification.event_enabled?(project, 'status_changed')
       refute RedmineSlackNotification.event_enabled?(project, 'issue_updated')
       assert RedmineSlackNotification.event_enabled?(project, 'comment_added')
+      assert RedmineSlackNotification.event_enabled?(project, 'comment_deleted')
     end
 
     settings['events']['issue']['updated'] = { 'enabled' => true, 'status_changed' => false, 'other_changed' => false }
@@ -319,6 +338,14 @@ class EventConfigurationTest < Minitest::Test
     RedmineSlackNotification.stub(:config, settings) do
       refute RedmineSlackNotification.event_enabled?(project, 'news_updated')
       assert RedmineSlackNotification.event_enabled?(project, 'news_comment_added')
+    end
+  end
+
+  def test_comment_edit_and_removal_default_to_enabled
+    RedmineSlackNotification.stub(:config, {}) do
+      %w[comment_updated comment_deleted news_comment_deleted].each do |event|
+        assert RedmineSlackNotification.event_enabled?(project, event), event
+      end
     end
   end
 
@@ -444,6 +471,47 @@ class EventConfigurationTest < Minitest::Test
       details: [status, due_date], expected_payload: :comment, expected_details: [due_date],
       expected_event: 'due_date_changed', expected_images: ['screenshot.png'], expected_journal_id: 12
     )
+  end
+
+  def test_issue_comment_edit_and_removal_have_separate_events
+    item = journal
+    item.previous_notes = 'Previous public comment'
+    item.updated_by = OpenStruct.new(name: 'Editor')
+    calls = []
+    formatter = ->(_issue, **kwargs) { calls << [:payload, kwargs]; :message }
+    enqueue = ->(message, **kwargs) { calls << [:enqueue, message, kwargs] }
+
+    RedmineSlackNotification.stub(:config, {}) do
+      RedmineSlackNotification::Formatter.stub(:journal_payload, formatter) do
+        RedmineSlackNotification.stub(:enqueue, enqueue) do
+          item.notes = 'Edited comment'
+          item.send(:notify_slack_journal_comment_changed)
+          item.notes = ''
+          item.send(:notify_slack_journal_comment_changed)
+        end
+      end
+    end
+
+    assert_equal %w[updated deleted], calls.select { |call| call[0] == :payload }.map { |call| call[1][:comment_action] }
+    assert_equal %w[comment_updated comment_deleted], calls.select { |call| call[0] == :enqueue }.map { |call| call[2][:event] }
+    assert_equal 'Editor', calls[0][1][:actor].name
+  end
+
+  def test_issue_comment_removal_respects_setting_and_privacy
+    item = journal
+    item.previous_notes = 'Previous public comment'
+    item.notes = ''
+    settings = { 'events' => { 'issue' => { 'comment' => { 'deleted' => false } } } }
+    RedmineSlackNotification.stub(:config, settings) do
+      RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'disabled removal was enqueued' }) do
+        item.send(:notify_slack_journal_comment_changed)
+      end
+    end
+
+    item.previous_private_notes = true
+    RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'private removal was enqueued' }) do
+      item.send(:notify_slack_journal_comment_changed)
+    end
   end
 
   def test_disabled_event_is_not_enqueued
@@ -572,6 +640,28 @@ class EventConfigurationTest < Minitest::Test
     else
       assert_equal expected_journal_id, calls[1][2][:journal_id]
     end
+  end
+end
+
+class NewsCommentDeletionTest < Minitest::Test
+  def test_news_comment_removal_uses_its_own_event_without_removed_text
+    news = News.new(id: 17, title: 'Release', project: OpenStruct.new(id: 7, identifier: 'agentic'))
+    comment = OpenStruct.new(commented: news)
+    comment.extend(RedmineSlackNotification::CommentPatch)
+    captured = []
+    formatter = ->(**kwargs) { captured << [:payload, kwargs]; :message }
+    enqueue = ->(message, **kwargs) { captured << [:enqueue, message, kwargs] }
+
+    RedmineSlackNotification::Formatter.stub(:generic_payload, formatter) do
+      RedmineSlackNotification.stub(:enqueue, enqueue) do
+        comment.send(:notify_slack_news_comment_deleted)
+      end
+    end
+
+    assert_equal 'News comment', captured[0][1][:noun]
+    assert_equal 'deleted', captured[0][1][:action]
+    refute captured[0][1].key?(:notes)
+    assert_equal 'news_comment_deleted', captured[1][2][:event]
   end
 end
 

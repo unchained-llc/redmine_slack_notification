@@ -25,6 +25,7 @@ The plugin does not use interactive Slack elements such as buttons, menus, or wo
 | `issue.updated.other_changed` | — | Other Issue details, such as category or tracker |
 | `issue.deleted` | `issue_deleted` | Issue deleted |
 | `issue.comment.added` | `comment_added` | Issue comment added |
+| `issue.comment.updated` / `.deleted` | `comment_updated` / `comment_deleted` | Issue comment edited / removed |
 | `issue.updated.relation.added` / `.removed` | `relation_added` / `relation_removed` | Issue relation added / removed |
 | `issue.updated.status_changed` | `status_changed` | Issue status changed |
 | `issue.updated.assignee_changed` | `assignee_changed` | Issue assignee changed |
@@ -41,11 +42,12 @@ The plugin does not use interactive Slack elements such as buttons, menus, or wo
 | `wiki.created` / `.updated` / `.deleted` | `wiki_created` / `wiki_updated` / `wiki_deleted` | Wiki page created / updated / deleted |
 | `news.created` / `.updated` / `.deleted` | `news_created` / `news_updated` / `news_deleted` | News created / updated / deleted |
 | `news.comment.added` | `news_comment_added` | News comment added |
+| `news.comment.deleted` | `news_comment_deleted` | News comment removed |
 | `time_entry.created` / `.updated` / `.deleted` | `time_entry_created` / `time_entry_updated` / `time_entry_deleted` | Time entry created / updated / deleted |
 | `version.created` / `.updated` / `.deleted` | `version_created` / `version_updated` / `version_deleted` | Version created / updated / deleted |
 | `project.updated` | `project_updated` | Project updated |
 
-When a comment, Issue attributes, attachments, and relations change in the same Journal, one notification contains only the enabled parts. If all parts are disabled, no notification is sent. `events.issue.updated.enabled` is the parent switch for every Issue detail path: setting it to `false` suppresses all Issue detail changes even if a child is `true`. With the parent enabled, `other_changed` controls details without a specific key, such as category or tracker. `issue.comment.added` is independent, so a comment can still be sent when Issue updates are disabled. `news.comment.added` is likewise independent of `news.updated`. `issue.updated.version_changed` is an Issue target version change; `version.updated` is an edit to a Version record.
+When a comment, Issue attributes, attachments, and relations change in the same Journal, one notification contains only the enabled parts. If all parts are disabled, no notification is sent. `events.issue.updated.enabled` is the parent switch for every Issue detail path: setting it to `false` suppresses all Issue detail changes even if a child is `true`. With the parent enabled, `other_changed` controls details without a specific key, such as category or tracker. `issue.comment` settings are independent, so a comment can still be sent when Issue details are disabled. `news.comment` settings are likewise independent of `news.updated`. Redmine edits an Issue comment by updating its Journal; clearing the Journal notes produces `issue.comment.deleted`. News comments have create and destroy actions but no edit action. Deletion notifications do not repeat the removed text. `issue.updated.version_changed` is an Issue target version change; `version.updated` is an edit to a Version record.
 
 Deletion of Wiki pages, News, Time entries, and Versions was not previously notified, so their new deletion keys default to `false`. Set a key to `true` to enable it. Deletion notifications link to the containing project view because the deleted record no longer has a usable page.
 
@@ -102,6 +104,8 @@ events:
     deleted: false
     comment:
       added: false
+      updated: true
+      deleted: true
   wiki:
     deleted: false
 
