@@ -1169,7 +1169,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
         project: OpenStruct.new(name: 'Agentic'), actor: OpenStruct.new(name: 'Kota')
       )
       assert_equal '#6D5DFB', payload.dig('attachments', 0, 'color')
-      assert_equal 'Redmine: Project updated - Agentic', payload.dig('attachments', 0, 'fallback')
+      assert_equal 'Project updated - Agentic', payload.dig('attachments', 0, 'fallback')
     end
   end
 
