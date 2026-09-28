@@ -13,6 +13,12 @@ class String
   end
 end
 
+class Array
+  def present?
+    !empty?
+  end
+end
+
 module Rails
   def self.application
     @application ||= OpenStruct.new(config: OpenStruct.new(to_prepare: nil, after_initialize: nil))
@@ -1103,6 +1109,88 @@ class ImageNotificationTest < Minitest::Test
 end
 
 class NotificationDisplaySettingsTest < Minitest::Test
+  def test_optional_issue_metadata_includes_selected_version_relation_and_custom_field
+    project = OpenStruct.new(name: 'Agentic')
+    related = OpenStruct.new(id: 12, subject: 'Related & visible')
+    private_issue = OpenStruct.new(id: 13, subject: 'Private')
+    private_issue.define_singleton_method(:is_private?) { true }
+    relation = OpenStruct.new
+    relation.define_singleton_method(:other_issue) { |_issue| related }
+    relation.define_singleton_method(:relation_type_for) { |_issue| 'relates' }
+    values = [
+      OpenStruct.new(custom_field: OpenStruct.new(id: 42, name: 'Customer'), value: 'Acme'),
+      OpenStruct.new(custom_field: OpenStruct.new(id: 43, name: 'Internal'), value: 'Hidden')
+    ]
+    issue = OpenStruct.new(id: 7, subject: 'Subject', description: '', project: project,
+                           tracker: OpenStruct.new(name: 'Task'),
+                           fixed_version: OpenStruct.new(name: 'Release 2'),
+                           relations: [relation], children: [private_issue])
+    issue.define_singleton_method(:visible_custom_field_values) { values }
+    no_changes = []
+    no_changes.define_singleton_method(:present?) { false }
+    settings = { 'slack' => { 'metadata' => { 'issue' => {
+      'target_version' => true, 'relations' => true, 'children' => true,
+      'custom_fields' => { 'default' => false, '42' => true }
+    } } } }
+
+    RedmineSlackNotification.stub(:config, settings) do
+      RedmineSlackNotification::Formatter.stub(:change_fields, no_changes) do
+        blocks = RedmineSlackNotification::Formatter.issue_payload(issue, actor: OpenStruct.new(name: 'Kota'), action: 'created')
+                                            .dig('attachments', 0, 'blocks')
+        fields = blocks.flat_map { |block| block.fetch('fields', []) }.map { |entry| entry.fetch('text') }
+        assert fields.any? { |value| value == "*Target version*\nRelease 2" }
+        assert fields.any? { |value| value.include?('Related &amp; visible') }
+        assert fields.any? { |value| value == "*Customer*\nAcme" }
+        refute fields.any? { |value| value.include?('Internal') || value.include?('Private') }
+      end
+    end
+  end
+
+  def test_additional_issue_metadata_is_opt_in_by_default
+    issue = OpenStruct.new(id: 7, subject: 'Subject', description: '',
+                           project: OpenStruct.new(name: 'Agentic'), tracker: OpenStruct.new(name: 'Task'),
+                           fixed_version: OpenStruct.new(name: 'Release 2'))
+    no_changes = []
+    no_changes.define_singleton_method(:present?) { false }
+
+    RedmineSlackNotification.stub(:config, {}) do
+      RedmineSlackNotification::Formatter.stub(:change_fields, no_changes) do
+        fields = RedmineSlackNotification::Formatter.issue_payload(
+          issue, actor: OpenStruct.new(name: 'Kota'), action: 'created'
+        ).dig('attachments', 0, 'blocks').flat_map { |block| block.fetch('fields', []) }
+        assert_equal 5, fields.length
+        refute fields.any? { |entry| entry.fetch('text').include?('Release 2') }
+      end
+    end
+  end
+
+  def test_issue_change_switches_hide_selected_details_and_description_diff
+    value = ->(string) { PresenceValue.new(string) }
+    details = [
+      OpenStruct.new(property: 'attr', prop_key: 'fixed_version_id', old_value: value.call('1'), value: value.call('2')),
+      OpenStruct.new(property: 'cf', prop_key: '42', old_value: value.call('A'), value: value.call('B')),
+      OpenStruct.new(property: 'cf', prop_key: '43', old_value: value.call('C'), value: value.call('D')),
+      OpenStruct.new(property: 'relation', prop_key: 'relates', old_value: value.call(''), value: value.call('12')),
+      OpenStruct.new(property: 'attr', prop_key: 'description', old_value: value.call('before'), value: value.call('after'))
+    ]
+    issue = OpenStruct.new(id: 7, subject: 'Subject', description: 'after',
+                           project: OpenStruct.new(name: 'Agentic'), tracker: OpenStruct.new(name: 'Task'))
+    settings = { 'slack' => { 'issue_changes' => {
+      'target_version' => false, 'relations' => false, 'description' => false,
+      'custom_fields' => { 'default' => true, '42' => false }
+    } } }
+
+    RedmineSlackNotification.stub(:config, settings) do
+      blocks = RedmineSlackNotification::Formatter.issue_payload(
+        issue, actor: OpenStruct.new(name: 'Kota'), action: 'updated', details: details
+      ).dig('attachments', 0, 'blocks')
+      fields = blocks.flat_map { |block| block.fetch('fields', []) }.map { |entry| entry.fetch('text') }
+      assert_equal 1, fields.length
+      assert_includes fields.first, 'C → D'
+      refute blocks.any? { |block| block['type'] == 'markdown' && block['text'].include?('diff') }
+    end
+  end
+
   def test_metadata_fields_can_be_hidden_independently_for_every_notification_type
     settings = { 'slack' => { 'metadata' => {
       'issue' => { 'project' => false }, 'wiki' => { 'location' => false },
