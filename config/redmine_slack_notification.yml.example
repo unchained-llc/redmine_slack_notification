@@ -9,8 +9,9 @@ slack:
   # Requires users:read and an app reinstall. Ambiguous names are not mentioned.
   auto_map_users_by_name: false
 
-# Issue detail events inherit issue_updated when omitted. Newly supported
-# deletion events below default to false; other omitted events default to true.
+# issue_updated is the parent switch for all Issue detail events below.
+# Setting it to false suppresses them even when an individual key is true.
+# Newly supported deletion events below default to false; other omitted events default to true.
 events:
   issue_created: true
   issue_updated: true

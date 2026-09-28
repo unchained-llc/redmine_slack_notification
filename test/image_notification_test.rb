@@ -236,13 +236,13 @@ class EventConfigurationTest < Minitest::Test
     end
   end
 
-  def test_relation_keys_inherit_issue_updated_when_omitted
+  def test_issue_updated_disables_relation_events_even_when_explicitly_enabled
     RedmineSlackNotification.stub(:config, { 'events' => { 'issue_updated' => false } }) do
       refute RedmineSlackNotification.event_enabled?(project, 'relation_added')
       refute RedmineSlackNotification.event_enabled?(project, 'relation_removed')
     end
     RedmineSlackNotification.stub(:config, { 'events' => { 'issue_updated' => false, 'relation_added' => true } }) do
-      assert RedmineSlackNotification.event_enabled?(project, 'relation_added')
+      refute RedmineSlackNotification.event_enabled?(project, 'relation_added')
     end
   end
 
@@ -264,18 +264,19 @@ class EventConfigurationTest < Minitest::Test
     end
   end
 
-  def test_issue_detail_keys_inherit_issue_updated_when_omitted
-    RedmineSlackNotification.stub(:config, { 'events' => { 'issue_updated' => false } }) do
+  def test_issue_updated_is_the_parent_switch_for_every_issue_detail
+    details = RedmineSlackNotification::ISSUE_DETAIL_EVENTS.to_h { |event| [event, true] }
+    RedmineSlackNotification.stub(:config, { 'events' => details.merge('issue_updated' => false) }) do
       RedmineSlackNotification::ISSUE_DETAIL_EVENTS.each do |event|
         refute RedmineSlackNotification.event_enabled?(project, event), event
       end
     end
   end
 
-  def test_project_can_enable_one_detail_when_global_issue_updates_are_disabled
+  def test_project_can_enable_issue_updates_while_honoring_a_global_detail_switch
     settings = {
-      'events' => { 'issue_updated' => false },
-      'projects' => { 'agentic' => { 'events' => { 'status_changed' => true } } }
+      'events' => { 'issue_updated' => false, 'assignee_changed' => false },
+      'projects' => { 'agentic' => { 'events' => { 'issue_updated' => true, 'status_changed' => true } } }
     }
     RedmineSlackNotification.stub(:config, settings) do
       assert RedmineSlackNotification.event_enabled?(project, 'status_changed')
@@ -283,7 +284,7 @@ class EventConfigurationTest < Minitest::Test
     end
   end
 
-  def test_project_issue_update_fallback_takes_precedence_over_global_detail
+  def test_project_issue_update_parent_disables_global_detail
     settings = {
       'events' => { 'status_changed' => true },
       'projects' => { 'agentic' => { 'events' => { 'issue_updated' => false } } }
@@ -366,12 +367,12 @@ class EventConfigurationTest < Minitest::Test
     )
   end
 
-  def test_relation_addition_can_be_enabled_without_issue_changes
+  def test_relation_addition_is_blocked_by_issue_updated_but_comment_remains
     relation = OpenStruct.new(property: 'relation', value: 7011)
     assert_journal_notification(
       { 'issue_updated' => false, 'relation_added' => true }, details: [:changed, relation],
-      expected_payload: :comment, expected_details: [relation],
-      expected_event: 'relation_added', expected_images: ['screenshot.png'], expected_journal_id: 12
+      expected_payload: :comment, expected_details: [],
+      expected_event: 'comment_added', expected_images: ['screenshot.png'], expected_journal_id: 12
     )
   end
 
@@ -387,10 +388,21 @@ class EventConfigurationTest < Minitest::Test
   def test_relation_only_journal_uses_relation_event
     relation = OpenStruct.new(property: 'relation', value: nil, old_value: 7011)
     assert_journal_notification(
-      { 'issue_updated' => false, 'relation_removed' => true }, details: [relation], notes: '',
+      { 'issue_updated' => true, 'relation_removed' => true }, details: [relation], notes: '',
       expected_payload: :update, expected_details: [relation],
       expected_event: 'relation_removed', expected_images: [], expected_journal_id: nil
     )
+  end
+
+  def test_relation_only_journal_is_suppressed_by_issue_updated
+    item = journal
+    item.notes = ''
+    item.details = [OpenStruct.new(property: 'relation', value: 7011)]
+    RedmineSlackNotification.stub(:config, { 'events' => { 'issue_updated' => false, 'relation_added' => true } }) do
+      RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'disabled Issue update was enqueued' }) do
+        item.send(:notify_slack_journal_created)
+      end
+    end
   end
 
   def test_disabled_relation_only_journal_sends_nothing
