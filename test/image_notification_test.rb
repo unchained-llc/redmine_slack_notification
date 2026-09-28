@@ -248,9 +248,117 @@ class EventConfigurationTest < Minitest::Test
 
   def test_example_yaml_lists_every_supported_event
     example = YAML.safe_load(File.read(File.expand_path('../config/redmine_slack_notification.yml.example', __dir__)))
-    assert_equal RedmineSlackNotification::EVENT_KEYS.sort, example.fetch('events').keys.sort
-    assert_equal RedmineSlackNotification::DEFAULT_DISABLED_EVENTS.sort,
-                 example.fetch('events').select { |_key, value| value == false }.keys.sort
+    events = example.fetch('events')
+    assert_equal true, events.dig('issue', 'updated', 'enabled')
+    assert_equal RedmineSlackNotification::EVENT_KEYS.sort, RedmineSlackNotification::EVENT_PATHS.keys.sort
+    assert_equal RedmineSlackNotification::EVENT_PATHS.length,
+                 RedmineSlackNotification::EVENT_PATHS.values.uniq.length
+    RedmineSlackNotification::EVENT_PATHS.each do |event, path|
+      value = events.dig(*path)
+      assert_includes [true, false], value, "Missing nested YAML setting for #{event}: #{path.join('.')}"
+    end
+    disabled = RedmineSlackNotification::EVENT_PATHS.select { |_key, path| events.dig(*path) == false }.keys
+    assert_equal RedmineSlackNotification::DEFAULT_DISABLED_EVENTS.sort, disabled.sort
+  end
+
+  def test_nested_issue_parent_and_detail_switches
+    settings = {
+      'events' => {
+        'issue' => {
+          'updated' => { 'enabled' => false, 'status_changed' => true },
+          'comment' => { 'added' => true }
+        }
+      }
+    }
+    RedmineSlackNotification.stub(:config, settings) do
+      refute RedmineSlackNotification.event_enabled?(project, 'status_changed')
+      refute RedmineSlackNotification.event_enabled?(project, 'issue_updated')
+      assert RedmineSlackNotification.event_enabled?(project, 'comment_added')
+    end
+
+    settings['events']['issue']['updated'] = { 'enabled' => true, 'status_changed' => false, 'other_changed' => false }
+    RedmineSlackNotification.stub(:config, settings) do
+      refute RedmineSlackNotification.event_enabled?(project, 'status_changed')
+      refute RedmineSlackNotification.event_enabled?(project, 'issue_updated')
+      assert RedmineSlackNotification.event_enabled?(project, 'assignee_changed')
+    end
+  end
+
+  def test_nested_project_override_and_legacy_flat_fallback_for_all_event_families
+    settings = {
+      'events' => {
+        'issue_updated' => false,
+        'news_updated' => false,
+        'wiki_deleted' => true,
+        'time_entry' => { 'created' => false },
+        'version' => { 'deleted' => true },
+        'project' => { 'updated' => false }
+      },
+      'projects' => {
+        'agentic' => { 'events' => {
+          'issue' => { 'updated' => { 'enabled' => true, 'attachment' => { 'added' => false } } },
+          'news' => { 'updated' => true, 'comment' => { 'added' => false } },
+          'wiki' => { 'deleted' => false }
+        } }
+      }
+    }
+    RedmineSlackNotification.stub(:config, settings) do
+      assert RedmineSlackNotification.event_enabled?(project, 'status_changed')
+      refute RedmineSlackNotification.event_enabled?(project, 'attachment_added')
+      assert RedmineSlackNotification.event_enabled?(project, 'news_updated')
+      refute RedmineSlackNotification.event_enabled?(project, 'news_comment_added')
+      refute RedmineSlackNotification.event_enabled?(project, 'wiki_deleted')
+      refute RedmineSlackNotification.event_enabled?(project, 'time_entry_created')
+      assert RedmineSlackNotification.event_enabled?(project, 'version_deleted')
+      refute RedmineSlackNotification.event_enabled?(project, 'project_updated')
+    end
+  end
+
+  def test_news_comment_is_independent_of_news_update
+    settings = { 'events' => { 'news' => { 'updated' => false, 'comment' => { 'added' => true } } } }
+    RedmineSlackNotification.stub(:config, settings) do
+      refute RedmineSlackNotification.event_enabled?(project, 'news_updated')
+      assert RedmineSlackNotification.event_enabled?(project, 'news_comment_added')
+    end
+  end
+
+  def test_nested_setting_wins_over_flat_setting_in_the_same_scope
+    settings = { 'events' => { 'status_changed' => false,
+                                'issue' => { 'updated' => { 'enabled' => true, 'status_changed' => true } } } }
+    RedmineSlackNotification.stub(:config, settings) do
+      assert RedmineSlackNotification.event_enabled?(project, 'status_changed')
+    end
+  end
+
+  def test_project_flat_setting_can_override_nested_global_leaf_and_parent
+    settings = {
+      'events' => { 'issue' => { 'updated' => { 'enabled' => false, 'status_changed' => false } } },
+      'projects' => { 'agentic' => { 'events' => { 'issue_updated' => true, 'status_changed' => true } } }
+    }
+    RedmineSlackNotification.stub(:config, settings) do
+      assert RedmineSlackNotification.event_enabled?(project, 'status_changed')
+      refute RedmineSlackNotification.event_enabled?(OpenStruct.new(identifier: 'other'), 'status_changed')
+    end
+  end
+
+  def test_every_nested_event_leaf_can_disable_its_notification
+    RedmineSlackNotification::EVENT_PATHS.each do |event, path|
+      events = { 'issue' => { 'updated' => { 'enabled' => true } } }
+      target = events
+      path[0...-1].each { |part| target = target[part] ||= {} }
+      target[path.last] = false
+      RedmineSlackNotification.stub(:config, { 'events' => events }) do
+        refute RedmineSlackNotification.event_enabled?(project, event), path.join('.')
+      end
+    end
+  end
+
+  def test_all_flat_event_keys_remain_supported
+    RedmineSlackNotification::EVENT_KEYS.each do |event|
+      RedmineSlackNotification.stub(:config, { 'events' => { event => false } }) do
+        refute RedmineSlackNotification.event_enabled?(project, event), event
+      end
+    end
   end
 
   def test_new_deletion_events_default_to_disabled_and_can_be_overridden
@@ -324,6 +432,17 @@ class EventConfigurationTest < Minitest::Test
       { 'status_changed' => false }, details: [status, due_date], notes: '',
       expected_payload: :update, expected_details: [due_date],
       expected_event: 'due_date_changed', expected_images: [], expected_journal_id: nil
+    )
+  end
+
+  def test_nested_issue_settings_filter_one_journal_without_losing_enabled_content
+    status = OpenStruct.new(property: 'attr', prop_key: 'status_id', value: 2)
+    due_date = OpenStruct.new(property: 'attr', prop_key: 'due_date', value: '2026-10-01')
+    assert_journal_notification(
+      { 'issue' => { 'updated' => { 'enabled' => true, 'status_changed' => false, 'due_date_changed' => true },
+                     'comment' => { 'added' => true } } },
+      details: [status, due_date], expected_payload: :comment, expected_details: [due_date],
+      expected_event: 'due_date_changed', expected_images: ['screenshot.png'], expected_journal_id: 12
     )
   end
 
