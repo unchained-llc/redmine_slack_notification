@@ -497,7 +497,7 @@ class EventConfigurationTest < Minitest::Test
     assert_equal %w[comment_updated comment_deleted], calls.select { |call| call[0] == :enqueue }.map { |call| call[2][:event] }
     assert_equal 'Editor', calls[0][1][:actor].name
     assert_equal 'Previous public comment', calls[0][1][:previous_notes]
-    assert_nil calls[2][1][:previous_notes]
+    assert_equal 'Previous public comment', calls[2][1][:previous_notes]
     assert_equal ['screenshot.png'], calls[1][2][:image_names]
     assert_equal 12, calls[1][2][:journal_id]
     assert_empty calls[3][2][:image_names]
@@ -684,9 +684,9 @@ class NewsCommentDeletionTest < Minitest::Test
     end
   end
 
-  def test_news_comment_removal_uses_its_own_event_without_removed_text
+  def test_news_comment_removal_sends_removed_text_as_a_diff
     news = News.new(id: 17, title: 'Release', project: OpenStruct.new(id: 7, identifier: 'agentic'))
-    comment = OpenStruct.new(commented: news)
+    comment = OpenStruct.new(commented: news, content: 'Removed comment')
     comment.extend(RedmineSlackNotification::CommentPatch)
     captured = []
     formatter = ->(**kwargs) { captured << [:payload, kwargs]; :message }
@@ -701,6 +701,8 @@ class NewsCommentDeletionTest < Minitest::Test
     assert_equal 'News comment', captured[0][1][:noun]
     assert_equal 'deleted', captured[0][1][:action]
     refute captured[0][1].key?(:notes)
+    assert_equal ['Removed comment', ''], captured[0][1][:body_diff]
+    assert_equal 'コメント', captured[0][1][:body_diff_label]
     assert_equal 'news_comment_deleted', captured[1][2][:event]
   end
 end
@@ -1175,6 +1177,28 @@ class BodyDiffNotificationTest < Minitest::Test
     assert_includes comment.fetch('text'), '**変更後のコメント**'
     assert_includes comment.fetch('text'), '1. new text'
     refute_includes comment.fetch('text'), '- 1. old text'
+  end
+
+  def test_deleted_issue_comment_always_shows_removed_lines_even_when_body_diff_is_disabled
+    issue = OpenStruct.new(id: 7098, subject: 'Title', project: project,
+                           tracker: OpenStruct.new(name: 'Task'))
+    empty_changes = []
+    empty_changes.define_singleton_method(:present?) { false }
+    message = nil
+    RedmineSlackNotification.stub(:config, { 'slack' => { 'body_diff' => false } }) do
+      RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
+        message = RedmineSlackNotification::Formatter.journal_payload(
+          issue, actor: OpenStruct.new(name: 'Editor'), notes: '',
+          comment_action: 'deleted', previous_notes: "removed text\n![](old.png)"
+        )
+      end
+    end
+
+    blocks = message.dig('attachments', 0, 'blocks')
+    diff = blocks.find { |block| block['type'] == 'markdown' }
+    assert_includes diff.fetch('text'), '- removed text'
+    assert_includes diff.fetch('text'), '- ![](old.png)'
+    refute blocks.any? { |block| block['type'] == 'image' }
   end
 
   def test_body_diff_handles_code_fences_and_slack_markdown_budget

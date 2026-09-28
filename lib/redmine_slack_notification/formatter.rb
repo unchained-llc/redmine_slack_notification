@@ -142,7 +142,9 @@ module RedmineSlackNotification
         section_text("*<#{url('/issues/' + issue.id.to_s)}|##{issue.id} #{text(issue.subject)}>*"),
         { 'type' => 'divider' }
       ]
-      if comment_action == 'updated' && !previous_notes.nil?
+      if comment_action == 'deleted' && !previous_notes.nil?
+        blocks.concat(body_diff_blocks('コメント', previous_notes, '', blocks: blocks))
+      elsif comment_action == 'updated' && !previous_notes.nil?
         blocks.concat(updated_body_blocks('コメント', previous_notes, notes, blocks: blocks,
                                           full_heading: '変更後のコメント'))
         if RedmineSlackNotification.body_diff_enabled?
@@ -206,8 +208,13 @@ module RedmineSlackNotification
         section_text("*<#{url}|#{text(subject)}>*")
       ]
       if body_diff
-        blocks.concat(updated_body_blocks(body_diff_label, *body_diff, blocks: blocks,
-                                          full_heading: body_full_label))
+        body_blocks = if action == 'deleted'
+                        body_diff_blocks(body_diff_label, *body_diff, blocks: blocks)
+                      else
+                        updated_body_blocks(body_diff_label, *body_diff, blocks: blocks,
+                                            full_heading: body_full_label)
+                      end
+        blocks.concat(body_blocks)
       elsif summary.to_s.strip.present?
         blocks << section_text("*概要*\n#{mrkdwn(summary.to_s.truncate(1200))}")
       end

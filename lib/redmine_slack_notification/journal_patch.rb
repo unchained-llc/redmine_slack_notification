@@ -61,7 +61,7 @@ module RedmineSlackNotification
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.journal_payload(
           issue, actor: updated_by || User.current, notes: notes, comment_action: action,
-          previous_notes: action == 'updated' ? notes_before_last_save : nil
+          previous_notes: notes_before_last_save
         ),
         project: issue.project, event: event,
         image_names: image_names, journal_id: action == 'updated' ? id : nil

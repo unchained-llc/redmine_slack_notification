@@ -127,7 +127,7 @@ module RedmineSlackNotification
         RedmineSlackNotification::Formatter.generic_payload(
           noun: 'News comment', action: 'deleted', subject: news.title,
           url: RedmineSlackNotification::Formatter.url("/news/#{news.id}"), project: project,
-          actor: User.current
+          actor: User.current, body_diff: [content, ''], body_diff_label: 'コメント'
         ), project: project, event: 'news_comment_deleted'
       )
     end
