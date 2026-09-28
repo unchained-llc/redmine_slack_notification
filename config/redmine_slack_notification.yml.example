@@ -52,6 +52,7 @@ events:
     deleted: false
     comment:
       added: true # Independent of news.updated
+      updated: true # Detects Comment record updates; standard News UI has no edit action
       deleted: true
   time_entry:
     created: true

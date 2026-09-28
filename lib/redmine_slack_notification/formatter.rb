@@ -131,7 +131,7 @@ module RedmineSlackNotification
       payload(title, blocks: blocks)
     end
 
-    def journal_payload(issue, actor:, notes:, details: [], comment_action: 'added')
+    def journal_payload(issue, actor:, notes:, details: [], comment_action: 'added', previous_notes: nil)
       combined_update = details.any?
       label = combined_update ? 'Issue updated' : "Comment #{comment_action}"
       icon = combined_update ? '🔄' : comment_action == 'deleted' ? '🗑️' : '💬'
@@ -141,7 +141,9 @@ module RedmineSlackNotification
         section_text("*<#{url('/issues/' + issue.id.to_s)}|##{issue.id} #{text(issue.subject)}>*"),
         { 'type' => 'divider' }
       ]
-      if notes.to_s.strip.present?
+      if comment_action == 'updated' && !previous_notes.nil?
+        blocks.concat(body_diff_blocks('コメント', previous_notes, notes, blocks: blocks))
+      elsif notes.to_s.strip.present?
         heading = comment_action == 'updated' ? '変更後のコメント' : '追加コメント'
         blocks.concat(mrkdwn_sections(heading, notes.to_s))
       end
@@ -188,7 +190,7 @@ module RedmineSlackNotification
       payload(fallback, blocks: blocks)
     end
 
-    def generic_payload(noun:, action:, subject:, url:, project:, actor:, fields: [], summary: nil, notes: nil, body_diff: nil)
+    def generic_payload(noun:, action:, subject:, url:, project:, actor:, fields: [], summary: nil, notes: nil, body_diff: nil, body_diff_label: '本文')
       label = event_label(noun, action)
       fallback = "Redmine: #{label} - #{subject}"
       blocks = [
@@ -196,7 +198,7 @@ module RedmineSlackNotification
         section_text("*<#{url}|#{text(subject)}>*")
       ]
       if body_diff
-        blocks.concat(body_diff_blocks('本文', *body_diff, blocks: blocks))
+        blocks.concat(body_diff_blocks(body_diff_label, *body_diff, blocks: blocks))
       elsif summary.to_s.strip.present?
         blocks << section_text("*概要*\n#{mrkdwn(summary.to_s.truncate(1200))}")
       end
@@ -225,7 +227,7 @@ module RedmineSlackNotification
         'Issue' => { 'created' => '🆕', 'updated' => '🔄', 'deleted' => '🗑️' },
         'Wiki page' => { 'created' => '📚', 'updated' => '✏️', 'deleted' => '🗑️' },
         'News' => { 'created' => '📰', 'updated' => '📰', 'deleted' => '🗑️' },
-        'News comment' => { 'deleted' => '🗑️' },
+        'News comment' => { 'updated' => '✏️', 'deleted' => '🗑️' },
         'Time entry' => { 'created' => '⏱️', 'updated' => '⏱️', 'deleted' => '🗑️' },
         'Version' => { 'created' => '🏷️', 'updated' => '🏷️', 'deleted' => '🗑️' },
         'Project' => { 'updated' => '🗂️' }

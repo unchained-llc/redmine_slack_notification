@@ -334,16 +334,17 @@ class EventConfigurationTest < Minitest::Test
   end
 
   def test_news_comment_is_independent_of_news_update
-    settings = { 'events' => { 'news' => { 'updated' => false, 'comment' => { 'added' => true } } } }
+    settings = { 'events' => { 'news' => { 'updated' => false, 'comment' => { 'added' => true, 'updated' => true } } } }
     RedmineSlackNotification.stub(:config, settings) do
       refute RedmineSlackNotification.event_enabled?(project, 'news_updated')
       assert RedmineSlackNotification.event_enabled?(project, 'news_comment_added')
+      assert RedmineSlackNotification.event_enabled?(project, 'news_comment_updated')
     end
   end
 
   def test_comment_edit_and_removal_default_to_enabled
     RedmineSlackNotification.stub(:config, {}) do
-      %w[comment_updated comment_deleted news_comment_deleted].each do |event|
+      %w[comment_updated comment_deleted news_comment_updated news_comment_deleted].each do |event|
         assert RedmineSlackNotification.event_enabled?(project, event), event
       end
     end
@@ -495,6 +496,8 @@ class EventConfigurationTest < Minitest::Test
     assert_equal %w[updated deleted], calls.select { |call| call[0] == :payload }.map { |call| call[1][:comment_action] }
     assert_equal %w[comment_updated comment_deleted], calls.select { |call| call[0] == :enqueue }.map { |call| call[2][:event] }
     assert_equal 'Editor', calls[0][1][:actor].name
+    assert_equal 'Previous public comment', calls[0][1][:previous_notes]
+    assert_nil calls[2][1][:previous_notes]
   end
 
   def test_issue_comment_removal_respects_setting_and_privacy
@@ -644,6 +647,38 @@ class EventConfigurationTest < Minitest::Test
 end
 
 class NewsCommentDeletionTest < Minitest::Test
+  def test_news_comment_edit_sends_diff_using_its_own_event
+    news = News.new(id: 17, title: 'Release', project: OpenStruct.new(id: 7, identifier: 'agentic'))
+    comment = OpenStruct.new(commented: news, content: 'after')
+    comment.define_singleton_method(:saved_change_to_content?) { true }
+    comment.define_singleton_method(:content_before_last_save) { 'before' }
+    comment.extend(RedmineSlackNotification::CommentPatch)
+    captured = []
+    formatter = ->(**kwargs) { captured << [:payload, kwargs]; :message }
+    enqueue = ->(message, **kwargs) { captured << [:enqueue, message, kwargs] }
+
+    RedmineSlackNotification::Formatter.stub(:generic_payload, formatter) do
+      RedmineSlackNotification.stub(:enqueue, enqueue) do
+        comment.send(:notify_slack_news_comment_updated)
+      end
+    end
+
+    assert_equal 'News comment', captured[0][1][:noun]
+    assert_equal 'updated', captured[0][1][:action]
+    assert_equal ['before', 'after'], captured[0][1][:body_diff]
+    assert_equal 'コメント', captured[0][1][:body_diff_label]
+    assert_equal 'news_comment_updated', captured[1][2][:event]
+  end
+
+  def test_news_comment_update_without_content_change_is_ignored
+    comment = OpenStruct.new
+    comment.define_singleton_method(:saved_change_to_content?) { false }
+    comment.extend(RedmineSlackNotification::CommentPatch)
+    RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'unchanged comment was enqueued' }) do
+      comment.send(:notify_slack_news_comment_updated)
+    end
+  end
+
   def test_news_comment_removal_uses_its_own_event_without_removed_text
     news = News.new(id: 17, title: 'Release', project: OpenStruct.new(id: 7, identifier: 'agentic'))
     comment = OpenStruct.new(commented: news)
@@ -797,8 +832,9 @@ class ImageNotificationTest < Minitest::Test
     name = 'screenshot.png'
     attachment = OpenStruct.new(id: 42, filename: name)
     diff = RedmineSlackNotification::Formatter.body_diff_blocks('説明', '', "![](#{name})").first
+    comment_diff = RedmineSlackNotification::Formatter.body_diff_blocks('コメント', '', "![](#{name})").first
     comment = RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', "1. See image\n![](#{name})").first
-    message = RedmineSlackNotification::Formatter.payload('Redmine notification', blocks: [diff, comment])
+    message = RedmineSlackNotification::Formatter.payload('Redmine notification', blocks: [diff, comment_diff, comment])
 
     Journal.stub(:find_by, journal(attachments: [attachment])) do
       RedmineSlackNotification.stub(:upload_image, 'F123') do
@@ -808,6 +844,7 @@ class ImageNotificationTest < Minitest::Test
 
     blocks = message.dig('attachments', 0, 'blocks')
     assert_includes blocks.first['text'], "![](#{name})"
+    assert_includes blocks[1]['text'], "![](#{name})"
     assert_equal 1, blocks.count { |block| block['type'] == 'image' }
   end
 
@@ -1025,6 +1062,27 @@ class BodyDiffNotificationTest < Minitest::Test
     refute_includes block['text'], "unchanged 1\n"
     assert_includes block['text'], '  …'
     assert_equal '#6D5DFB', RedmineSlackNotification::Formatter.payload('fallback', blocks: [block]).dig('attachments', 0, 'color')
+  end
+
+  def test_edited_issue_comment_renders_only_its_diff
+    issue = OpenStruct.new(id: 7098, subject: 'Title', project: project,
+                           tracker: OpenStruct.new(name: 'Task'))
+    empty_changes = []
+    empty_changes.define_singleton_method(:present?) { false }
+    message = nil
+    RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
+      message = RedmineSlackNotification::Formatter.journal_payload(
+        issue, actor: OpenStruct.new(name: 'Editor'), notes: 'new text',
+        comment_action: 'updated', previous_notes: 'old text'
+      )
+    end
+
+    blocks = message.dig('attachments', 0, 'blocks')
+    diff = blocks.find { |block| block['type'] == 'markdown' }
+    assert_equal '#6D5DFB', message.dig('attachments', 0, 'color')
+    assert_includes diff.fetch('text'), '- old text'
+    assert_includes diff.fetch('text'), '+ new text'
+    refute blocks.any? { |block| block['type'] == 'section' && block.dig('text', 'text').to_s.include?('変更後のコメント') }
   end
 
   def test_body_diff_handles_code_fences_and_slack_markdown_budget
