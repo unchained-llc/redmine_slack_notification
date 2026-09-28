@@ -7,9 +7,29 @@ slack:
   bot_token: 'xoxb-REPLACE-ME'
   default_channel_id: 'C0123456789'
 
+# Omitted events default to true. Set an event to false to suppress it.
+events:
+  issue_created: true
+  issue_updated: true
+  issue_deleted: true
+  comment_added: true
+  wiki_created: true
+  wiki_updated: true
+  news_created: true
+  news_updated: true
+  news_comment_added: true
+  time_entry_created: true
+  time_entry_updated: true
+  version_created: true
+  version_updated: true
+  project_updated: true
+
 projects:
   agentic:
     channel_id: 'C0123456789'
+    # Project events override the global events above.
+    # events:
+    #   news_updated: false
   another-project:
     channel_id: 'C0234567890'
 

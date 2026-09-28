@@ -17,7 +17,7 @@ module RedmineSlackNotification
 
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.issue_payload(self, actor: author, action: 'created'),
-        project: self.project
+        project: self.project, event: 'issue_created'
       )
     end
 
@@ -26,7 +26,7 @@ module RedmineSlackNotification
 
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.issue_payload(self, actor: User.current, action: 'deleted'),
-        project: self.project
+        project: self.project, event: 'issue_deleted'
       )
     end
   end
