@@ -1132,6 +1132,39 @@ class NotificationDisplaySettingsTest < Minitest::Test
     end
   end
 
+  def test_issue_metadata_is_shown_on_creation_but_not_repeated_on_updates_or_comments
+    project = OpenStruct.new(name: 'Agentic')
+    issue = OpenStruct.new(id: 7, subject: 'Subject', description: '', project: project,
+                           tracker: OpenStruct.new(name: 'Task'))
+    actor = OpenStruct.new(name: 'Kota')
+    changes = [[RedmineSlackNotification::Formatter.field_label('status'), 'Open → Closed']]
+    changes.define_singleton_method(:present?) { true }
+    no_changes = []
+    no_changes.define_singleton_method(:present?) { false }
+
+    RedmineSlackNotification::Formatter.stub(:change_fields, no_changes) do
+      created = RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'created')
+      removed = RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'deleted')
+      comment_only = RedmineSlackNotification::Formatter.journal_payload(issue, actor: actor, notes: 'Comment')
+      assert created.dig('attachments', 0, 'blocks').any? { |block| block.dig('text', 'text') == '*Metadata*' }
+      [removed, comment_only].each do |message|
+        refute message.dig('attachments', 0, 'blocks').any? { |block| block.dig('text', 'text') == '*Metadata*' }
+      end
+    end
+
+    RedmineSlackNotification::Formatter.stub(:change_fields, changes) do
+      updated = RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'updated')
+      commented = RedmineSlackNotification::Formatter.journal_payload(
+        issue, actor: actor, notes: 'Comment', details: [OpenStruct.new(property: 'attr', prop_key: 'status_id')]
+      )
+      [updated, commented].each do |message|
+        blocks = message.dig('attachments', 0, 'blocks')
+        refute blocks.any? { |block| block.dig('text', 'text') == '*Metadata*' }
+        assert blocks.any? { |block| block.dig('text', 'text') == '*Changes*' }
+      end
+    end
+  end
+
   def test_color_and_message_overrides_apply_to_the_colored_card
     settings = {
       'slack' => { 'attachment_color' => '#12Ab34' },
@@ -1218,7 +1251,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
         ).dig('attachments', 0)
         assert_includes card.dig('blocks', 0, 'text', 'text'), 'Note removed'
         assert card['blocks'].any? { |block| block['type'] == 'markdown' && block['text'].include?('Note changes') }
-        assert card['blocks'].any? { |block| block['type'] == 'section' && block.dig('text', 'text') == '*Properties*' }
+        refute card['blocks'].any? { |block| block['type'] == 'section' && block.dig('text', 'text') == '*Properties*' }
       end
       wiki = OpenStruct.new(page: OpenStruct.new(title: 'Home'), comments: '')
       wiki_card = RedmineSlackNotification::Formatter.wiki_payload(wiki, project, actor: OpenStruct.new(name: 'Editor'), action: 'updated').dig('attachments', 0)
