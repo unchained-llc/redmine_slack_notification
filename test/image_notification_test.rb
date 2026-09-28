@@ -79,6 +79,16 @@ class EventConfigurationTest < Minitest::Test
     end
   end
 
+  def test_relation_keys_inherit_issue_updated_when_omitted
+    RedmineSlackNotification.stub(:config, { 'events' => { 'issue_updated' => false } }) do
+      refute RedmineSlackNotification.event_enabled?(project, 'relation_added')
+      refute RedmineSlackNotification.event_enabled?(project, 'relation_removed')
+    end
+    RedmineSlackNotification.stub(:config, { 'events' => { 'issue_updated' => false, 'relation_added' => true } }) do
+      assert RedmineSlackNotification.event_enabled?(project, 'relation_added')
+    end
+  end
+
   def test_example_yaml_lists_every_supported_event
     example = YAML.safe_load(File.read(File.expand_path('../config/redmine_slack_notification.yml.example', __dir__)))
     assert_equal RedmineSlackNotification::EVENT_KEYS.sort, example.fetch('events').keys.sort
@@ -116,6 +126,53 @@ class EventConfigurationTest < Minitest::Test
     )
   end
 
+  def test_relation_addition_can_be_disabled_without_hiding_issue_changes
+    relation = OpenStruct.new(property: 'relation', value: 7011)
+    assert_journal_notification(
+      { 'relation_added' => false }, details: [:changed, relation],
+      expected_payload: :comment, expected_details: [:changed],
+      expected_event: 'issue_updated', expected_images: ['screenshot.png'], expected_journal_id: 12
+    )
+  end
+
+  def test_relation_addition_can_be_enabled_without_issue_changes
+    relation = OpenStruct.new(property: 'relation', value: 7011)
+    assert_journal_notification(
+      { 'issue_updated' => false, 'relation_added' => true }, details: [:changed, relation],
+      expected_payload: :comment, expected_details: [relation],
+      expected_event: 'relation_added', expected_images: ['screenshot.png'], expected_journal_id: 12
+    )
+  end
+
+  def test_relation_removal_can_be_disabled_independently
+    relation = OpenStruct.new(property: 'relation', value: nil, old_value: 7011)
+    assert_journal_notification(
+      { 'relation_removed' => false }, details: [:changed, relation],
+      expected_payload: :comment, expected_details: [:changed],
+      expected_event: 'issue_updated', expected_images: ['screenshot.png'], expected_journal_id: 12
+    )
+  end
+
+  def test_relation_only_journal_uses_relation_event
+    relation = OpenStruct.new(property: 'relation', value: nil, old_value: 7011)
+    assert_journal_notification(
+      { 'issue_updated' => false, 'relation_removed' => true }, details: [relation], notes: '',
+      expected_payload: :update, expected_details: [relation],
+      expected_event: 'relation_removed', expected_images: [], expected_journal_id: nil
+    )
+  end
+
+  def test_disabled_relation_only_journal_sends_nothing
+    item = journal
+    item.notes = ''
+    item.details = [OpenStruct.new(property: 'relation', value: 7011)]
+    RedmineSlackNotification.stub(:config, { 'events' => { 'relation_added' => false } }) do
+      RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'disabled relation was enqueued' }) do
+        item.send(:notify_slack_journal_created)
+      end
+    end
+  end
+
   def test_both_disabled_send_nothing
     RedmineSlackNotification.stub(:config, { 'events' => { 'comment_added' => false, 'issue_updated' => false } }) do
       RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'disabled journal was enqueued' }) do
@@ -126,7 +183,7 @@ class EventConfigurationTest < Minitest::Test
 
   private
 
-  def assert_journal_notification(settings, expected_payload:, expected_details:, expected_event:, expected_images:, expected_journal_id:)
+  def assert_journal_notification(settings, expected_payload:, expected_details:, expected_event:, expected_images:, expected_journal_id:, details: [:changed], notes: 'Comment ![](screenshot.png)')
     calls = []
     comment_payload = ->(_issue, actor:, notes:, details:) { calls << [:comment, details, notes]; :comment }
     update_payload = ->(_issue, actor:, action:, details:) { calls << [:update, details, action]; :update }
@@ -135,7 +192,10 @@ class EventConfigurationTest < Minitest::Test
       RedmineSlackNotification::Formatter.stub(:journal_payload, comment_payload) do
         RedmineSlackNotification::Formatter.stub(:issue_payload, update_payload) do
           RedmineSlackNotification.stub(:enqueue, enqueue) do
-            journal.send(:notify_slack_journal_created)
+            item = journal
+            item.details = details
+            item.notes = notes
+            item.send(:notify_slack_journal_created)
           end
         end
       end

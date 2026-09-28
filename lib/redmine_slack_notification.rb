@@ -7,10 +7,11 @@ require 'yaml'
 
 module RedmineSlackNotification
   EVENT_KEYS = %w[
-    issue_created issue_updated issue_deleted comment_added
+    issue_created issue_updated issue_deleted comment_added relation_added relation_removed
     wiki_created wiki_updated news_created news_updated news_comment_added
     time_entry_created time_entry_updated version_created version_updated project_updated
   ].freeze
+  EVENT_FALLBACKS = { 'relation_added' => 'issue_updated', 'relation_removed' => 'issue_updated' }.freeze
 
   class SlackApiError < StandardError
     attr_reader :code
@@ -85,6 +86,8 @@ module RedmineSlackNotification
 
     events = config['events']
     return events[key] != false if events.is_a?(Hash) && events.key?(key)
+
+    return event_enabled?(project, EVENT_FALLBACKS[key]) if EVENT_FALLBACKS.key?(key)
 
     true
   end

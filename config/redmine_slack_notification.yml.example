@@ -13,6 +13,8 @@ events:
   issue_updated: true
   issue_deleted: true
   comment_added: true
+  relation_added: true
+  relation_removed: true
   wiki_created: true
   wiki_updated: true
   news_created: true
