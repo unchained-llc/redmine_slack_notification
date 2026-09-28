@@ -203,7 +203,8 @@ module RedmineSlackNotification
       end
       if action != 'created' && description_detail
         blocks.insert(2, *updated_body_blocks(section_label('description'), description_detail.old_value, description_detail.value,
-                                              blocks: blocks, full_heading: section_label('summary'), full_text: description))
+                                              blocks: blocks, full_heading: section_label('summary'), full_text: description,
+                                              diff_kind: :issue_description))
       end
 
       changes = change_fields(issue, details)
@@ -241,8 +242,8 @@ module RedmineSlackNotification
         blocks.concat(body_diff_blocks(section_label('comment'), previous_notes, '', blocks: blocks))
       elsif comment_action == 'updated' && !previous_notes.nil?
         blocks.concat(updated_body_blocks(section_label('comment'), previous_notes, notes, blocks: blocks,
-                                          full_heading: section_label('updated_comment')))
-        if RedmineSlackNotification.body_diff_enabled?
+                                          full_heading: section_label('updated_comment'), diff_kind: :issue_comment))
+        if RedmineSlackNotification.body_diff_enabled?(:issue_comment)
           image_references(notes).each { |name| blocks << section_text("![](#{name})") }
         end
       elsif notes.to_s.strip.present?
@@ -253,7 +254,7 @@ module RedmineSlackNotification
       description_detail = details.find { |detail| detail.property == 'attr' && detail.prop_key == 'description' }
       if description_detail
         blocks.concat(updated_body_blocks(section_label('description'), description_detail.old_value, description_detail.value,
-                                          blocks: blocks, full_heading: section_label('summary')))
+                                          blocks: blocks, full_heading: section_label('summary'), diff_kind: :issue_description))
       end
       changes = change_fields(issue, details)
       if changes.present?
@@ -283,7 +284,8 @@ module RedmineSlackNotification
         section_text("*<#{url('/projects/' + project.identifier.to_s + '/wiki/' + title.to_s)}|#{text(title)}>*")
       ]
       blocks.concat(mrkdwn_sections(section_label('changes'), change_summary)) if change_summary.present?
-      blocks.concat(updated_body_blocks(section_label('body'), *body_diff, blocks: blocks)) if body_diff
+      blocks.concat(updated_body_blocks(section_label('body'), *body_diff, blocks: blocks,
+                                        diff_kind: :wiki_body)) if body_diff
       blocks.concat([
         { 'type' => 'divider' },
         section_text("*#{text(section_label('metadata'))}*"),
@@ -310,8 +312,9 @@ module RedmineSlackNotification
         body_blocks = if action == 'deleted'
                         body_diff_blocks(body_diff_label, *body_diff, blocks: blocks)
                       else
+                        diff_kind = noun == 'News' ? :news_description : noun == 'News comment' ? :news_comment : nil
                         updated_body_blocks(body_diff_label, *body_diff, blocks: blocks,
-                                            full_heading: body_full_label)
+                                            full_heading: body_full_label, diff_kind: diff_kind)
                       end
         blocks.concat(body_blocks)
       elsif summary.to_s.strip.present?
@@ -365,8 +368,8 @@ module RedmineSlackNotification
       value.to_s.match?(/^[ \t]*\d+\.[ \t]+/)
     end
 
-    def updated_body_blocks(label, before, after, blocks: [], full_heading: label, full_text: nil)
-      return body_diff_blocks(label, before, after, blocks: blocks) if RedmineSlackNotification.body_diff_enabled?
+    def updated_body_blocks(label, before, after, blocks: [], full_heading: label, full_text: nil, diff_kind: nil)
+      return body_diff_blocks(label, before, after, blocks: blocks) if RedmineSlackNotification.body_diff_enabled?(diff_kind)
       return [] if body_lines(before) == body_lines(after)
 
       content = full_text.nil? ? after.to_s : full_text.to_s

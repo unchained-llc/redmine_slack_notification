@@ -8,8 +8,17 @@ slack:
   default_channel_id: 'C0123456789'
   # Requires users:read and an app reinstall. Ambiguous names are not mentioned.
   auto_map_users_by_name: false
-  # true: show Markdown line diffs on body/comment edits; false: show updated text.
-  body_diff: true
+  # true/false still applies to all edits. Use this map to choose per content type.
+  # Deleted comments always show removed lines regardless of these settings.
+  body_diff:
+    issue:
+      description: true
+      comment: true
+    wiki:
+      body: true
+    news:
+      description: true
+      comment: true
   # Six-digit hexadecimal color for the left border of the Slack attachment.
   attachment_color: '#6D5DFB'
 

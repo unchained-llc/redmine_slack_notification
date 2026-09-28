@@ -57,7 +57,22 @@ By default, when an Issue description, News description, or Wiki body changes, i
 
 Edited Issue and News comments use the same line diff format by default. New comments show their full text. Deleted Issue and News comments show removed lines in a diff, without re-uploading their images.
 
-Set `slack.body_diff: false` to show the updated text instead of a diff for Issue descriptions, News descriptions, Wiki bodies, and edited Issue or News comments. The default is `true`. Deleted comments always show a diff regardless of this setting. Restart Redmine and Sidekiq after changing the YAML setting.
+Set `slack.body_diff` for each editable text type:
+
+```yaml
+slack:
+  body_diff:
+    issue:
+      description: true
+      comment: false
+    wiki:
+      body: true
+    news:
+      description: false
+      comment: true
+```
+
+`true` shows a line diff; `false` shows the updated text. Missing entries default to `true`. Setting a parent (`issue`, `wiki`, or `news`) to `false` disables diffs for all its children. The former `slack.body_diff: true` or `false` setting remains supported and applies to every type. Deleted comments always show their removed lines as a diff. Restart Redmine and Sidekiq after changing the YAML.
 
 ## Installation
 
@@ -171,7 +186,7 @@ For example, `generic_fallback: '[Redmine] %{event}: %{subject}'` produces `[Red
 
 Set `slack.auto_map_users_by_name: true` to mention an assignee automatically when the Redmine login matches exactly one active human Slack member's `profile.display_name` or account `name` (case-insensitive). Explicit `users` mappings take precedence. If the name is missing or ambiguous, the notification displays the Redmine name without a mention. The plugin caches the Slack user directory for 10 minutes and falls back to plain names when the API is unavailable. Automatic name matching requires the Bot Token's `users:read` scope and reinstalling the Slack app after adding that scope. It does not read email addresses and does not require `users:read.email`. The option defaults to `false` for existing installations.
 
-Comment images are uploaded from the attachments added in the same public Journal, then included in the colored notification card. This also works when an existing Issue comment is edited: with `slack.body_diff: false`, images appear at their Markdown positions in the updated text; with `true`, previews appear after the comment diff. A successful image replaces the source Markdown without an extra attachment link. Slack initially needs a top-level image accessory to share each newly uploaded private file with the channel; the plugin removes those small temporary previews with `chat.update` after posting. If that update fails, the complete colored card remains visible and an error is logged rather than posting a duplicate notification. Images over 20 MB and failed uploads remain clickable Redmine attachment links. Images in private Issues or private comments are never uploaded. Already posted Slack notifications are not changed automatically by installing this version.
+Comment images are uploaded from the attachments added in the same public Journal, then included in the colored notification card. This also works when an existing Issue comment is edited: with `slack.body_diff.issue.comment: false`, images appear at their Markdown positions in the updated text; with `true`, previews appear after the comment diff. A successful image replaces the source Markdown without an extra attachment link. Slack initially needs a top-level image accessory to share each newly uploaded private file with the channel; the plugin removes those small temporary previews with `chat.update` after posting. If that update fails, the complete colored card remains visible and an error is logged rather than posting a duplicate notification. Images over 20 MB and failed uploads remain clickable Redmine attachment links. Images in private Issues or private comments are never uploaded. Already posted Slack notifications are not changed automatically by installing this version.
 
 Redmine text containing an ordered Markdown list is sent in a Slack `markdown` block inside the colored attachment card. Slack renders repeated `1.` markers as a numbered list, as Redmine does. The card header, dividers, metadata fields, and configured border keep their existing layout even when a comment includes images. Slack limits Markdown blocks to 12,000 characters per message, so longer text uses the existing `mrkdwn` section format.
 

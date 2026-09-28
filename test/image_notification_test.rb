@@ -1219,6 +1219,67 @@ class BodyDiffNotificationTest < Minitest::Test
     end
     RedmineSlackNotification.stub(:config, { 'slack' => { 'body_diff' => false } }) do
       refute RedmineSlackNotification.body_diff_enabled?
+      refute RedmineSlackNotification.body_diff_enabled?(:issue_comment)
+      refute RedmineSlackNotification.body_diff_enabled?(:news_description)
+    end
+  end
+
+  def test_body_diff_settings_can_be_selected_per_content_type
+    settings = { 'slack' => { 'body_diff' => {
+      'issue' => { 'description' => true, 'comment' => false },
+      'wiki' => { 'body' => false },
+      'news' => { 'description' => false, 'comment' => true }
+    } } }
+    RedmineSlackNotification.stub(:config, settings) do
+      assert RedmineSlackNotification.body_diff_enabled?(:issue_description)
+      refute RedmineSlackNotification.body_diff_enabled?(:issue_comment)
+      refute RedmineSlackNotification.body_diff_enabled?(:wiki_body)
+      refute RedmineSlackNotification.body_diff_enabled?(:news_description)
+      assert RedmineSlackNotification.body_diff_enabled?(:news_comment)
+    end
+    RedmineSlackNotification.stub(:config, { 'slack' => { 'body_diff' => { 'news' => false } } }) do
+      refute RedmineSlackNotification.body_diff_enabled?(:news_description)
+      refute RedmineSlackNotification.body_diff_enabled?(:news_comment)
+      assert RedmineSlackNotification.body_diff_enabled?(:issue_comment)
+    end
+  end
+
+  def test_mixed_issue_update_uses_separate_comment_and_description_settings
+    issue = OpenStruct.new(id: 7098, subject: 'Title', project: project, tracker: OpenStruct.new(name: 'Task'))
+    detail = OpenStruct.new(property: 'attr', prop_key: 'description', old_value: 'old body', value: 'new body')
+    empty_changes = []
+    empty_changes.define_singleton_method(:present?) { false }
+    settings = { 'slack' => { 'body_diff' => { 'issue' => { 'description' => true, 'comment' => false } } } }
+    RedmineSlackNotification.stub(:config, settings) do
+      RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
+        blocks = RedmineSlackNotification::Formatter.journal_payload(
+          issue, actor: OpenStruct.new(name: 'Editor'), notes: 'new note ![](screenshot.png)',
+          details: [detail], comment_action: 'updated', previous_notes: 'old note'
+        ).dig('attachments', 0, 'blocks')
+        assert blocks.any? { |block| block['type'] == 'markdown' && block['text'].include?('+ new body') }
+        assert blocks.any? { |block| block['type'] == 'section' && block.dig('text', 'text').to_s.include?('new note ![](screenshot.png)') }
+        assert_equal 1, blocks.count { |block| block['type'] == 'section' && block.dig('text', 'text').to_s.include?('![](screenshot.png)') }
+      end
+    end
+  end
+
+  def test_wiki_news_body_and_news_comment_use_their_own_settings
+    settings = { 'slack' => { 'body_diff' => { 'wiki' => { 'body' => false },
+                                             'news' => { 'description' => false, 'comment' => true } } } }
+    RedmineSlackNotification.stub(:config, settings) do
+      wiki = OpenStruct.new(page: OpenStruct.new(title: 'Home'), comments: '')
+      wiki_blocks = RedmineSlackNotification::Formatter.wiki_payload(
+        wiki, project, actor: OpenStruct.new(name: 'Editor'), action: 'updated', body_diff: ['old', 'new']
+      ).dig('attachments', 0, 'blocks')
+      assert wiki_blocks.any? { |block| block['type'] == 'section' && block.dig('text', 'text').to_s.include?("*Body*\nnew") }
+      refute wiki_blocks.any? { |block| block['type'] == 'markdown' }
+
+      common = { action: 'updated', subject: 'Headline', url: 'https://example.com/news/1',
+                 project: project, actor: OpenStruct.new(name: 'Editor'), body_diff: ['old', 'new'] }
+      news_blocks = RedmineSlackNotification::Formatter.generic_payload(noun: 'News', **common).dig('attachments', 0, 'blocks')
+      comment_blocks = RedmineSlackNotification::Formatter.generic_payload(noun: 'News comment', **common).dig('attachments', 0, 'blocks')
+      assert news_blocks.any? { |block| block['type'] == 'section' && block.dig('text', 'text').to_s.include?("*Summary*\nnew") }
+      assert comment_blocks.any? { |block| block['type'] == 'markdown' && block['text'].include?('+ new') }
     end
   end
 

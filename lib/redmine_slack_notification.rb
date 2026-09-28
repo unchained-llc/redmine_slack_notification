@@ -53,6 +53,10 @@ module RedmineSlackNotification
   end.keys.freeze
   ISSUE_UPDATE_PARENT_PATH = %w[issue updated enabled].freeze
   DEFAULT_DISABLED_EVENTS = %w[wiki_deleted news_deleted time_entry_deleted version_deleted].freeze
+  BODY_DIFF_PATHS = {
+    issue_description: %w[issue description], issue_comment: %w[issue comment],
+    wiki_body: %w[wiki body], news_description: %w[news description], news_comment: %w[news comment]
+  }.freeze
 
   class SlackApiError < StandardError
     attr_reader :code
@@ -100,8 +104,19 @@ module RedmineSlackNotification
     ENV['SLACK_BOT_TOKEN'].to_s.strip.presence || config.dig('slack', 'bot_token').to_s.strip
   end
 
-  def body_diff_enabled?
-    config.dig('slack', 'body_diff') != false
+  def body_diff_enabled?(kind = nil)
+    setting = config.dig('slack', 'body_diff')
+    return setting != false unless setting.is_a?(Hash)
+    return true unless kind
+
+    path = BODY_DIFF_PATHS.fetch(kind)
+    path.each do |key|
+      return false if setting == false
+      return true unless setting.is_a?(Hash) && setting.key?(key)
+
+      setting = setting[key]
+    end
+    setting != false
   end
 
   def channel_id(project)
