@@ -65,7 +65,7 @@ module RedmineSlackNotification
         'issue_updated_header' => '%{actor} *%{event}*',
         'issue_fallback' => '[%{project}] %{actor} %{action} %{tracker} #%{id}: %{subject}',
         'journal_fallback' => '[%{project}] %{actor} %{event} %{tracker} #%{id}: %{subject}',
-        'generic_fallback' => 'WAC: %{event} - %{subject}'
+        'generic_fallback' => '%{event} - %{subject}'
       }
     }.freeze
 
