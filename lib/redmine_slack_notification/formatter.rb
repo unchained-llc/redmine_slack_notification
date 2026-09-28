@@ -62,6 +62,7 @@ module RedmineSlackNotification
       'diff' => { 'heading' => '%{label} diff', 'omitted' => 'Diff truncated. See the linked page for the full text.' },
       'images' => { 'preparing' => 'Preparing image', 'alt' => 'Image', 'link_label' => 'Image: %{name}' },
       'templates' => {
+        'issue_updated_header' => '%{actor} *%{event}*',
         'issue_fallback' => '[%{project}] %{actor} %{action} %{tracker} #%{id}: %{subject}',
         'journal_fallback' => '[%{project}] %{actor} %{event} %{tracker} #%{id}: %{subject}',
         'generic_fallback' => 'WAC: %{event} - %{subject}'
@@ -183,7 +184,7 @@ module RedmineSlackNotification
                             action: message('values', action), tracker: issue.tracker.name, id: issue.id, subject: issue.subject },
                           fallback: DEFAULT_MESSAGES.dig('templates', 'issue_fallback'))
       blocks = [
-        section_text("#{event_icon(action, noun: 'Issue')} *#{event_label}*"),
+        section_text("#{event_icon(action, noun: 'Issue')} #{issue_heading(action, actor, event_label)}"),
         section_text("*<#{url('/issues/' + issue.id.to_s)}|##{issue.id} #{text(issue.subject)}>*")
       ]
 
@@ -233,8 +234,9 @@ module RedmineSlackNotification
                              { project: issue.project.name, actor: actor&.name || message('values', 'unknown_user'),
                                event: label.downcase, tracker: issue.tracker.name, id: issue.id, subject: issue.subject },
                              fallback: DEFAULT_MESSAGES.dig('templates', 'journal_fallback'))
+      heading = combined_update ? issue_heading('updated', actor, label) : "*#{text(label)}*"
       blocks = [
-        section_text("#{icon} *#{label}*"),
+        section_text("#{icon} #{heading}"),
         section_text("*<#{url('/issues/' + issue.id.to_s)}|##{issue.id} #{text(issue.subject)}>*"),
         { 'type' => 'divider' }
       ]
@@ -336,6 +338,14 @@ module RedmineSlackNotification
       return configured if configured
 
       "#{noun} #{action}"
+    end
+
+    def issue_heading(action, actor, label)
+      return "*#{text(label)}*" unless action == 'updated'
+
+      values = { actor: text(actor&.name || message('values', 'unknown_user')), event: text(label) }
+      interpolate(message('templates', 'issue_updated_header'), values,
+                  fallback: DEFAULT_MESSAGES.dig('templates', 'issue_updated_header'))
     end
 
     def event_icon(action, noun: 'Issue')
