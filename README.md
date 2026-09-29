@@ -188,9 +188,9 @@ slack:
 
 Missing entries default to `true`. Setting `issue`, `wiki`, or `news` to `false` disables diffs for all children of that parent. The older scalar form, `body_diff: true` or `body_diff: false`, still applies to every type. Deleted Issue and News comments **always** show their removed lines as a diff, regardless of this setting.
 
-### Inline Issue comment images
+### Inline Issue images
 
-For public Issue comments, the plugin recognizes local Markdown image references such as `![](screenshot.png)`. It can upload a matching PNG, JPEG, or GIF attached to the same Journal and show it inside the colored card. It does not fetch remote URLs or filesystem paths. Images must be nonempty and at most 20 MiB. The Bot Token needs `files:write`.
+For new public Issues and public Issue comments, the plugin recognizes local Markdown image references such as `![](screenshot.png)`. On creation, it can upload a matching image attached to the Issue; for comments, it uses images attached to the same Journal. Supported formats are PNG, JPEG, and GIF. Images appear inside the colored card. It does not fetch remote URLs or filesystem paths. Images must be nonempty and at most 20 MiB. The Bot Token needs `files:write`.
 
 This also applies when an existing public Issue comment is edited. With `body_diff.issue.comment: false`, an eligible image appears at its Markdown position in the updated text. With `true`, image previews appear after the comment diff. Deleted comments do not re-upload images. A successful upload replaces the Markdown reference without adding a duplicate attachment link. If a recognized image cannot be uploaded, including when it exceeds the size limit, the notification contains a link to its Redmine attachment or Issue.
 

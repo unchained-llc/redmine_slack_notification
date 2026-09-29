@@ -6,7 +6,7 @@ module RedmineSlackNotification
   module IssuePatch
     def self.included(base)
 
-      base.after_create :notify_slack_issue_created
+      base.after_create_commit :notify_slack_issue_created
       base.after_destroy :notify_slack_issue_deleted
     end
 
@@ -17,7 +17,8 @@ module RedmineSlackNotification
 
       RedmineSlackNotification.enqueue(
         RedmineSlackNotification::Formatter.issue_payload(self, actor: author, action: 'created'),
-        project: self.project, event: 'issue_created'
+        project: self.project, event: 'issue_created',
+        image_names: RedmineSlackNotification::Formatter.image_references(description), issue_id: id
       )
     end
 
