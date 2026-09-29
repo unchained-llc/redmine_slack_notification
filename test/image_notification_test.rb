@@ -73,10 +73,21 @@ class PresenceValue < String
   end
 end
 
-class RedmineSlackNotificationJob
+class ApplicationJob
+  def self.queue_as(*)
+  end
+
   def self.perform_later(*)
   end
 end
+
+class Project
+  def self.find_by(id:)
+    nil
+  end
+end
+
+require_relative '../app/jobs/redmine_slack_notification_job'
 
 class User
   attr_accessor :login, :mail, :name
@@ -802,6 +813,84 @@ class ImageNotificationTest < Minitest::Test
                  RedmineSlackNotification::Formatter.image_references('![](clipboard-202609281254-s6trp@2x.png)')
     assert_empty RedmineSlackNotification::Formatter.image_references('![](https://example.com/image.png)')
     assert_equal '![English](english.png)', RedmineSlackNotification::Formatter.mrkdwn('![English](english.png)')
+  end
+
+  def test_four_argument_job_keeps_non_image_notifications_compatible_with_old_workers
+    project = OpenStruct.new(id: 6)
+    queued = nil
+    RedmineSlackNotification.stub(:event_enabled?, true) do
+      RedmineSlackNotificationJob.stub(:perform_later, ->(*args) { queued = args }) do
+        RedmineSlackNotification.enqueue({ 'text' => 'Issue deleted' }, project: project, event: 'issue_deleted')
+      end
+    end
+
+    assert_equal [{ 'text' => 'Issue deleted' }, 6, [], nil], queued
+  end
+
+  def test_job_accepts_four_argument_issue_images_and_existing_five_argument_jobs
+    project = OpenStruct.new(id: 6)
+    calls = []
+    Project.stub(:find_by, project) do
+      RedmineSlackNotification.stub(:notify, ->(payload, **options) { calls << [payload, options] }) do
+        RedmineSlackNotificationJob.new.perform({ 'text' => 'created' }, 6, ['image.png'], -7105)
+        RedmineSlackNotificationJob.new.perform({ 'text' => 'created' }, 6, ['image.png'], nil, 7105)
+        RedmineSlackNotificationJob.new.perform({ 'text' => 'comment' }, 6, ['image.png'], 99)
+      end
+    end
+
+    assert_equal 3, calls.length
+    calls.first(2).each do |_payload, options|
+      assert_equal 7105, options[:issue_id]
+      assert_nil options[:journal_id]
+    end
+    assert_equal 99, calls.last[1][:journal_id]
+    assert_nil calls.last[1][:issue_id]
+  end
+
+  def test_new_issue_embeds_its_attached_image_in_the_colored_notification
+    name = 'F0C57KUNXCH-__________2026-09-29_12.01.19.png'
+    issue = Issue.new(7105)
+    issue.project = OpenStruct.new(id: 7)
+    issue.define_singleton_method(:description) { "Report\n\n![Attached image](#{name})" }
+    issue.define_singleton_method(:author) { OpenStruct.new(name: 'LUMEN') }
+    issue.define_singleton_method(:attachments) { [OpenStruct.new(id: 88, filename: name)] }
+    payload = RedmineSlackNotification::Formatter.payload('Issue created', blocks: [
+      RedmineSlackNotification::Formatter.mrkdwn_sections('Content', issue.description).first
+    ])
+    queued = nil
+    posted = nil
+
+    RedmineSlackNotification::Formatter.stub(:issue_payload, payload) do
+      RedmineSlackNotification.stub(:event_enabled?, true) do
+        RedmineSlackNotificationJob.stub(:perform_later, ->(*args) { queued = args }) do
+          issue.extend(RedmineSlackNotification::IssuePatch)
+          issue.send(:notify_slack_issue_created)
+        end
+      end
+    end
+
+    assert_equal [name], queued[2]
+    assert_equal 4, queued.length
+    assert_equal(-7105, queued[3])
+
+    Issue.stub(:find_by, issue) do
+      RedmineSlackNotification.stub(:bot_token, 'token') do
+        RedmineSlackNotification.stub(:channel_id, 'C123') do
+          RedmineSlackNotification.stub(:upload_image, 'F123') do
+            RedmineSlackNotification.stub(:post_message, ->(message, _channel, _token) { posted = message }) do
+              RedmineSlackNotification.notify(queued[0], project: issue.project, image_names: queued[2],
+                                              issue_id: -queued[3])
+            end
+          end
+        end
+      end
+    end
+
+    assert_equal '#6D5DFB', posted.dig('attachments', 0, 'color')
+    blocks = posted.dig('attachments', 0, 'blocks')
+    assert_equal ['section', 'image'], blocks.map { |block| block['type'] }
+    assert_equal 'F123', blocks.last.dig('slack_file', 'id')
+    refute_includes blocks.first.dig('text', 'text'), name
   end
 
   def test_ordered_lists_use_markdown_inside_the_colored_attachment

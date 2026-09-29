@@ -226,14 +226,18 @@ module RedmineSlackNotification
     [true, scope]
   end
 
-  def enqueue(payload, project:, event: nil, image_names: [], journal_id: nil)
+  def enqueue(payload, project:, event: nil, image_names: [], journal_id: nil, issue_id: nil)
     return unless project
     return if event && !event_enabled?(project, event)
 
-    RedmineSlackNotificationJob.perform_later(payload, project.id, image_names, journal_id)
+    # Keep the four-argument job contract for workers still running the
+    # previous release. Journal IDs are positive; a negative ID identifies
+    # an Issue whose attachments belong to its creation notification.
+    image_source_id = issue_id ? -issue_id : journal_id
+    RedmineSlackNotificationJob.perform_later(payload, project.id, image_names, image_source_id)
   end
 
-  def notify(payload, project: nil, image_names: [], journal_id: nil)
+  def notify(payload, project: nil, image_names: [], journal_id: nil, issue_id: nil)
     token = bot_token
     channel = channel_id(project)
     unless token.present? && channel.present?
@@ -242,7 +246,7 @@ module RedmineSlackNotification
     end
 
 
-    add_images(payload, image_names, journal_id, token) if image_names.present? && journal_id
+    add_images(payload, image_names, journal_id, token, issue_id: issue_id) if image_names.present? && (journal_id || issue_id)
     post_message(payload, channel, token)
   rescue StandardError => e
     Rails.logger.error("RedmineSlackNotification: #{e.class}: #{e.message}")
@@ -302,11 +306,14 @@ module RedmineSlackNotification
     end
   end
 
-  def add_images(payload, image_names, journal_id, token)
-    journal = Journal.find_by(id: journal_id)
-    return unless journal && journal.journalized.is_a?(Issue) && !journal.private_notes? && !journal.journalized.is_private?
+  def add_images(payload, image_names, journal_id, token, issue_id: nil)
+    journal = Journal.find_by(id: journal_id) if journal_id
+    issue = journal ? journal.journalized : Issue.find_by(id: issue_id)
+    return unless issue.is_a?(Issue) && !issue.is_private?
+    return if journal&.private_notes?
 
-    attachments = journal.attachments.each_with_object({}) { |attachment, indexed| indexed[attachment.filename] = attachment }
+    source_attachments = journal ? journal.attachments : issue.attachments
+    attachments = source_attachments.each_with_object({}) { |attachment, indexed| indexed[attachment.filename.downcase] = attachment }
     blocks = payload['blocks'] || payload.dig('attachments', 0, 'blocks')
     return unless blocks
 
@@ -332,7 +339,7 @@ module RedmineSlackNotification
         name = eligible_names[match[1].downcase]
         if name
           found_eligible = true
-          attachment = attachments[name]
+          attachment = attachments[name.downcase]
           file_id = upload_results.fetch(name) { upload_results[name] = upload_image(attachment, token) if attachment }
           if file_id
             text_before = current_text.strip
@@ -340,7 +347,7 @@ module RedmineSlackNotification
             pieces << { 'type' => 'image', 'slack_file' => { 'id' => file_id }, 'alt_text' => name[0, 2000] }
             current_text = +''
           else
-            path = attachment ? "/attachments/#{attachment.id}" : "/issues/#{journal.journalized.id}"
+            path = attachment ? "/attachments/#{attachment.id}" : "/issues/#{issue.id}"
             if markdown_block
               label = name.gsub(/[\\\[\]]/) { |character| "\\#{character}" }
               image_label = Formatter.interpolate(Formatter.message('images', 'link_label'), { name: label },
