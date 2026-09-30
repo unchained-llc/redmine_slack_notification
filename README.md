@@ -288,13 +288,14 @@ bundle exec rake redmine:slack:due_reminders RAILS_ENV=production
 
 Schedule the task once a day with the scheduler used by your Redmine installation. Each execution sends another digest, even on the same day.
 
-For a limited test, set `USER_ID` to a **Redmine user ID**. Only Issues currently assigned to that user are included, and the job checks the assignee again before sending:
+For a limited test, set `USERS` to one or more comma-separated **Redmine user IDs**. Only Issues currently assigned to those users are included, and the job checks each assignee again before sending:
 
 ```bash
-bundle exec rake redmine:slack:due_reminders RAILS_ENV=production USER_ID=123
+bundle exec rake redmine:slack:due_reminders RAILS_ENV=production USERS=3
+bundle exec rake redmine:slack:due_reminders RAILS_ENV=production USERS=3,5
 ```
 
-This uses the same date range as the normal run. Every invocation sends the current matching Issues again, including Issues already sent earlier that day. An invalid or nonexistent ID stops the task before any jobs are queued.
+Lowercase `users=3,5`, as used by Redmine's standard reminder task, is also accepted. The previous `USER_ID=3` form remains available for a single user. Specify only one filter at a time. This uses the same date range as the normal run. Every invocation sends the current matching Issues again, including Issues already sent earlier that day. An invalid or nonexistent ID stops the task before any jobs are queued.
 
 By default, assigned open Issues are included daily from **three days before their due date** through every overdue day, until their status is marked **closed** in Redmine. The worker sends one compact DM per assignee and groups the linked Issues under overdue, due today, and upcoming headings. Each group has its own color: overdue is red, due today is amber, and upcoming uses the configured attachment color. Issue lines show relative timing without repeating the calendar date; the due-today heading carries that context. A digest with more than 100 Issues is split into numbered messages. Separate bot tokens or Slack user mappings can produce a separate digest for each app. Each run sends the current matching Issues, even if the task already ran that day.
 
