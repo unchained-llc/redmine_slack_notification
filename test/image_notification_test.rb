@@ -2080,6 +2080,32 @@ class DueReminderTest < Minitest::Test
     end
   end
 
+  def test_digest_colors_use_yaml_and_project_override
+    project = OpenStruct.new(identifier: 'example', name: 'Example')
+    issues = [-1, 0, 1].each_with_index.map do |offset, index|
+      OpenStruct.new(id: index + 1, subject: "Issue #{index + 1}", due_date: Date.current + offset,
+                     project: project)
+    end
+    config = {
+      'slack' => { 'attachment_color' => '#112233' },
+      'due_reminders' => { 'colors' => { 'overdue' => '#AABBCC', 'today' => 'orange' } },
+      'projects' => { 'example' => { 'due_reminders' => {
+        'colors' => { 'today' => '#445566', 'upcoming' => '#778899' }
+      } } }
+    }
+    RedmineSlackNotification.stub(:config, config) do
+      RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+        global = RedmineSlackNotification::Formatter.due_digest_payload(issues, today: Date.current)
+        assert_equal ['#AABBCC', '#F79009', '#112233'], global['attachments'].map { |a| a['color'] }
+
+        RedmineSlackNotification.with_project(project) do
+          digest = RedmineSlackNotification::Formatter.due_digest_payload(issues, today: Date.current)
+          assert_equal ['#AABBCC', '#445566', '#778899'], digest['attachments'].map { |a| a['color'] }
+        end
+      end
+    end
+  end
+
   def test_digest_wording_uses_yaml_messages_and_project_override
     project = OpenStruct.new(identifier: 'example', name: 'Example')
     issues = [
