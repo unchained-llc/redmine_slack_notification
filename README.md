@@ -225,7 +225,7 @@ To share a newly uploaded private file with the channel, the plugin posts a temp
 
 ### Wording and templates
 
-The top-level `messages` tree changes notification wording; it does not control whether an event is sent. All keys are optional. Omitted or empty strings use built-in English defaults. The [example YAML](config/redmine_slack_notification.yml.example) lists every available key and value:
+The top-level `messages` tree changes notification wording; it does not control whether an event is sent. All keys are optional. Omitted or empty strings use built-in defaults. The [example YAML](config/redmine_slack_notification.yml.example) lists every available key with sample values:
 
 | Group | Controls |
 | --- | --- |
@@ -238,6 +238,7 @@ The top-level `messages` tree changes notification wording; it does not control 
 | `messages.diff` | Diff heading and truncation notice |
 | `messages.images` | Temporary preview wording, alt text, and fallback link label |
 | `messages.templates` | Visible Issue-update heading and plain-text attachment fallbacks |
+| `messages.due_reminders` | Daily DM headings, labels, relative timing, and fallbacks |
 
 An Issue update heading uses the Redmine user who made the update. Its default format is `🔄 Kota *Issue updated*` in Slack markup. You can change the text after the icon without editing the plugin:
 
@@ -293,7 +294,7 @@ bundle exec rake redmine:slack:due_reminders RAILS_ENV=production USER_ID=123
 
 This uses the same date range as the normal run. Every invocation sends the current matching Issues again, including Issues already sent earlier that day. An invalid or nonexistent ID stops the task before any jobs are queued.
 
-By default, assigned open Issues are included daily from **three days before their due date** through every overdue day, until their status is marked **closed** in Redmine. The worker sends one compact DM per assignee and groups the linked Issues under overdue, due today, and upcoming headings. Each group has its own color: overdue is red, due today is amber, and upcoming uses the configured attachment color. Issue lines show relative timing (`1日超過` or `残り2日`) without repeating the calendar date; the due-today heading carries that context. A digest with more than 100 Issues is split into numbered messages. Separate bot tokens or Slack user mappings can produce a separate digest for each app. Each run sends the current matching Issues, even if the task already ran that day.
+By default, assigned open Issues are included daily from **three days before their due date** through every overdue day, until their status is marked **closed** in Redmine. The worker sends one compact DM per assignee and groups the linked Issues under overdue, due today, and upcoming headings. Each group has its own color: overdue is red, due today is amber, and upcoming uses the configured attachment color. Issue lines show relative timing without repeating the calendar date; the due-today heading carries that context. A digest with more than 100 Issues is split into numbered messages. Separate bot tokens or Slack user mappings can produce a separate digest for each app. Each run sends the current matching Issues, even if the task already ran that day.
 
 ```yaml
 due_reminders:
