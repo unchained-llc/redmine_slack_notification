@@ -85,8 +85,8 @@ due_reminders:
     # slack.attachment_color (default: '#6D5DFB').
     # upcoming: '#6D5DFB'
 
-# All displayed notification wording is optional. The values below reproduce
-# the built-in defaults; edit individual keys as needed. %{...} are placeholders.
+# All displayed notification wording is optional. The values below are examples;
+# edit individual keys as needed. %{...} are placeholders.
 messages:
   events:
     issue:
@@ -224,19 +224,19 @@ messages:
     journal_fallback: "[%{project}] %{actor} %{event} %{tracker} #%{id}: %{subject}"
     generic_fallback: '%{event} - %{subject}'
   due_reminders:
-    # Omit keys to use these defaults. Project-specific messages can override
-    # individual keys under projects.<identifier>.messages.due_reminders.
+    # Omit a key to use its built-in default. Projects can override keys under
+    # projects.<identifier>.messages.due_reminders.
     part_suffix: ' (%{part}/%{total_parts})'
-    fallback: '期日リマインダー%{suffix}: %{count}件（期限超過%{overdue_count}件・本日期日%{today_count}件）'
-    title: '📋 *期日リマインダー %{count}件%{suffix}*'
-    overdue_label: '🚨 期限超過'
-    today_label: '⏰ 本日期日'
-    upcoming_label: '📅 期日が近い課題'
-    group_fallback: '%{label}: %{count}件'
-    group_heading: '*%{label}（%{count}件）*'
-    group_continued: '*%{label}（続き）*'
-    overdue_timing: '%{days}日超過'
-    upcoming_timing: '残り%{days}日'
+    fallback: 'Due reminders%{suffix}: %{count} total (overdue: %{overdue_count}, due today: %{today_count})'
+    title: '📋 *Due reminders: %{count}%{suffix}*'
+    overdue_label: '🚨 Overdue'
+    today_label: '⏰ Due today'
+    upcoming_label: '📅 Due soon'
+    group_fallback: '%{label}: %{count}'
+    group_heading: '*%{label} (%{count})*'
+    group_continued: '*%{label} (continued)*'
+    overdue_timing: '%{days}d overdue'
+    upcoming_timing: '%{days}d left'
     timing_suffix: ' · %{timing}'
     issue_line: '• <%{url}|#%{id} %{subject}> · %{project}%{timing}'
 
