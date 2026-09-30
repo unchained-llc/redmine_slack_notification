@@ -1,14 +1,15 @@
 # Redmine Event Notifications for Slack
 
-A Redmine 7 plugin that sends Issue, Wiki, News, time entry, Version, and Project events to Slack. Notifications use a colored Block Kit attachment with a link to the Redmine record. Delivery runs through ActiveJob, normally on Sidekiq's `slack` queue.
+A Redmine 7 plugin that sends Issue, Wiki, News, time entry, Version, and Project events to Slack. It can also send daily Issue due-date reminders to assignees by Slack DM. Notifications use a colored Block Kit attachment with a link to the Redmine record. Delivery runs through ActiveJob, normally on Sidekiq's `slack` queue.
 
 The plugin provides notifications only. It does not add Slack buttons, slash commands, project settings tabs, or Redmine custom fields.
 
 ## Requirements and setup
 
 - Redmine 7.0 or later.
-- A Slack app with a Bot Token and the [`chat:write`](https://docs.slack.dev/reference/methods/chat.postMessage/) scope. Add [`files:write`](https://docs.slack.dev/reference/methods/files.getUploadURLExternal/) to show eligible Issue images inline. Add [`users:read`](https://docs.slack.dev/reference/methods/users.list/) only if you enable automatic user mapping by name. Reinstall the Slack app after changing scopes so its Bot Token receives them.
+- A Slack app with a Bot Token and the [`chat:write`](https://docs.slack.dev/reference/methods/chat.postMessage/) scope. Add [`im:write`](https://docs.slack.dev/reference/methods/conversations.open/) for due-date DMs, [`files:write`](https://docs.slack.dev/reference/methods/files.getUploadURLExternal/) for inline Issue images, and [`users:read`](https://docs.slack.dev/reference/methods/users.list/) if you enable automatic user mapping by name. Reinstall the Slack app after changing scopes so its Bot Token receives them.
 - A Slack channel for each project, or a default channel. Invite the bot to each destination channel, including private channels.
+- For due-date DMs, turn on the Slack app's **App Home → Display Messages tab** setting.
 - An ActiveJob worker that processes the `slack` queue. Sidekiq is recommended in production.
 
 1. Place this directory at `plugins/redmine_slack_notification` in the Redmine application.
@@ -37,7 +38,7 @@ The plugin reads the first configuration file it finds:
 1. `<Redmine root>/config/redmine_slack_notification.yml`
 2. `plugins/redmine_slack_notification/config/redmine_slack_notification.yml`
 
-Every top-level configuration group can be overridden under `projects.<identifier>`: `slack`, `events`, `messages`, and `users`. Nested maps merge by key, so omitted project keys inherit the global value. Explicit `false` values override `true`. For Bot Tokens, the priority is `projects.<identifier>.slack.bot_token`, then `SLACK_BOT_TOKEN`, then global `slack.bot_token`. For channels, `projects.<identifier>.slack.default_channel_id` takes priority over the older `projects.<identifier>.channel_id`, then global `slack.default_channel_id`. Project keys are Redmine **identifiers**, not display names. A missing token or channel prevents delivery and is logged. Channel IDs typically begin with `C` for public channels or `G` for private channels. Keep every project token out of Git and restart Redmine and Sidekiq after changing the YAML.
+Every top-level configuration group can be overridden under `projects.<identifier>`: `slack`, `events`, `messages`, `users`, and `due_reminders`. Nested maps merge by key, so omitted project keys inherit the global value. Explicit `false` values override `true`. For Bot Tokens, the priority is `projects.<identifier>.slack.bot_token`, then `SLACK_BOT_TOKEN`, then global `slack.bot_token`. For channels, `projects.<identifier>.slack.default_channel_id` takes priority over the older `projects.<identifier>.channel_id`, then global `slack.default_channel_id`. Project keys are Redmine **identifiers**, not display names. A missing token or channel prevents delivery and is logged. Channel IDs typically begin with `C` for public channels or `G` for private channels. Keep every project token out of Git and restart Redmine and Sidekiq after changing the YAML.
 
 For example, this project uses its own token and channel, disables comment notifications, hides Issue project metadata, changes the card color and heading, and overrides one Slack user mapping. Other settings retain their global values:
 
@@ -273,6 +274,50 @@ With `slack.auto_map_users_by_name: true`, the plugin can also match a Redmine *
 
 The new assignee uses Slack's `<@U0123456789>` mention format. Issue authors, Journal authors, Wiki updaters, and the actor in the Issue-update heading are displayed as names without automatic mentions.
 
+## Daily due-date DMs
+
+Run the task once a day in the Redmine application's time zone. It queues jobs on the `slack` queue; the worker sends the DMs:
+
+```bash
+cd /path/to/redmine
+bundle exec rake redmine:slack:due_reminders RAILS_ENV=production
+```
+
+Schedule the task once a day with the scheduler used by your Redmine installation. Each execution sends another digest, even on the same day.
+
+For a limited test, set `USER_ID` to a **Redmine user ID**. Only Issues currently assigned to that user are included, and the job checks the assignee again before sending:
+
+```bash
+bundle exec rake redmine:slack:due_reminders RAILS_ENV=production USER_ID=123
+```
+
+This uses the same date range as the normal run. Every invocation sends the current matching Issues again, including Issues already sent earlier that day. An invalid or nonexistent ID stops the task before any jobs are queued.
+
+By default, assigned open Issues are included daily from **three days before their due date** through every overdue day, until their status is marked **closed** in Redmine. The worker sends one compact DM per assignee and groups the linked Issues under overdue, due today, and upcoming headings. Each group has its own color: overdue is red, due today is amber, and upcoming uses the configured attachment color. Issue lines show relative timing (`1日超過` or `残り2日`) without repeating the calendar date; the due-today heading carries that context. A digest with more than 100 Issues is split into numbered messages. Separate bot tokens or Slack user mappings can produce a separate digest for each app. Each run sends the current matching Issues, even if the task already ran that day.
+
+```yaml
+due_reminders:
+  enabled: true
+  days_before: 3
+projects:
+  example:
+    due_reminders:
+      enabled: false
+```
+
+The assignee must be an active Redmine user who can view the Issue, and must map to a Slack user through `users` or `slack.auto_map_users_by_name`. Group assignees and unmapped users are skipped and logged. Private Issues can be sent to their own assignee by DM when Redmine grants that user access. DM delivery needs a Bot Token with `chat:write` and `im:write`; it does not use the project's channel ID. In the Slack app settings, enable **App Home → Messages Tab → Display Messages tab**; otherwise Slack returns `messages_tab_disabled` even after `conversations.open` succeeds. After adding scopes, reinstall the Slack app. Verify a test Issue in the recipient's Slack DM before relying on the schedule.
+
+The digest wording is configurable under `messages.due_reminders` in the YAML file. The [example configuration](config/redmine_slack_notification.yml.example) lists every key and its placeholders. For example, change the title and the overdue group label without changing the other groups:
+
+```yaml
+messages:
+  due_reminders:
+    title: '📋 *Due reminders: %{count}%{suffix}*'
+    overdue_label: '🚨 Overdue'
+```
+
+The same keys can be overridden under `projects.<identifier>.messages.due_reminders`.
+
 ## Delivery and operations
 
 `RedmineSlackNotificationJob` is enqueued after the Redmine event on the `slack` ActiveJob queue. For Sidekiq, include that queue in its configuration, for example:
@@ -306,7 +351,7 @@ A YAML change requires restarting both Redmine and Sidekiq. A successful job pos
 
 ## Privacy and development
 
-Private Issues and private Journal notes are excluded. Images from private Issues or notes are not uploaded. Do not commit a real `redmine_slack_notification.yml` or expose the Bot Token in logs, examples, or support requests. Rotate a token if it is exposed.
+Channel notifications exclude private Issues and private Journal notes. Daily DMs may include private Issues only when the assignee can view them in Redmine. Images from private Issues or notes are not uploaded. Do not commit a real `redmine_slack_notification.yml` or expose the Bot Token in logs, examples, or support requests. Rotate a token if it is exposed.
 
 The repository's local test suite can be run with:
 

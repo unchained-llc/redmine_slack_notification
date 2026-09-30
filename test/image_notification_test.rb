@@ -2,6 +2,7 @@
 
 require 'minitest/autorun'
 require 'ostruct'
+require 'date'
 
 class String
   def present?
@@ -101,6 +102,10 @@ require_relative '../app/jobs/redmine_slack_notification_job'
 
 class User
   attr_accessor :login, :mail, :name
+
+  def self.find_by(id:)
+    nil
+  end
 
   def blank?
     false
@@ -2013,5 +2018,158 @@ class BodyDiffNotificationTest < Minitest::Test
       end
     end
     assert_equal ['old body', 'new body'], captured[:body_diff]
+  end
+end
+
+require_relative '../app/jobs/redmine_slack_due_digest_job'
+require_relative '../app/jobs/redmine_slack_due_reminder_job'
+
+class DueReminderTest < Minitest::Test
+  def setup
+    @date_current = Date.method(:current) if Date.respond_to?(:current)
+    Date.singleton_class.define_method(:current) { Date.new(2026, 9, 30) }
+  end
+
+  def teardown
+    if @date_current
+      Date.singleton_class.define_method(:current, @date_current)
+    else
+      Date.singleton_class.remove_method(:current)
+    end
+  end
+
+  def test_settings_and_project_override
+    project = OpenStruct.new(identifier: 'example')
+    config = { 'due_reminders' => { 'days_before' => 3 },
+               'projects' => { 'example' => { 'due_reminders' => { 'days_before' => 7, 'enabled' => false } } } }
+    RedmineSlackNotification.stub(:config, config) do
+      assert_equal({ enabled: false, days_before: 7 }, RedmineSlackNotification.due_reminder_settings(project))
+      assert_equal 7, RedmineSlackNotification.due_reminder_max_days_before
+    end
+  end
+
+  def test_digest_groups_overdue_today_and_upcoming_with_overdue_color
+    project = OpenStruct.new(name: 'Example')
+    issues = [
+      OpenStruct.new(id: 42, subject: 'Fix <problem>', due_date: Date.new(2026, 9, 28), project: project),
+      OpenStruct.new(id: 43, subject: 'Due today', due_date: Date.current, project: project),
+      OpenStruct.new(id: 44, subject: 'Due soon', due_date: Date.current + 2, project: project)
+    ]
+    RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+      digest = RedmineSlackNotification::Formatter.due_digest_payload(issues, today: Date.current)
+      assert_includes digest.dig('blocks', 0, 'text', 'text'), '期日リマインダー 3件'
+      assert_equal 3, digest['attachments'].size
+      assert_equal ['#D92D20', '#F79009', RedmineSlackNotification::Formatter.attachment_color],
+                   digest['attachments'].map { |attachment| attachment['color'] }
+      overdue, current, upcoming = digest['attachments'].map do |attachment|
+        attachment['blocks'].map { |block| block.dig('text', 'text') }.join("\n")
+      end
+      assert_includes overdue, '期限超過（1件）'
+      assert_includes overdue, 'Fix &lt;problem&gt;'
+      assert_includes overdue, '2日超過'
+      refute_includes overdue, '2026-09-28'
+      refute_includes overdue, 'Due today'
+      assert_includes current, '本日期日（1件）'
+      assert_includes current, 'Due today'
+      refute_includes current, '2026-09-30'
+      refute_includes current, 'Fix &lt;problem&gt;'
+      assert_includes upcoming, '期日が近い課題（1件）'
+      assert_includes upcoming, 'Due soon'
+      assert_includes upcoming, '残り2日'
+      refute_includes upcoming, '2026-10-02'
+    end
+  end
+
+  def test_digest_wording_uses_yaml_messages_and_project_override
+    project = OpenStruct.new(identifier: 'example', name: 'Example')
+    issues = [
+      OpenStruct.new(id: 42, subject: 'Late', due_date: Date.current - 2, project: project),
+      OpenStruct.new(id: 43, subject: 'Soon', due_date: Date.current + 2, project: project)
+    ]
+    config = {
+      'messages' => { 'due_reminders' => {
+        'title' => '*Global %{count} %{suffix}*',
+        'part_suffix' => '[%{part}/%{total_parts}]',
+        'upcoming_label' => 'Upcoming',
+        'upcoming_timing' => '%{days} days left',
+        'issue_line' => '<%{url}|#%{id} %{subject}> in %{project}%{timing}',
+        'timing_suffix' => ' (%{timing})'
+      } },
+      'projects' => { 'example' => { 'messages' => { 'due_reminders' => {
+        'title' => '*Project %{count} %{suffix}*',
+        'fallback' => 'Summary %{count}: %{overdue_count} late, %{today_count} today %{suffix}',
+        'overdue_label' => 'Late',
+        'group_heading' => '%{label}: %{count}',
+        'overdue_timing' => '%{days} days late'
+      } } } }
+    }
+    RedmineSlackNotification.stub(:config, config) do
+      RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+        RedmineSlackNotification.with_project(project) do
+          digest = RedmineSlackNotification::Formatter.due_digest_payload(issues, today: Date.current,
+                                                                           part: 2, total_parts: 3)
+          assert_equal 'Summary 2: 1 late, 0 today [2/3]', digest['text']
+          assert_equal '*Project 2 [2/3]*', digest.dig('blocks', 0, 'text', 'text')
+          assert_equal ['Late: 1', 'Upcoming: 1'], digest['attachments'].map { |a| a.dig('blocks', 0, 'text', 'text').lines.first.strip }
+          assert_includes digest.dig('attachments', 0, 'blocks', 0, 'text', 'text'),
+                          '<https://redmine.example/issues/42|#42 Late> in Example (2 days late)'
+          assert_includes digest.dig('attachments', 1, 'blocks', 0, 'text', 'text'),
+                          '<https://redmine.example/issues/43|#43 Soon> in Example (2 days left)'
+        end
+      end
+    end
+  end
+
+  def test_digest_invalid_message_placeholder_uses_default
+    project = OpenStruct.new(name: 'Example')
+    issue = OpenStruct.new(id: 42, subject: 'Late', due_date: Date.current - 1, project: project)
+    config = { 'messages' => { 'due_reminders' => { 'title' => '%{unknown}' } } }
+    RedmineSlackNotification.stub(:config, config) do
+      RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+        digest = RedmineSlackNotification::Formatter.due_digest_payload([issue], today: Date.current)
+        assert_equal '📋 *期日リマインダー 1件*', digest.dig('blocks', 0, 'text', 'text')
+      end
+    end
+  end
+
+  def test_job_sends_eleven_issues_in_one_dm_on_every_run
+    assignee = User.new
+    assignee.define_singleton_method(:id) { 7 }
+    assignee.define_singleton_method(:active?) { true }
+    project = OpenStruct.new(id: 2, identifier: 'example', name: 'Example')
+    issues = (1..11).map do |id|
+      OpenStruct.new(id: id, subject: "Issue #{id}", due_date: Date.current, project: project)
+    end
+    posts = []
+    api = ->(method, body, _token) do
+      assert_equal 'conversations.open', method
+      assert_equal({ 'users' => 'U123' }, body)
+      { 'channel' => { 'id' => 'D123' } }
+    end
+    config = { 'slack' => { 'bot_token' => 'token' } }
+    RedmineSlackNotification.stub(:config, config) do
+      User.stub(:find_by, assignee) do
+        RedmineSlackNotification.stub(:slack_api, api) do
+          RedmineSlackNotification.stub(:post_message, ->(payload, channel, token) { posts << [payload, channel, token] }) do
+            RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+              job = RedmineSlackDueDigestJob.new
+              job.stub(:due_issues_for, { ['token', 'U123'] => issues }) do
+                job.perform(7, '2026-09-29')
+                assert_empty posts
+                job.perform(7, '2026-09-30')
+                job.perform(7, '2026-09-30')
+              end
+              assert_equal 2, posts.size
+              assert_equal 'D123', posts.first[1]
+              assert_equal 'token', posts.first[2]
+              assert_equal '#F79009', posts.first[0].dig('attachments', 0, 'color')
+              assert_includes posts.first[0].dig('blocks', 0, 'text', 'text'), '期日リマインダー 11件'
+              body = posts.first[0].dig('attachments', 0, 'blocks').map { |block| block.dig('text', 'text') }.join("\n")
+              assert_includes body, '#11 Issue 11'
+            end
+          end
+        end
+      end
+    end
   end
 end

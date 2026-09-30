@@ -74,6 +74,21 @@ module RedmineSlackNotification
         'issue_fallback' => '[%{project}] %{actor} %{action} %{tracker} #%{id}: %{subject}',
         'journal_fallback' => '[%{project}] %{actor} %{event} %{tracker} #%{id}: %{subject}',
         'generic_fallback' => '%{event} - %{subject}'
+      },
+      'due_reminders' => {
+        'part_suffix' => ' (%{part}/%{total_parts})',
+        'fallback' => '期日リマインダー%{suffix}: %{count}件（期限超過%{overdue_count}件・本日期日%{today_count}件）',
+        'title' => '📋 *期日リマインダー %{count}件%{suffix}*',
+        'overdue_label' => '🚨 期限超過',
+        'today_label' => '⏰ 本日期日',
+        'upcoming_label' => '📅 期日が近い課題',
+        'group_fallback' => '%{label}: %{count}件',
+        'group_heading' => '*%{label}（%{count}件）*',
+        'group_continued' => '*%{label}（続き）*',
+        'overdue_timing' => '%{days}日超過',
+        'upcoming_timing' => '残り%{days}日',
+        'timing_suffix' => ' · %{timing}',
+        'issue_line' => '• <%{url}|#%{id} %{subject}> · %{project}%{timing}'
       }
     }.freeze
 
@@ -183,6 +198,71 @@ module RedmineSlackNotification
     def attachment_color
       color = RedmineSlackNotification.effective_config.dig('slack', 'attachment_color')
       color.is_a?(String) && color.match?(/\A#[0-9a-fA-F]{6}\z/) ? color : '#6D5DFB'
+    end
+
+    def due_digest_payload(issues, today: Date.current, part: 1, total_parts: 1)
+      overdue, rest = issues.partition { |issue| issue.due_date < today }
+      current, upcoming = rest.partition { |issue| issue.due_date == today }
+      suffix = total_parts > 1 ? due_message('part_suffix', part: part, total_parts: total_parts) : ''
+      fallback = due_message('fallback', suffix: suffix, count: issues.size,
+                                        overdue_count: overdue.size, today_count: current.size)
+      attachments = [
+        due_digest_attachment(message('due_reminders', 'overdue_label'), overdue, today, '#D92D20'),
+        due_digest_attachment(message('due_reminders', 'today_label'), current, today, '#F79009'),
+        due_digest_attachment(message('due_reminders', 'upcoming_label'), upcoming, today, attachment_color)
+      ].compact
+      {
+        'text' => fallback,
+        'blocks' => [section_text(due_message('title', count: issues.size, suffix: suffix))],
+        'attachments' => attachments
+      }
+    end
+
+    def due_message(key, **values)
+      interpolate(message('due_reminders', key), values,
+                  fallback: DEFAULT_MESSAGES.dig('due_reminders', key))
+    end
+
+    def due_digest_attachment(label, issues, today, color)
+      return if issues.empty?
+
+      {
+        'fallback' => due_message('group_fallback', label: label, count: issues.size),
+        'color' => color,
+        'blocks' => due_digest_group_blocks(label, issues, today)
+      }
+    end
+
+    def due_digest_group_blocks(label, issues, today)
+      return [] if issues.empty?
+
+      heading = due_message('group_heading', label: label, count: issues.size)
+      sections = []
+      content = heading
+      issues.each do |issue|
+        line = due_digest_line(issue, today)
+        if content.length + line.length + 1 > 2_900
+          sections << section_text(content)
+          content = due_message('group_continued', label: label)
+        end
+        content = "#{content}\n#{line}"
+      end
+      sections << section_text(content)
+      sections
+    end
+
+    def due_digest_line(issue, today)
+      subject = text(issue.subject.to_s.gsub(/[|\r\n]/, ' ').strip[0, 120])
+      project = text(issue.project.name.to_s.gsub(/[|\r\n]/, ' ').strip[0, 60])
+      days_left = (issue.due_date - today).to_i
+      timing = if days_left.negative?
+                 due_message('overdue_timing', days: -days_left)
+               elsif days_left.positive?
+                 due_message('upcoming_timing', days: days_left)
+               end
+      suffix = timing ? due_message('timing_suffix', timing: timing) : ''
+      due_message('issue_line', url: url("/issues/#{issue.id}"), id: issue.id,
+                                subject: subject, project: project, timing: suffix)
     end
 
     def issue_payload(issue, **options)

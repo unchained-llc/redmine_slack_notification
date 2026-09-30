@@ -166,6 +166,34 @@ module RedmineSlackNotification
     mapping.is_a?(Hash) ? mapping : {}
   end
 
+  def slack_user_id_for(user)
+    return unless user.is_a?(User)
+
+    mapping = user_mapping
+    id = mapping[user.login.to_s] || mapping[user.mail.to_s]
+    id = slack_user_id_for_name(user.login) if id == false || id.to_s.strip.empty?
+    id = id.to_s.strip
+    id if id.match?(/\A[UW][A-Z0-9]+\z/)
+  end
+
+  def due_reminder_settings(project = nil)
+    settings = effective_config(project)['due_reminders']
+    settings = {} unless settings.is_a?(Hash)
+    days = Integer(settings.fetch('days_before', 3), exception: false)
+    { enabled: settings['enabled'] != false, days_before: days && days.between?(0, 365) ? days : 3 }
+  end
+
+  def due_reminder_max_days_before
+    projects = config['projects']
+    project_days = projects.is_a?(Hash) ? projects.values.each_with_object([]) do |settings, days_list|
+      next unless settings.is_a?(Hash) && settings['due_reminders'].is_a?(Hash)
+
+      days = Integer(settings['due_reminders']['days_before'], exception: false)
+      days_list << days if days && days.between?(0, 365)
+    end : []
+    ([due_reminder_settings[:days_before]] + project_days).max
+  end
+
   def slack_user_id_for_name(name)
     return nil unless effective_config.dig('slack', 'auto_map_users_by_name') == true
 
