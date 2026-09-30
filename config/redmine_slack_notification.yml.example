@@ -73,6 +73,12 @@ slack:
   # Changes to visible fields and the description diff are always shown.
   issue_changes_when_hidden: true
 
+# Run redmine:slack:due_reminders once daily to DM assigned users until the
+# Issue reaches a closed Redmine status. The first DM is 3 days before due date.
+due_reminders:
+  enabled: true
+  days_before: 3
+
 # All displayed notification wording is optional. The values below reproduce
 # the built-in defaults; edit individual keys as needed. %{...} are placeholders.
 messages:
@@ -211,6 +217,22 @@ messages:
     issue_fallback: "[%{project}] %{actor} %{action} %{tracker} #%{id}: %{subject}"
     journal_fallback: "[%{project}] %{actor} %{event} %{tracker} #%{id}: %{subject}"
     generic_fallback: '%{event} - %{subject}'
+  due_reminders:
+    # Omit keys to use these defaults. Project-specific messages can override
+    # individual keys under projects.<identifier>.messages.due_reminders.
+    part_suffix: ' (%{part}/%{total_parts})'
+    fallback: '期日リマインダー%{suffix}: %{count}件（期限超過%{overdue_count}件・本日期日%{today_count}件）'
+    title: '📋 *期日リマインダー %{count}件%{suffix}*'
+    overdue_label: '🚨 期限超過'
+    today_label: '⏰ 本日期日'
+    upcoming_label: '📅 期日が近い課題'
+    group_fallback: '%{label}: %{count}件'
+    group_heading: '*%{label}（%{count}件）*'
+    group_continued: '*%{label}（続き）*'
+    overdue_timing: '%{days}日超過'
+    upcoming_timing: '残り%{days}日'
+    timing_suffix: ' · %{timing}'
+    issue_line: '• <%{url}|#%{id} %{subject}> · %{project}%{timing}'
 
 # issue.updated.enabled is the parent switch for all Issue detail events below.
 # Setting it to false suppresses them even when an individual key is true.
