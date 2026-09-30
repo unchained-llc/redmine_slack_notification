@@ -408,6 +408,42 @@ class EventConfigurationTest < Minitest::Test
     end
   end
 
+  def test_every_nested_event_leaf_can_be_overridden_for_a_project
+    RedmineSlackNotification::EVENT_PATHS.each do |event, path|
+      [[false, true], [true, false]].each do |global_value, project_value|
+        global_events = {}
+        project_events = {}
+        [[global_events, global_value], [project_events, project_value]].each do |events, value|
+          target = events
+          path[0...-1].each { |part| target = target[part] ||= {} }
+          target[path.last] = value
+        end
+        settings = { 'events' => global_events,
+                     'projects' => { 'agentic' => { 'events' => project_events } } }
+        RedmineSlackNotification.stub(:config, settings) do
+          assert_equal project_value, RedmineSlackNotification.event_enabled?(project, event),
+                       "Project override failed for #{path.join('.')}"
+          assert_equal global_value,
+                       RedmineSlackNotification.event_enabled?(OpenStruct.new(identifier: 'other'), event),
+                       "Global value changed for #{path.join('.')}"
+        end
+      end
+    end
+  end
+
+  def test_project_can_override_issue_update_parent_and_detail_together
+    settings = {
+      'events' => { 'issue' => { 'updated' => { 'enabled' => false, 'status_changed' => false } } },
+      'projects' => { 'agentic' => { 'events' => {
+        'issue' => { 'updated' => { 'enabled' => true, 'status_changed' => true } }
+      } } }
+    }
+    RedmineSlackNotification.stub(:config, settings) do
+      assert RedmineSlackNotification.event_enabled?(project, 'status_changed')
+      refute RedmineSlackNotification.event_enabled?(OpenStruct.new(identifier: 'other'), 'status_changed')
+    end
+  end
+
   def test_all_flat_event_keys_remain_supported
     RedmineSlackNotification::EVENT_KEYS.each do |event|
       RedmineSlackNotification.stub(:config, { 'events' => { event => false } }) do

@@ -272,11 +272,15 @@ events:
 projects:
   agentic:
     channel_id: 'C0123456789'
-    # Project event leaves override the matching global leaves.
+    # Every events key can override the matching global value; omitted keys inherit it.
+    # If the global issue.updated.enabled is false, set it true here to enable details.
     # events:
     #   issue:
     #     updated:
+    #       enabled: true
     #       status_changed: false
+    #   wiki:
+    #     deleted: true
   another-project:
     channel_id: 'C0234567890'
 
