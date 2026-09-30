@@ -299,11 +299,17 @@ By default, assigned open Issues are included daily from **three days before the
 due_reminders:
   enabled: true
   days_before: 3
+  colors:
+    overdue: '#D92D20'
+    today: '#F79009'
+    # upcoming: '#6D5DFB'
 projects:
   example:
     due_reminders:
       enabled: false
 ```
+
+Set `due_reminders.colors.overdue`, `.today`, and `.upcoming` to six-digit hex colors. Invalid or omitted values use the defaults; an omitted upcoming color uses `slack.attachment_color`. Colors can also be overridden per project under `projects.<identifier>.due_reminders.colors`.
 
 The assignee must be an active Redmine user who can view the Issue, and must map to a Slack user through `users` or `slack.auto_map_users_by_name`. Group assignees and unmapped users are skipped and logged. Private Issues can be sent to their own assignee by DM when Redmine grants that user access. DM delivery needs a Bot Token with `chat:write` and `im:write`; it does not use the project's channel ID. In the Slack app settings, enable **App Home → Messages Tab → Display Messages tab**; otherwise Slack returns `messages_tab_disabled` even after `conversations.open` succeeds. After adding scopes, reinstall the Slack app. Verify a test Issue in the recipient's Slack DM before relying on the schedule.
 

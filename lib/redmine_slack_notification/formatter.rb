@@ -6,6 +6,7 @@ module RedmineSlackNotification
     BODY_DIFF_MAX_LINE_CHARS = 400
     BODY_DIFF_CONTEXT_LINES = 2
     BODY_DIFF_LCS_CELLS = 40_000
+    DUE_REMINDER_COLORS = { 'overdue' => '#D92D20', 'today' => '#F79009' }.freeze
     EVENT_NOUN_KEYS = {
       'Issue' => 'issue', 'Comment' => 'comment', 'Wiki page' => 'wiki', 'News' => 'news',
       'News comment' => 'news_comment', 'Time entry' => 'time_entry', 'Version' => 'version',
@@ -200,6 +201,15 @@ module RedmineSlackNotification
       color.is_a?(String) && color.match?(/\A#[0-9a-fA-F]{6}\z/) ? color : '#6D5DFB'
     end
 
+    def due_reminder_color(group)
+      settings = RedmineSlackNotification.effective_config['due_reminders']
+      colors = settings.is_a?(Hash) ? settings['colors'] : nil
+      color = colors[group] if colors.is_a?(Hash)
+      return color if color.is_a?(String) && color.match?(/\A#[0-9a-fA-F]{6}\z/)
+
+      DUE_REMINDER_COLORS.fetch(group) { attachment_color }
+    end
+
     def due_digest_payload(issues, today: Date.current, part: 1, total_parts: 1)
       overdue, rest = issues.partition { |issue| issue.due_date < today }
       current, upcoming = rest.partition { |issue| issue.due_date == today }
@@ -207,9 +217,9 @@ module RedmineSlackNotification
       fallback = due_message('fallback', suffix: suffix, count: issues.size,
                                         overdue_count: overdue.size, today_count: current.size)
       attachments = [
-        due_digest_attachment(message('due_reminders', 'overdue_label'), overdue, today, '#D92D20'),
-        due_digest_attachment(message('due_reminders', 'today_label'), current, today, '#F79009'),
-        due_digest_attachment(message('due_reminders', 'upcoming_label'), upcoming, today, attachment_color)
+        due_digest_attachment(message('due_reminders', 'overdue_label'), overdue, today, due_reminder_color('overdue')),
+        due_digest_attachment(message('due_reminders', 'today_label'), current, today, due_reminder_color('today')),
+        due_digest_attachment(message('due_reminders', 'upcoming_label'), upcoming, today, due_reminder_color('upcoming'))
       ].compact
       {
         'text' => fallback,

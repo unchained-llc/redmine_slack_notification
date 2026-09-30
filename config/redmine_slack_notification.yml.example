@@ -78,6 +78,12 @@ slack:
 due_reminders:
   enabled: true
   days_before: 3
+  colors:
+    overdue: '#D92D20'
+    today: '#F79009'
+    # Uncomment to override the upcoming color. When omitted, it uses
+    # slack.attachment_color (default: '#6D5DFB').
+    # upcoming: '#6D5DFB'
 
 # All displayed notification wording is optional. The values below reproduce
 # the built-in defaults; edit individual keys as needed. %{...} are placeholders.
