@@ -8,6 +8,10 @@ class String
     !strip.empty?
   end
 
+  def presence
+    present? ? self : nil
+  end
+
   def truncate(length)
     self[0, length]
   end
@@ -16,6 +20,12 @@ end
 class Array
   def present?
     !empty?
+  end
+end
+
+class NilClass
+  def presence
+    nil
   end
 end
 
@@ -220,6 +230,136 @@ class AutomaticUserMappingTest < Minitest::Test
     assert_equal 1, attempts
     assert_equal 1, warnings.length
     assert_includes warnings.first, 'missing_scope'
+  end
+end
+
+class ProjectConfigurationTest < Minitest::Test
+  def project(identifier = 'agentic')
+    OpenStruct.new(id: 7, identifier: identifier, name: identifier)
+  end
+
+  def settings
+    {
+      'slack' => {
+        'bot_token' => 'global-token', 'default_channel_id' => 'C_GLOBAL',
+        'attachment_color' => '#6D5DFB', 'auto_map_users_by_name' => false,
+        'body_diff' => { 'issue' => { 'description' => true, 'comment' => true } },
+        'metadata' => { 'issue' => { 'project' => true, 'tracker' => true } },
+        'issue_changes_when_hidden' => true
+      },
+      'messages' => { 'events' => { 'issue' => { 'created' => 'Global issue created' } } },
+      'users' => { 'alice' => 'U_GLOBAL', 'bob' => 'U_BOB' },
+      'projects' => {
+        'agentic' => {
+          'slack' => {
+            'bot_token' => 'project-token', 'default_channel_id' => 'C_PROJECT',
+            'attachment_color' => '#123456', 'auto_map_users_by_name' => true,
+            'body_diff' => { 'issue' => { 'comment' => false } },
+            'metadata' => { 'issue' => { 'project' => false } },
+            'issue_changes_when_hidden' => false
+          },
+          'messages' => {
+            'events' => { 'issue' => { 'created' => 'Project issue created' } },
+            'sections' => { 'comment' => 'Project comment' }
+          },
+          'users' => { 'alice' => 'U_PROJECT' }
+        }
+      }
+    }
+  end
+
+  def test_project_overrides_all_config_sections_without_losing_global_siblings
+    RedmineSlackNotification.stub(:config, settings) do
+      ENV.stub(:[], ->(key) { key == 'SLACK_BOT_TOKEN' ? 'environment-token' : nil }) do
+        assert_equal 'project-token', RedmineSlackNotification.bot_token(project)
+        assert_equal 'environment-token', RedmineSlackNotification.bot_token(project('other'))
+      end
+      assert_equal 'C_PROJECT', RedmineSlackNotification.channel_id(project)
+      assert_equal 'C_GLOBAL', RedmineSlackNotification.channel_id(project('other'))
+
+      RedmineSlackNotification.with_project(project) do
+        assert_equal 'Project issue created', RedmineSlackNotification::Formatter.message('events', 'issue', 'created')
+        assert_equal 'Issue updated', RedmineSlackNotification::Formatter.message('events', 'issue', 'updated')
+        assert_equal '#123456', RedmineSlackNotification::Formatter.attachment_color
+        assert RedmineSlackNotification.body_diff_enabled?(:issue_description)
+        refute RedmineSlackNotification.body_diff_enabled?(:issue_comment)
+        assert_equal false, RedmineSlackNotification.effective_config.dig('slack', 'issue_changes_when_hidden')
+        assert_equal({ 'alice' => 'U_PROJECT', 'bob' => 'U_BOB' }, RedmineSlackNotification.user_mapping)
+        user = User.new
+        user.login = 'alice'
+        user.mail = 'alice@example.com'
+        user.name = 'Alice'
+        assert_equal '<@U_PROJECT>', RedmineSlackNotification::Formatter.user_mention(user)
+        RedmineSlackNotification.stub(:slack_user_directory, { 'charlie' => ['U_CHARLIE'] }) do
+          assert_equal 'U_CHARLIE', RedmineSlackNotification.slack_user_id_for_name('charlie')
+        end
+      end
+      assert_equal 'Global issue created', RedmineSlackNotification::Formatter.message('events', 'issue', 'created')
+      assert_equal '#6D5DFB', RedmineSlackNotification::Formatter.attachment_color
+      assert RedmineSlackNotification.body_diff_enabled?(:issue_comment)
+      RedmineSlackNotification.with_project(project('other')) do
+        assert_nil RedmineSlackNotification.slack_user_id_for_name('charlie')
+      end
+    end
+  end
+
+  def test_payload_and_delivery_use_the_same_project_overrides
+    issue = OpenStruct.new(id: 42, subject: 'Example', description: '', project: project,
+                           tracker: OpenStruct.new(name: 'Task'))
+    other_issue = OpenStruct.new(id: 43, subject: 'Other', description: '', project: project('other'),
+                                 tracker: OpenStruct.new(name: 'Task'))
+    deliveries = []
+
+    RedmineSlackNotification.stub(:config, settings) do
+      card = RedmineSlackNotification::Formatter.issue_payload(issue, actor: nil, action: 'created')
+      other_card = RedmineSlackNotification::Formatter.issue_payload(other_issue, actor: nil, action: 'created')
+      assert_equal '#123456', card.dig('attachments', 0, 'color')
+      assert_includes card.dig('attachments', 0, 'blocks', 0, 'text', 'text'), 'Project issue created'
+      fields = card.dig('attachments', 0, 'blocks').flat_map { |block| block.fetch('fields', []) }
+      refute fields.any? { |field| field.fetch('text').start_with?('*Project*') }
+      assert fields.any? { |field| field.fetch('text').start_with?('*Tracker*') }
+      assert_equal '#6D5DFB', other_card.dig('attachments', 0, 'color')
+      assert_includes other_card.dig('attachments', 0, 'blocks', 0, 'text', 'text'), 'Global issue created'
+
+      ENV.stub(:[], ->(_key) { nil }) do
+        RedmineSlackNotification.stub(:post_message, ->(payload, channel, token) { deliveries << [payload, channel, token] }) do
+          RedmineSlackNotification.notify(card, project: project)
+          RedmineSlackNotification.notify(other_card, project: project('other'))
+        end
+      end
+    end
+    assert_equal ['C_PROJECT', 'project-token'], deliveries[0].last(2)
+    assert_equal ['C_GLOBAL', 'global-token'], deliveries[1].last(2)
+  end
+
+  def test_nested_project_context_restores_previous_project_even_after_error
+    RedmineSlackNotification.stub(:config, settings) do
+      RedmineSlackNotification.with_project(project) do
+        assert_raises(RuntimeError) do
+          RedmineSlackNotification.with_project(project('other')) { raise 'stop' }
+        end
+        assert_equal 'Project issue created', RedmineSlackNotification::Formatter.message('events', 'issue', 'created')
+      end
+      assert_equal 'Global issue created', RedmineSlackNotification::Formatter.message('events', 'issue', 'created')
+    end
+  end
+
+  def test_news_comment_diff_heading_uses_project_message
+    RedmineSlackNotification.stub(:config, settings) do
+      card = RedmineSlackNotification::Formatter.generic_payload(
+        noun: 'News comment', action: 'updated', subject: 'Title', url: 'https://example.com/news/1',
+        project: project, actor: nil, body_diff: ['before', 'after'], body_diff_label: :comment
+      )
+      diff = card.dig('attachments', 0, 'blocks').find { |block| block['type'] == 'markdown' }
+      assert_includes diff['text'], 'Project comment diff'
+
+      other_card = RedmineSlackNotification::Formatter.generic_payload(
+        noun: 'News comment', action: 'updated', subject: 'Title', url: 'https://example.com/news/1',
+        project: project('other'), actor: nil, body_diff: ['before', 'after'], body_diff_label: :comment
+      )
+      other_diff = other_card.dig('attachments', 0, 'blocks').find { |block| block['type'] == 'markdown' }
+      assert_includes other_diff['text'], 'Comment diff'
+    end
   end
 end
 
@@ -749,8 +889,8 @@ class NewsCommentDeletionTest < Minitest::Test
     assert_equal 'News comment', captured[0][1][:noun]
     assert_equal 'updated', captured[0][1][:action]
     assert_equal ['before', 'after'], captured[0][1][:body_diff]
-    assert_equal 'Comment', captured[0][1][:body_diff_label]
-    assert_equal 'Updated comment', captured[0][1][:body_full_label]
+    assert_equal :comment, captured[0][1][:body_diff_label]
+    assert_equal :updated_comment, captured[0][1][:body_full_label]
     assert_equal 'news_comment_updated', captured[1][2][:event]
   end
 
@@ -781,7 +921,7 @@ class NewsCommentDeletionTest < Minitest::Test
     assert_equal 'deleted', captured[0][1][:action]
     refute captured[0][1].key?(:notes)
     assert_equal ['Removed comment', ''], captured[0][1][:body_diff]
-    assert_equal 'Comment', captured[0][1][:body_diff_label]
+    assert_equal :comment, captured[0][1][:body_diff_label]
     assert_equal 'news_comment_deleted', captured[1][2][:event]
   end
 end

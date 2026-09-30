@@ -81,7 +81,7 @@ module RedmineSlackNotification
 
     def message(*path)
       default = DEFAULT_MESSAGES.dig(*path)
-      configured = RedmineSlackNotification.config['messages']
+      configured = RedmineSlackNotification.effective_config['messages']
       path.each do |key|
         configured = configured.is_a?(Hash) ? configured[key] : nil
       end
@@ -181,11 +181,15 @@ module RedmineSlackNotification
     end
 
     def attachment_color
-      color = RedmineSlackNotification.config.dig('slack', 'attachment_color')
+      color = RedmineSlackNotification.effective_config.dig('slack', 'attachment_color')
       color.is_a?(String) && color.match?(/\A#[0-9a-fA-F]{6}\z/) ? color : '#6D5DFB'
     end
 
-    def issue_payload(issue, actor:, action:, details: [], notes: nil)
+    def issue_payload(issue, **options)
+      RedmineSlackNotification.with_project(issue.project) { build_issue_payload(issue, **options) }
+    end
+
+    def build_issue_payload(issue, actor:, action:, details: [], notes: nil)
       event_label = event_label('Issue', action)
       title = interpolate(message('templates', 'issue_fallback'),
                           { project: issue.project.name, actor: actor&.name || message('values', 'unknown_user'),
@@ -230,7 +234,11 @@ module RedmineSlackNotification
       payload(title, blocks: blocks)
     end
 
-    def journal_payload(issue, actor:, notes:, details: [], comment_action: 'added', previous_notes: nil)
+    def journal_payload(issue, **options)
+      RedmineSlackNotification.with_project(issue.project) { build_journal_payload(issue, **options) }
+    end
+
+    def build_journal_payload(issue, actor:, notes:, details: [], comment_action: 'added', previous_notes: nil)
       combined_update = details.any?
       label = combined_update ? event_label('Issue', 'updated') : message('events', 'comment', comment_action)
       icon = combined_update ? event_icon('updated', noun: 'Issue') : event_icon(comment_action, noun: 'Comment')
@@ -272,7 +280,11 @@ module RedmineSlackNotification
       payload(fallback, blocks: blocks)
     end
 
-    def wiki_payload(content, project, actor:, action:, body_diff: nil)
+    def wiki_payload(content, project, **options)
+      RedmineSlackNotification.with_project(project) { build_wiki_payload(content, project, **options) }
+    end
+
+    def build_wiki_payload(content, project, actor:, action:, body_diff: nil)
       title = content.page.title
       label = event_label('Wiki page', action)
       fallback = interpolate(message('templates', 'generic_fallback'), { event: label, subject: title },
@@ -293,10 +305,16 @@ module RedmineSlackNotification
       payload(fallback, blocks: blocks)
     end
 
-    def generic_payload(noun:, action:, subject:, url:, project:, actor:, fields: [], summary: nil, notes: nil, body_diff: nil, body_diff_label: nil, body_full_label: nil)
+    def generic_payload(project:, **options)
+      RedmineSlackNotification.with_project(project) { build_generic_payload(project: project, **options) }
+    end
+
+    def build_generic_payload(noun:, action:, subject:, url:, project:, actor:, fields: [], summary: nil, notes: nil, body_diff: nil, body_diff_label: nil, body_full_label: nil)
       label = event_label(noun, action)
       fallback = interpolate(message('templates', 'generic_fallback'), { event: label, subject: subject },
                              fallback: DEFAULT_MESSAGES.dig('templates', 'generic_fallback'))
+      body_diff_label = section_label(body_diff_label.to_s) if body_diff_label.is_a?(Symbol)
+      body_full_label = section_label(body_full_label.to_s) if body_full_label.is_a?(Symbol)
       body_diff_label ||= section_label('body')
       body_full_label ||= section_label('summary')
       blocks = [
@@ -489,7 +507,7 @@ module RedmineSlackNotification
     end
 
     def metadata_enabled?(kind, key, action: nil)
-      slack = RedmineSlackNotification.config['slack']
+      slack = RedmineSlackNotification.effective_config['slack']
       settings = slack['metadata'] if slack.is_a?(Hash)
       return false if settings == false
 
@@ -595,7 +613,7 @@ module RedmineSlackNotification
     end
 
     def issue_metadata_group(action)
-      group = RedmineSlackNotification.config.dig('slack', 'metadata', 'issue')
+      group = RedmineSlackNotification.effective_config.dig('slack', 'metadata', 'issue')
       return group[action] if group.is_a?(Hash) && (group.key?('created') || group.key?('updated'))
 
       group
@@ -610,7 +628,7 @@ module RedmineSlackNotification
     end
 
     def visible_issue_changes(details)
-      return details if RedmineSlackNotification.config.dig('slack', 'issue_changes_when_hidden') != false
+      return details if RedmineSlackNotification.effective_config.dig('slack', 'issue_changes_when_hidden') != false
 
       details.select do |detail|
         key = if detail.property == 'cf'

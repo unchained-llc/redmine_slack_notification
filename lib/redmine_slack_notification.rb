@@ -101,12 +101,43 @@ module RedmineSlackNotification
     config_paths.first
   end
 
-  def bot_token
-    ENV['SLACK_BOT_TOKEN'].to_s.strip.presence || config.dig('slack', 'bot_token').to_s.strip
+  def project_config(project)
+    return {} unless project
+
+    projects = config['projects']
+    settings = projects[project.identifier.to_s] if projects.is_a?(Hash)
+    settings.is_a?(Hash) ? settings : {}
+  end
+
+  def merge_config(base, overrides)
+    return overrides unless base.is_a?(Hash) && overrides.is_a?(Hash)
+
+    base.merge(overrides) do |_key, original, replacement|
+      merge_config(original, replacement)
+    end
+  end
+
+  def with_project(project)
+    previous = Thread.current[:redmine_slack_notification_project]
+    Thread.current[:redmine_slack_notification_project] = project
+    yield
+  ensure
+    Thread.current[:redmine_slack_notification_project] = previous
+  end
+
+  def effective_config(project = Thread.current[:redmine_slack_notification_project])
+    project ? merge_config(config, project_config(project)) : config
+  end
+
+  def bot_token(project = Thread.current[:redmine_slack_notification_project])
+    project_slack = project_config(project)['slack']
+    project_token = project_slack['bot_token'] if project_slack.is_a?(Hash)
+    project_token.to_s.strip.presence || ENV['SLACK_BOT_TOKEN'].to_s.strip.presence ||
+      config.dig('slack', 'bot_token').to_s.strip
   end
 
   def body_diff_enabled?(kind = nil)
-    setting = config.dig('slack', 'body_diff')
+    setting = effective_config.dig('slack', 'body_diff')
     return setting != false unless setting.is_a?(Hash)
     return true unless kind
 
@@ -123,17 +154,20 @@ module RedmineSlackNotification
   def channel_id(project)
     return '' unless project
 
-    project_config = config.fetch('projects', {}).fetch(project.identifier.to_s, {})
-    project_channel = project_config.is_a?(Hash) ? project_config['channel_id'] : nil
+    settings = project_config(project)
+    project_slack = settings['slack']
+    project_channel = project_slack['default_channel_id'].to_s.strip.presence if project_slack.is_a?(Hash)
+    project_channel ||= settings['channel_id'].to_s.strip.presence
     (project_channel.presence || config.dig('slack', 'default_channel_id')).to_s.strip
   end
 
   def user_mapping
-    config.fetch('users', {})
+    mapping = effective_config['users']
+    mapping.is_a?(Hash) ? mapping : {}
   end
 
   def slack_user_id_for_name(name)
-    return nil unless config.dig('slack', 'auto_map_users_by_name') == true
+    return nil unless effective_config.dig('slack', 'auto_map_users_by_name') == true
 
     key = name.to_s.strip.downcase
     return nil if key.empty?
@@ -184,7 +218,7 @@ module RedmineSlackNotification
   end
 
   def configured?(project)
-    bot_token.present? && channel_id(project).present?
+    bot_token(project).present? && channel_id(project).present?
   end
 
   def event_enabled?(project, event)
@@ -238,16 +272,17 @@ module RedmineSlackNotification
   end
 
   def notify(payload, project: nil, image_names: [], journal_id: nil, issue_id: nil)
-    token = bot_token
-    channel = channel_id(project)
-    unless token.present? && channel.present?
-      Rails.logger.warn("RedmineSlackNotification: Slack API is not configured for project #{project&.identifier || '(none)'} (token/channel missing)")
-      return
+    with_project(project) do
+      token = bot_token(project)
+      channel = channel_id(project)
+      unless token.present? && channel.present?
+        Rails.logger.warn("RedmineSlackNotification: Slack API is not configured for project #{project&.identifier || '(none)'} (token/channel missing)")
+        return
+      end
+
+      add_images(payload, image_names, journal_id, token, issue_id: issue_id) if image_names.present? && (journal_id || issue_id)
+      post_message(payload, channel, token)
     end
-
-
-    add_images(payload, image_names, journal_id, token, issue_id: issue_id) if image_names.present? && (journal_id || issue_id)
-    post_message(payload, channel, token)
   rescue StandardError => e
     Rails.logger.error("RedmineSlackNotification: #{e.class}: #{e.message}")
     raise

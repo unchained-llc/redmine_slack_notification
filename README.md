@@ -7,7 +7,7 @@ The plugin provides notifications only. It does not add Slack buttons, slash com
 ## Requirements and setup
 
 - Redmine 7.0 or later.
-- A Slack app with a Bot Token and the [`chat:write`](https://docs.slack.dev/reference/methods/chat.postMessage/) scope. Add [`files:write`](https://docs.slack.dev/reference/methods/files.getUploadURLExternal/) to show eligible Issue comment images inline. Add [`users:read`](https://docs.slack.dev/reference/methods/users.list/) only if you enable automatic user mapping by name. Reinstall the Slack app after changing scopes so its Bot Token receives them.
+- A Slack app with a Bot Token and the [`chat:write`](https://docs.slack.dev/reference/methods/chat.postMessage/) scope. Add [`files:write`](https://docs.slack.dev/reference/methods/files.getUploadURLExternal/) to show eligible Issue images inline. Add [`users:read`](https://docs.slack.dev/reference/methods/users.list/) only if you enable automatic user mapping by name. Reinstall the Slack app after changing scopes so its Bot Token receives them.
 - A Slack channel for each project, or a default channel. Invite the bot to each destination channel, including private channels.
 - An ActiveJob worker that processes the `slack` queue. Sidekiq is recommended in production.
 
@@ -21,13 +21,15 @@ A minimal configuration is:
 
 ```yaml
 slack:
-  # Prefer SLACK_BOT_TOKEN in the environment in production.
+  # SLACK_BOT_TOKEN can supply the shared token instead.
   bot_token: 'xoxb-REPLACE-ME'
   default_channel_id: 'C0123456789'
 
 projects:
   agentic:
-    channel_id: 'C0234567890'
+    slack:
+      bot_token: 'xoxb-AGENTIC-BOT-TOKEN'
+      default_channel_id: 'C0234567890'
 ```
 
 The plugin reads the first configuration file it finds:
@@ -35,7 +37,31 @@ The plugin reads the first configuration file it finds:
 1. `<Redmine root>/config/redmine_slack_notification.yml`
 2. `plugins/redmine_slack_notification/config/redmine_slack_notification.yml`
 
-`SLACK_BOT_TOKEN` takes precedence over `slack.bot_token`. A project's `projects.<identifier>.channel_id` takes precedence over `slack.default_channel_id`. Project keys are Redmine **identifiers**, not display names. A missing token or channel prevents delivery and is logged. Channel IDs typically begin with `C` for public channels or `G` for private channels.
+Every top-level configuration group can be overridden under `projects.<identifier>`: `slack`, `events`, `messages`, and `users`. Nested maps merge by key, so omitted project keys inherit the global value. Explicit `false` values override `true`. For Bot Tokens, the priority is `projects.<identifier>.slack.bot_token`, then `SLACK_BOT_TOKEN`, then global `slack.bot_token`. For channels, `projects.<identifier>.slack.default_channel_id` takes priority over the older `projects.<identifier>.channel_id`, then global `slack.default_channel_id`. Project keys are Redmine **identifiers**, not display names. A missing token or channel prevents delivery and is logged. Channel IDs typically begin with `C` for public channels or `G` for private channels. Keep every project token out of Git and restart Redmine and Sidekiq after changing the YAML.
+
+For example, this project uses its own token and channel, disables comment notifications, hides Issue project metadata, changes the card color and heading, and overrides one Slack user mapping. Other settings retain their global values:
+
+```yaml
+projects:
+  agentic:
+    slack:
+      bot_token: 'xoxb-AGENTIC-BOT-TOKEN'
+      default_channel_id: 'C0234567890'
+      attachment_color: '#123456'
+      metadata:
+        issue:
+          project: false
+    events:
+      issue:
+        comment:
+          added: false
+    messages:
+      events:
+        issue:
+          created: 'New Agentic issue'
+    users:
+      alice: 'U0123456789'
+```
 
 ## Event switches
 
