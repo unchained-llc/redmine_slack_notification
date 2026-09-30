@@ -3,7 +3,7 @@
 # Do not commit this file because it contains Slack credentials.
 
 slack:
-  # Prefer the SLACK_BOT_TOKEN environment variable in production.
+  # SLACK_BOT_TOKEN can supply the shared token instead.
   bot_token: 'xoxb-REPLACE-ME'
   default_channel_id: 'C0123456789'
   # Requires users:read and an app reinstall. Ambiguous names are not mentioned.
@@ -271,8 +271,15 @@ events:
 
 projects:
   agentic:
-    channel_id: 'C0123456789'
-    # Every events key can override the matching global value; omitted keys inherit it.
+    # The same slack, events, messages, and users trees can be overridden here.
+    # Omitted keys inherit global values. A project bot_token overrides SLACK_BOT_TOKEN.
+    slack:
+      bot_token: 'xoxb-AGENTIC-BOT-TOKEN'
+      default_channel_id: 'C0123456789'
+      attachment_color: '#123456'
+    # The older project-level channel_id remains supported.
+    # channel_id: 'C0123456789'
+    # Every events key can override the matching global value.
     # If the global issue.updated.enabled is false, set it true here to enable details.
     # events:
     #   issue:
@@ -281,6 +288,12 @@ projects:
     #       status_changed: false
     #   wiki:
     #     deleted: true
+    # messages:
+    #   events:
+    #     issue:
+    #       created: 'New Agentic issue'
+    # users:
+    #   alice: 'U0123456789'
   another-project:
     channel_id: 'C0234567890'
 

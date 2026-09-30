@@ -128,7 +128,7 @@ module RedmineSlackNotification
           noun: 'News comment', action: 'deleted', subject: news.title,
           url: RedmineSlackNotification::Formatter.url("/news/#{news.id}"), project: project,
           actor: User.current, body_diff: [content, ''],
-          body_diff_label: RedmineSlackNotification::Formatter.section_label('comment')
+          body_diff_label: :comment
         ), project: project, event: 'news_comment_deleted'
       )
     end
@@ -147,8 +147,8 @@ module RedmineSlackNotification
           noun: 'News comment', action: 'updated', subject: news.title,
           url: RedmineSlackNotification::Formatter.url("/news/#{news.id}"), project: project,
           actor: User.current, body_diff: [content_before_last_save, content],
-          body_diff_label: RedmineSlackNotification::Formatter.section_label('comment'),
-          body_full_label: RedmineSlackNotification::Formatter.section_label('updated_comment')
+          body_diff_label: :comment,
+          body_full_label: :updated_comment
         ), project: project, event: 'news_comment_updated'
       )
     end
