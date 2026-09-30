@@ -2,10 +2,10 @@
 
 namespace :redmine do
   namespace :slack do
-    desc 'Queue Slack due reminders (days, tracker, project, users/USERS, version)'
+    desc 'Queue Slack due reminders (days, tracker, project, users, version)'
     task due_reminders: :environment do
-      abort 'USER_ID is unsupported; use users or USERS' if ENV.key?('USER_ID')
-      abort 'Specify only one of users or USERS' if ENV.key?('users') && ENV.key?('USERS')
+      abort 'USER_ID is unsupported; use users' if ENV.key?('USER_ID')
+      abort 'Use lowercase users' if ENV.keys.any? { |name| name.downcase == 'users' && name != 'users' }
 
       options = {}
       if ENV.key?('days')
@@ -36,12 +36,11 @@ namespace :redmine do
         options['version_ids'] = version_ids
       end
 
-      filter = %w[users USERS].find { |name| ENV.key?(name) }
       requested_ids = nil
-      if filter
-        ids = ENV.fetch(filter).split(',', -1).map(&:strip)
+      if ENV.key?('users')
+        ids = ENV.fetch('users').split(',', -1).map(&:strip)
         unless ids.any? && ids.all? { |id| id.match?(/\A[1-9]\d*\z/) }
-          abort "#{filter} must contain positive Redmine user IDs separated by commas"
+          abort 'users must contain positive Redmine user IDs separated by commas'
         end
 
         requested_ids = ids.map(&:to_i).uniq

@@ -2270,7 +2270,8 @@ class DueReminderTaskTest < Minitest::Test
   end
 
   def setup
-    @original_filters = %w[USERS users USER_ID days tracker project version].to_h { |name| [name, ENV[name]] }
+    @original_filters = ['users', 'users'.upcase, 'USER_ID', 'days', 'tracker', 'project', 'version']
+                        .to_h { |name| [name, ENV[name]] }
     @original_filters.each_key { |name| ENV.delete(name) }
     @date_current = Date.method(:current) if Date.respond_to?(:current)
     Date.singleton_class.define_method(:current) { Date.new(2026, 9, 30) }
@@ -2316,7 +2317,7 @@ class DueReminderTaskTest < Minitest::Test
   end
 
   def test_users_filters_multiple_assignees_before_queuing
-    ENV['USERS'] = '3, 5,3'
+    ENV['users'] = '3, 5,3'
     with_task do |scope, queued|
       capture_io { Rake::Task['redmine:slack:due_reminders'].invoke }
       assert_equal [3, 5], scope.filters[:assigned_to_id]
@@ -2338,7 +2339,7 @@ class DueReminderTaskTest < Minitest::Test
 
   def test_invalid_or_missing_user_stops_before_queuing
     ['3,,5', '3,99', ''].each do |value|
-      ENV['USERS'] = value
+      ENV['users'] = value
       with_task do |_scope, queued|
         assert_raises(SystemExit) { capture_io { Rake::Task['redmine:slack:due_reminders'].invoke } }
         assert_empty queued
@@ -2354,9 +2355,17 @@ class DueReminderTaskTest < Minitest::Test
     end
   end
 
+  def test_noncanonical_users_name_is_rejected_before_queuing
+    ENV['users'.upcase] = '3'
+    with_task do |_scope, queued|
+      assert_raises(SystemExit) { capture_io { Rake::Task['redmine:slack:due_reminders'].invoke } }
+      assert_empty queued
+    end
+  end
+
   def test_invalid_redmine_filters_stop_before_queuing
     [{ 'days' => '-1' }, { 'days' => 'soon' }, { 'tracker' => '99' },
-     { 'version' => 'missing' }, { 'users' => '3', 'USERS' => '5' }].each do |values|
+     { 'version' => 'missing' }].each do |values|
       ENV.update(values)
       with_task do |_scope, queued|
         assert_raises(SystemExit) { capture_io { Rake::Task['redmine:slack:due_reminders'].invoke } }
