@@ -78,7 +78,7 @@ slack:
 # date unless the rake task's days option overrides this setting.
 due_reminders:
   enabled: true
-  days_before: 3
+  days: 3
   colors:
     overdue: '#D92D20'
     today: '#F79009'
