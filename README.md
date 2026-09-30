@@ -303,7 +303,7 @@ The task accepts the same filters as Redmine's reminder command. Set them as Rak
 | `days` | Days before the due date. Overrides `due_reminders.days` in the YAML, including project overrides. Without it, the YAML setting applies (default: 3). |
 | `tracker` | Tracker ID. |
 | `project` | Project ID or identifier. |
-| `users` | Comma-separated Redmine user IDs whose assigned Issues should be included. Uppercase `USERS` is also accepted. |
+| `users` | Comma-separated Redmine user IDs whose assigned Issues should be included. |
 | `version` | Target version name, matched case-insensitively as in Redmine. |
 
 For example, to restrict a run to users 3 and 5, or to combine all filters:
@@ -313,7 +313,7 @@ bundle exec rake redmine:slack:due_reminders users=3,5 RAILS_ENV=production
 bundle exec rake redmine:slack:due_reminders days=7 tracker=2 project=example users=3,5 version="1.0" RAILS_ENV=production
 ```
 
-Only Issues matching every supplied filter are included, and the worker checks the filters and assignee again before sending. You can also use `USERS=3` or `USERS=3,5`; do not set both `users` and `USERS`. Invalid values or nonexistent users, trackers, projects, and versions stop the task before any jobs are queued. Every invocation sends the current matching Issues again, including Issues already sent earlier that day.
+Only Issues matching every supplied filter are included, and the worker checks the filters and assignee again before sending. Invalid values or nonexistent users, trackers, projects, and versions stop the task before any jobs are queued. Every invocation sends the current matching Issues again, including Issues already sent earlier that day.
 
 By default, assigned open Issues are included daily from **three days before their due date** through every overdue day, until their status is marked **closed** in Redmine. The worker sends one compact DM per assignee and groups the linked Issues under overdue, due today, and upcoming headings. Each group has its own color: overdue is red, due today is amber, and upcoming uses the configured attachment color. Issue lines show relative timing without repeating the calendar date; the due-today heading carries that context. A digest with more than 100 Issues is split into numbered messages. Separate bot tokens or Slack user mappings can produce a separate digest for each app. Each run sends the current matching Issues, even if the task already ran that day.
 
