@@ -5,14 +5,15 @@ class RedmineSlackDueDigestJob < ApplicationJob
 
   MAX_ISSUES_PER_MESSAGE = 100
 
-  def perform(user_id, scheduled_on, _legacy_force = nil)
+  def perform(user_id, scheduled_on, filters = nil)
     today = Date.current
     return unless scheduled_on == today.iso8601
 
     user = User.find_by(id: user_id)
     return unless user&.active?
 
-    groups = due_issues_for(user, today)
+    filters = {} unless filters.is_a?(Hash)
+    groups = due_issues_for(user, today, filters)
     groups.each do |(token, slack_user_id), issues|
       dm = RedmineSlackNotification.slack_api('conversations.open', { 'users' => slack_user_id }, token)
       channel = dm.dig('channel', 'id')
@@ -32,17 +33,18 @@ class RedmineSlackDueDigestJob < ApplicationJob
 
   private
 
-  def due_issues_for(user, today)
-    max_days = RedmineSlackNotification.due_reminder_max_days_before
+  def due_issues_for(user, today, filters = {})
+    max_days = filters.fetch('days') { RedmineSlackNotification.due_reminder_max_days_before }
     issues = Issue.joins(:status).where(issue_statuses: { is_closed: false })
                   .where(assigned_to_id: user.id)
                   .where('issues.due_date <= ?', today + max_days)
                   .includes(:project)
+    issues = RedmineSlackNotification.due_reminder_filter_scope(issues, filters)
     groups = Hash.new { |hash, key| hash[key] = [] }
     issues.find_each do |issue|
       project = issue.project
       settings = RedmineSlackNotification.due_reminder_settings(project)
-      next unless settings[:enabled] && issue.due_date <= today + settings[:days_before]
+      next unless settings[:enabled] && issue.due_date <= today + filters.fetch('days', settings[:days_before])
       next unless project.active? && issue.visible?(user)
       RedmineSlackNotification.with_project(project) do
         token = RedmineSlackNotification.bot_token(project)

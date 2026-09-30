@@ -194,6 +194,13 @@ module RedmineSlackNotification
     ([due_reminder_settings[:days_before]] + project_days).max
   end
 
+  def due_reminder_filter_scope(scope, options)
+    scope = scope.where(project_id: options['project_id']) if options.key?('project_id')
+    scope = scope.where(tracker_id: options['tracker_id']) if options.key?('tracker_id')
+    scope = scope.where(fixed_version_id: options['version_ids']) if options.key?('version_ids')
+    scope
+  end
+
   def slack_user_id_for_name(name)
     return nil unless effective_config.dig('slack', 'auto_map_users_by_name') == true
 

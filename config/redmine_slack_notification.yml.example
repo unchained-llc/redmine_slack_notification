@@ -74,7 +74,8 @@ slack:
   issue_changes_when_hidden: true
 
 # Run redmine:slack:due_reminders once daily to DM assigned users until the
-# Issue reaches a closed Redmine status. The first DM is 3 days before due date.
+# Issue reaches a closed Redmine status. The first DM is 3 days before the due
+# date unless the rake task's days option overrides this setting.
 due_reminders:
   enabled: true
   days_before: 3
