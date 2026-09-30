@@ -77,6 +77,10 @@ class Version
   def self.find_by(id:)
     OpenStruct.new(name: '旧版')
   end
+
+  def self.named(_name)
+    nil
+  end
 end
 
 class PresenceValue < String
@@ -100,6 +104,16 @@ end
 class Project
   def self.find_by(id:)
     nil
+  end
+
+  def self.find(_value)
+    nil
+  end
+end
+
+class Tracker
+  def self.exists?(id:)
+    false
   end
 end
 
@@ -2215,11 +2229,15 @@ load File.expand_path('../lib/tasks/redmine_slack_due_reminders.rake', __dir__)
 
 class DueReminderTaskTest < Minitest::Test
   class Scope
-    attr_reader :filtered_ids
+    attr_reader :filters
+
+    def initialize
+      @filters = {}
+    end
 
     def where(condition = nil, *, **keywords)
       condition ||= keywords
-      @filtered_ids = condition[:assigned_to_id] if condition.is_a?(Hash) && condition.key?(:assigned_to_id)
+      @filters.merge!(condition) if condition.is_a?(Hash)
       self
     end
 
@@ -2227,17 +2245,32 @@ class DueReminderTaskTest < Minitest::Test
       self
     end
 
-    def find_each
-      [3, 5, 7].each do |id|
-        next if @filtered_ids && !@filtered_ids.include?(id)
+    def includes(*)
+      self
+    end
 
-        yield OpenStruct.new(assigned_to_id: id, due_date: Date.current, project: nil)
+    def find_each
+      [
+        [3, 10, 2, 100, 0], [5, 10, 2, 100, 5], [7, 11, 3, 101, 0],
+        [3, 10, 3, 100, 0]
+      ].each_with_index do |(user_id, project_id, tracker_id, version_id, due_in), index|
+        values = { assigned_to_id: user_id, project_id: project_id, tracker_id: tracker_id,
+                   fixed_version_id: version_id }
+        next unless @filters.all? do |key, expected|
+          !values.key?(key) || Array(expected).include?(values[key])
+        end
+
+        project = OpenStruct.new(id: project_id, name: "Project #{project_id}")
+        project.define_singleton_method(:active?) { true }
+        issue = OpenStruct.new(id: index + 1, **values, due_date: Date.current + due_in, project: project)
+        issue.define_singleton_method(:visible?) { |_user| true }
+        yield issue
       end
     end
   end
 
   def setup
-    @original_filters = %w[USERS users USER_ID].to_h { |name| [name, ENV[name]] }
+    @original_filters = %w[USERS users USER_ID days tracker project version].to_h { |name| [name, ENV[name]] }
     @original_filters.each_key { |name| ENV.delete(name) }
     @date_current = Date.method(:current) if Date.respond_to?(:current)
     Date.singleton_class.define_method(:current) { Date.new(2026, 9, 30) }
@@ -2262,10 +2295,18 @@ class DueReminderTaskTest < Minitest::Test
       RedmineSlackNotification.stub(:due_reminder_settings, { enabled: true, days_before: 3 }) do
         Issue.stub(:joins, scope) do
           User.stub(:exists?, ->(options) { [3, 5, 7].include?(options[:id]) }) do
-            Rails.stub(:logger, logger) do
-              RedmineSlackDueDigestJob.stub(:perform_later, ->(*args) { queued << args }) do
-                Rake::Task['redmine:slack:due_reminders'].reenable
-                yield scope, queued
+            Tracker.stub(:exists?, ->(options) { options[:id] == 2 }) do
+              Project.stub(:find, ->(value) { OpenStruct.new(id: 10) if %w[10 example].include?(value) }) do
+                Version.stub(:named, ->(name) {
+                  Object.new.tap { |item| item.define_singleton_method(:pluck) { |_column| name == '1.0' ? [100] : [] } }
+                }) do
+                  Rails.stub(:logger, logger) do
+                    RedmineSlackDueDigestJob.stub(:perform_later, ->(*args) { queued << args }) do
+                      Rake::Task['redmine:slack:due_reminders'].reenable
+                      yield scope, queued
+                    end
+                  end
+                end
               end
             end
           end
@@ -2278,21 +2319,20 @@ class DueReminderTaskTest < Minitest::Test
     ENV['USERS'] = '3, 5,3'
     with_task do |scope, queued|
       capture_io { Rake::Task['redmine:slack:due_reminders'].invoke }
-      assert_equal [3, 5], scope.filtered_ids
-      assert_equal [[3, '2026-09-30'], [5, '2026-09-30']], queued
+      assert_equal [3, 5], scope.filters[:assigned_to_id]
+      assert_equal [[3, '2026-09-30', {}]], queued
     end
   end
 
-  def test_lowercase_users_and_legacy_user_id
-    { 'users' => '5', 'USER_ID' => '3' }.each do |filter, value|
-      ENV[filter] = value
-      with_task do |scope, queued|
-        capture_io { Rake::Task['redmine:slack:due_reminders'].invoke }
-        expected = value.to_i
-        assert_equal [expected], scope.filtered_ids
-        assert_equal [[expected, '2026-09-30']], queued
-      end
-      ENV.delete(filter)
+  def test_all_redmine_filters_are_passed_to_the_worker
+    ENV.update('days' => '7', 'tracker' => '2', 'project' => 'example',
+               'users' => '3,5', 'version' => '1.0')
+    with_task do |scope, queued|
+      capture_io { Rake::Task['redmine:slack:due_reminders'].invoke }
+      filters = { 'days' => 7, 'tracker_id' => 2, 'project_id' => 10, 'version_ids' => [100] }
+      assert_equal({ assigned_to_id: [3, 5], project_id: 10, tracker_id: 2,
+                     fixed_version_id: [100] }, scope.filters.reject { |key, _value| key == :issue_statuses })
+      assert_equal [[3, '2026-09-30', filters], [5, '2026-09-30', filters]], queued
     end
   end
 
@@ -2302,6 +2342,45 @@ class DueReminderTaskTest < Minitest::Test
       with_task do |_scope, queued|
         assert_raises(SystemExit) { capture_io { Rake::Task['redmine:slack:due_reminders'].invoke } }
         assert_empty queued
+      end
+    end
+  end
+
+  def test_removed_user_id_is_rejected_before_queuing
+    ENV['USER_ID'] = '3'
+    with_task do |_scope, queued|
+      assert_raises(SystemExit) { capture_io { Rake::Task['redmine:slack:due_reminders'].invoke } }
+      assert_empty queued
+    end
+  end
+
+  def test_invalid_redmine_filters_stop_before_queuing
+    [{ 'days' => '-1' }, { 'days' => 'soon' }, { 'tracker' => '99' },
+     { 'version' => 'missing' }, { 'users' => '3', 'USERS' => '5' }].each do |values|
+      ENV.update(values)
+      with_task do |_scope, queued|
+        assert_raises(SystemExit) { capture_io { Rake::Task['redmine:slack:due_reminders'].invoke } }
+        assert_empty queued
+      end
+      values.each_key { |name| ENV.delete(name) }
+    end
+  end
+
+  def test_worker_reapplies_task_filters_and_command_line_days
+    filters = { 'days' => 7, 'project_id' => 10, 'tracker_id' => 2, 'version_ids' => [100] }
+    user = OpenStruct.new(id: 5)
+    scope = Scope.new
+    job = RedmineSlackDueDigestJob.new
+    RedmineSlackNotification.stub(:due_reminder_settings, { enabled: true, days_before: 3 }) do
+      RedmineSlackNotification.stub(:bot_token, 'token') do
+        RedmineSlackNotification.stub(:slack_user_id_for, 'U123') do
+          Issue.stub(:joins, scope) do
+            groups = job.send(:due_issues_for, user, Date.current, filters)
+            assert_equal({ assigned_to_id: 5, project_id: 10, tracker_id: 2,
+                           fixed_version_id: [100] }, scope.filters.reject { |key, _value| key == :issue_statuses })
+            assert_equal [2], groups[['token', 'U123']].map(&:id)
+          end
+        end
       end
     end
   end

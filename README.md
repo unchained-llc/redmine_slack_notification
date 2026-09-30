@@ -288,14 +288,24 @@ bundle exec rake redmine:slack:due_reminders RAILS_ENV=production
 
 Schedule the task once a day with the scheduler used by your Redmine installation. Each execution sends another digest, even on the same day.
 
-For a limited test, set `USERS` to one or more comma-separated **Redmine user IDs**. Only Issues currently assigned to those users are included, and the job checks each assignee again before sending:
+The task accepts the same filters as Redmine's reminder command. Set them as Rake environment arguments; omitted filters include all matching Issues:
+
+| Option | Meaning |
+| --- | --- |
+| `days` | Days before the due date. Overrides `due_reminders.days_before` in the YAML, including project overrides. Without it, the YAML setting applies (default: 3). |
+| `tracker` | Tracker ID. |
+| `project` | Project ID or identifier. |
+| `users` | Comma-separated Redmine user IDs whose assigned Issues should be included. Uppercase `USERS` is also accepted. |
+| `version` | Target version name, matched case-insensitively as in Redmine. |
+
+For example, to restrict a run to users 3 and 5, or to combine all filters:
 
 ```bash
-bundle exec rake redmine:slack:due_reminders RAILS_ENV=production USERS=3
-bundle exec rake redmine:slack:due_reminders RAILS_ENV=production USERS=3,5
+bundle exec rake redmine:slack:due_reminders users=3,5 RAILS_ENV=production
+bundle exec rake redmine:slack:due_reminders days=7 tracker=2 project=example users=3,5 version="1.0" RAILS_ENV=production
 ```
 
-Lowercase `users=3,5`, as used by Redmine's standard reminder task, is also accepted. The previous `USER_ID=3` form remains available for a single user. Specify only one filter at a time. This uses the same date range as the normal run. Every invocation sends the current matching Issues again, including Issues already sent earlier that day. An invalid or nonexistent ID stops the task before any jobs are queued.
+Only Issues matching every supplied filter are included, and the worker checks the filters and assignee again before sending. You can also use `USERS=3` or `USERS=3,5`; do not set both `users` and `USERS`. Invalid values or nonexistent users, trackers, projects, and versions stop the task before any jobs are queued. Every invocation sends the current matching Issues again, including Issues already sent earlier that day.
 
 By default, assigned open Issues are included daily from **three days before their due date** through every overdue day, until their status is marked **closed** in Redmine. The worker sends one compact DM per assignee and groups the linked Issues under overdue, due today, and upcoming headings. Each group has its own color: overdue is red, due today is amber, and upcoming uses the configured attachment color. Issue lines show relative timing without repeating the calendar date; the due-today heading carries that context. A digest with more than 100 Issues is split into numbered messages. Separate bot tokens or Slack user mappings can produce a separate digest for each app. Each run sends the current matching Issues, even if the task already ran that day.
 

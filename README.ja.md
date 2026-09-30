@@ -288,14 +288,24 @@ bundle exec rake redmine:slack:due_reminders RAILS_ENV=production
 
 Redmine の運用環境で使用しているスケジューラーに、このタスクを 1 日 1 回登録してください。同じ日に再実行した場合も、その都度リマインダーが送られます。
 
-対象を絞って試すには、`USERS` に **Redmine のユーザー ID** をカンマ区切りで指定します。指定したユーザーが現在担当する Issue だけを対象にし、送信前に担当者を再確認します。
+Redmine 標準のリマインダーコマンドと同じ絞り込みオプションを Rake の環境引数として指定できます。省略した条件では対象を絞り込みません。
+
+| オプション | 内容 |
+| --- | --- |
+| `days` | 期日の何日前から通知するか。指定するとプロジェクト別設定を含む YAML の `due_reminders.days_before` より優先します。省略時は YAML の設定を使います（初期値: 3 日）。 |
+| `tracker` | トラッカー ID。 |
+| `project` | プロジェクトの ID または識別子。 |
+| `users` | 担当 Issue を通知する Redmine ユーザー ID のカンマ区切り。大文字の `USERS` も使えます。 |
+| `version` | 対象バージョン名。Redmine と同様に大文字・小文字を区別せず照合します。 |
+
+たとえば、ユーザー 3 と 5 だけに絞る場合、またはすべての条件を組み合わせる場合は次のように実行します。
 
 ```bash
-bundle exec rake redmine:slack:due_reminders RAILS_ENV=production USERS=3
-bundle exec rake redmine:slack:due_reminders RAILS_ENV=production USERS=3,5
+bundle exec rake redmine:slack:due_reminders users=3,5 RAILS_ENV=production
+bundle exec rake redmine:slack:due_reminders days=7 tracker=2 project=example users=3,5 version="1.0" RAILS_ENV=production
 ```
 
-Redmine 標準のリマインダータスクと同じ小文字の `users=3,5` も使えます。従来の `USER_ID=3` は 1 人だけ指定する場合に引き続き使えます。フィルターは同時に複数指定できません。対象とする日付の範囲は通常実行と同じです。同じ日に既に通知した Issue も、実行のたびに再送されます。無効な ID や存在しない ID を指定した場合は、ジョブを登録する前にタスクを停止します。
+指定したすべての条件に一致する Issue だけを対象にし、ワーカーも送信前に条件と担当者を再確認します。`USERS=3` や `USERS=3,5` も使えますが、`users` と `USERS` は同時に指定できません。値が無効な場合や指定したユーザー・トラッカー・プロジェクト・バージョンが存在しない場合は、ジョブを登録する前に停止します。同じ日に既に通知した Issue も、実行のたびに再送されます。
 
 初期状態では、担当者がいる未完了の Issue を、期日の **3 日前から**期限超過後も毎日、Redmine のステータスが**終了**になるまで通知します。ワーカーは担当者ごとにコンパクトな DM を 1 通送り、リンク付き Issue を期限超過・本日期日・期日が近い課題の見出しでまとめます。各グループの色は独立しており、初期値は期限超過が赤、本日期日がオレンジ、期日が近い課題には設定済みの attachment 色を使います。Issue 行には日付を繰り返さず相対日数を示し、本日期日の見出しが日付の文脈を示します。100 件を超える場合は番号付きの複数メッセージに分割します。Bot Token または Slack ユーザーの対応付けが異なると、アプリごとに別の DM に分かれます。同じ日にタスクを再実行しても、その時点で対象となる Issue を送ります。
 
