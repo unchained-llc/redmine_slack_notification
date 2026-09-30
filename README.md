@@ -288,6 +288,14 @@ bundle exec rake redmine:slack:due_reminders RAILS_ENV=production
 
 Schedule the task once a day with the scheduler used by your Redmine installation. Each execution sends another digest, even on the same day.
 
+For cron, put the command in a small script that changes to the Redmine directory first:
+
+```sh
+#!/bin/sh
+cd /path/to/redmine || exit 1
+bundle exec rake redmine:slack:due_reminders days=7 RAILS_ENV=production
+```
+
 The task accepts the same filters as Redmine's reminder command. Set them as Rake environment arguments; omitted filters include all matching Issues:
 
 | Option | Meaning |

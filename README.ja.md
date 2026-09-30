@@ -288,6 +288,14 @@ bundle exec rake redmine:slack:due_reminders RAILS_ENV=production
 
 Redmine の運用環境で使用しているスケジューラーに、このタスクを 1 日 1 回登録してください。同じ日に再実行した場合も、その都度リマインダーが送られます。
 
+cron から実行する場合は、先に Redmine のディレクトリへ移動する小さなスクリプトにコマンドを記述します。
+
+```sh
+#!/bin/sh
+cd /path/to/redmine || exit 1
+bundle exec rake redmine:slack:due_reminders days=7 RAILS_ENV=production
+```
+
 Redmine 標準のリマインダーコマンドと同じ絞り込みオプションを Rake の環境引数として指定できます。省略した条件では対象を絞り込みません。
 
 | オプション | 内容 |
