@@ -1,3 +1,5 @@
+[English](README.md) | [日本語](README.ja.md)
+
 # Redmine Event Notifications for Slack
 
 A Redmine 7 plugin that sends Issue, Wiki, News, time entry, Version, and Project events to Slack. It can also send daily Issue due-date reminders to assignees by Slack DM. Notifications use a colored Block Kit attachment with a link to the Redmine record. Delivery runs through ActiveJob, normally on Sidekiq's `slack` queue.
