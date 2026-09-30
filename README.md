@@ -300,7 +300,7 @@ The task accepts the same filters as Redmine's reminder command. Set them as Rak
 
 | Option | Meaning |
 | --- | --- |
-| `days` | Days before the due date. Overrides `due_reminders.days_before` in the YAML, including project overrides. Without it, the YAML setting applies (default: 3). |
+| `days` | Days before the due date. Overrides `due_reminders.days` in the YAML, including project overrides. Without it, the YAML setting applies (default: 3). |
 | `tracker` | Tracker ID. |
 | `project` | Project ID or identifier. |
 | `users` | Comma-separated Redmine user IDs whose assigned Issues should be included. Uppercase `USERS` is also accepted. |
@@ -320,7 +320,7 @@ By default, assigned open Issues are included daily from **three days before the
 ```yaml
 due_reminders:
   enabled: true
-  days_before: 3
+  days: 3
   colors:
     overdue: '#D92D20'
     today: '#F79009'

@@ -2063,11 +2063,11 @@ class DueReminderTest < Minitest::Test
 
   def test_settings_and_project_override
     project = OpenStruct.new(identifier: 'example')
-    config = { 'due_reminders' => { 'days_before' => 3 },
-               'projects' => { 'example' => { 'due_reminders' => { 'days_before' => 7, 'enabled' => false } } } }
+    config = { 'due_reminders' => { 'days' => 3 },
+               'projects' => { 'example' => { 'due_reminders' => { 'days' => 7, 'enabled' => false } } } }
     RedmineSlackNotification.stub(:config, config) do
-      assert_equal({ enabled: false, days_before: 7 }, RedmineSlackNotification.due_reminder_settings(project))
-      assert_equal 7, RedmineSlackNotification.due_reminder_max_days_before
+      assert_equal({ enabled: false, days: 7 }, RedmineSlackNotification.due_reminder_settings(project))
+      assert_equal 7, RedmineSlackNotification.due_reminder_max_days
     end
   end
 
@@ -2291,8 +2291,8 @@ class DueReminderTaskTest < Minitest::Test
     scope = Scope.new
     queued = []
     logger = Object.new.tap { |item| item.define_singleton_method(:info) { |_message| } }
-    RedmineSlackNotification.stub(:due_reminder_max_days_before, 3) do
-      RedmineSlackNotification.stub(:due_reminder_settings, { enabled: true, days_before: 3 }) do
+    RedmineSlackNotification.stub(:due_reminder_max_days, 3) do
+      RedmineSlackNotification.stub(:due_reminder_settings, { enabled: true, days: 3 }) do
         Issue.stub(:joins, scope) do
           User.stub(:exists?, ->(options) { [3, 5, 7].include?(options[:id]) }) do
             Tracker.stub(:exists?, ->(options) { options[:id] == 2 }) do
@@ -2371,7 +2371,7 @@ class DueReminderTaskTest < Minitest::Test
     user = OpenStruct.new(id: 5)
     scope = Scope.new
     job = RedmineSlackDueDigestJob.new
-    RedmineSlackNotification.stub(:due_reminder_settings, { enabled: true, days_before: 3 }) do
+    RedmineSlackNotification.stub(:due_reminder_settings, { enabled: true, days: 3 }) do
       RedmineSlackNotification.stub(:bot_token, 'token') do
         RedmineSlackNotification.stub(:slack_user_id_for, 'U123') do
           Issue.stub(:joins, scope) do

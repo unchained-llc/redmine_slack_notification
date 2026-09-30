@@ -34,7 +34,7 @@ class RedmineSlackDueDigestJob < ApplicationJob
   private
 
   def due_issues_for(user, today, filters = {})
-    max_days = filters.fetch('days') { RedmineSlackNotification.due_reminder_max_days_before }
+    max_days = filters.fetch('days') { RedmineSlackNotification.due_reminder_max_days }
     issues = Issue.joins(:status).where(issue_statuses: { is_closed: false })
                   .where(assigned_to_id: user.id)
                   .where('issues.due_date <= ?', today + max_days)
@@ -44,7 +44,7 @@ class RedmineSlackDueDigestJob < ApplicationJob
     issues.find_each do |issue|
       project = issue.project
       settings = RedmineSlackNotification.due_reminder_settings(project)
-      next unless settings[:enabled] && issue.due_date <= today + filters.fetch('days', settings[:days_before])
+      next unless settings[:enabled] && issue.due_date <= today + filters.fetch('days', settings[:days])
       next unless project.active? && issue.visible?(user)
       RedmineSlackNotification.with_project(project) do
         token = RedmineSlackNotification.bot_token(project)

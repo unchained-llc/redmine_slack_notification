@@ -50,7 +50,7 @@ namespace :redmine do
       end
 
       today = Date.current
-      max_days = options.fetch('days') { RedmineSlackNotification.due_reminder_max_days_before }
+      max_days = options.fetch('days') { RedmineSlackNotification.due_reminder_max_days }
       scope = Issue.joins(:status).where(issue_statuses: { is_closed: false })
                    .where.not(assigned_to_id: nil)
                    .where('issues.due_date <= ?', today + max_days)
@@ -59,7 +59,7 @@ namespace :redmine do
       user_ids = []
       scope.find_each do |issue|
         settings = RedmineSlackNotification.due_reminder_settings(issue.project)
-        next unless settings[:enabled] && issue.due_date <= today + options.fetch('days', settings[:days_before])
+        next unless settings[:enabled] && issue.due_date <= today + options.fetch('days', settings[:days])
 
         user_ids << issue.assigned_to_id
       end

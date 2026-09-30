@@ -179,19 +179,19 @@ module RedmineSlackNotification
   def due_reminder_settings(project = nil)
     settings = effective_config(project)['due_reminders']
     settings = {} unless settings.is_a?(Hash)
-    days = Integer(settings.fetch('days_before', 3), exception: false)
-    { enabled: settings['enabled'] != false, days_before: days && days.between?(0, 365) ? days : 3 }
+    days = Integer(settings.fetch('days', 3), exception: false)
+    { enabled: settings['enabled'] != false, days: days && days.between?(0, 365) ? days : 3 }
   end
 
-  def due_reminder_max_days_before
+  def due_reminder_max_days
     projects = config['projects']
     project_days = projects.is_a?(Hash) ? projects.values.each_with_object([]) do |settings, days_list|
       next unless settings.is_a?(Hash) && settings['due_reminders'].is_a?(Hash)
 
-      days = Integer(settings['due_reminders']['days_before'], exception: false)
+      days = Integer(settings['due_reminders']['days'], exception: false)
       days_list << days if days && days.between?(0, 365)
     end : []
-    ([due_reminder_settings[:days_before]] + project_days).max
+    ([due_reminder_settings[:days]] + project_days).max
   end
 
   def due_reminder_filter_scope(scope, options)

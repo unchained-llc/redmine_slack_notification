@@ -300,7 +300,7 @@ Redmine 標準のリマインダーコマンドと同じ絞り込みオプショ
 
 | オプション | 内容 |
 | --- | --- |
-| `days` | 期日の何日前から通知するか。指定するとプロジェクト別設定を含む YAML の `due_reminders.days_before` より優先します。省略時は YAML の設定を使います（初期値: 3 日）。 |
+| `days` | 期日の何日前から通知するか。指定するとプロジェクト別設定を含む YAML の `due_reminders.days` より優先します。省略時は YAML の設定を使います（初期値: 3 日）。 |
 | `tracker` | トラッカー ID。 |
 | `project` | プロジェクトの ID または識別子。 |
 | `users` | 担当 Issue を通知する Redmine ユーザー ID のカンマ区切り。大文字の `USERS` も使えます。 |
@@ -320,7 +320,7 @@ bundle exec rake redmine:slack:due_reminders days=7 tracker=2 project=example us
 ```yaml
 due_reminders:
   enabled: true
-  days_before: 3
+  days: 3
   colors:
     overdue: '#D92D20'
     today: '#F79009'
