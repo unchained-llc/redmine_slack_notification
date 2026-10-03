@@ -62,17 +62,54 @@ module RedmineSlackNotification
       Issue.find_by(id: match[1].to_i)
     end
 
-    # Resolve only explicit mappings; display-name matching cannot authorize
-    # access to Redmine data. Ambiguous, locked, or missing users are denied.
+    # Explicit mappings take priority. Optional email matching never uses
+    # display names to authorize access to Redmine data.
     def viewer_for(slack_id)
       return unless slack_id.to_s.match?(/\A[UW][A-Z0-9]+\z/)
 
-      users = RedmineSlackNotification.user_mapping.map do |key, value|
-        next unless value == slack_id
+      mapping = RedmineSlackNotification.user_mapping
+      explicit_keys = mapping.select { |_key, value| value == slack_id }.keys
+      unless explicit_keys.empty?
+        users = explicit_keys.map do |key|
+          User.find_by(login: key.to_s) || User.find_by(mail: key.to_s)
+        end.compact.uniq { |user| user.id }
+        return users.first if users.length == 1 && users.first.active?
+        return nil
+      end
+      viewer_by_email(slack_id, mapping)
+    end
 
-        User.find_by(login: key.to_s) || User.find_by(mail: key.to_s)
-      end.compact.uniq { |user| user.id }
-      users.first if users.length == 1 && users.first.active?
+    def viewer_by_email(slack_id, mapping)
+      settings = RedmineSlackNotification.effective_config
+      return unless settings.dig('slack', 'auto_map_users_by_email') == true
+      token = RedmineSlackNotification.bot_token
+      return if token.to_s.empty?
+
+      # Fetch fresh identity data for each authorization; do not persist emails
+      # or cache permissions in Redis, files, or process memory.
+      response = RedmineSlackNotification.slack_api('users.info', { 'user' => slack_id }, token,
+        form: true, open_timeout: 2, read_timeout: 3)
+      member = response['user']
+      return unless member.is_a?(Hash) && member['id'] == slack_id
+      return if member['deleted'] || member['is_bot'] || member['is_app_user'] || member['is_stranger']
+      team_id = settings.dig('slack', 'events', 'team_id').to_s
+      return if !team_id.empty? && (member['team_id'] || member['team']) != team_id
+      email = member.dig('profile', 'email').to_s.strip.downcase
+      return if email.empty?
+
+      users = User.active.joins(:email_addresses).where('LOWER(email_addresses.address) = ?', email).distinct.limit(2).to_a
+      return unless users.length == 1
+      viewer = users.first
+      # A manual mapping of this Redmine identity to another Slack user wins.
+      assigned = [mapping[viewer.login.to_s], mapping[viewer.mail.to_s]].select do |value|
+        value.is_a?(String) && value.match?(/\A[UW][A-Z0-9]+\z/)
+      end
+      return if assigned.any? { |value| value != slack_id }
+
+      viewer if viewer.active?
+    rescue StandardError => e
+      Rails.logger&.warn("RedmineSlackNotification: email user matching failed: #{e.class}")
+      nil
     end
 
     def present_details(app_id, team_id, event)

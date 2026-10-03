@@ -25,9 +25,13 @@ end
 
 class Project < OpenStruct
   def self.find_by(**); nil; end
+  def self.active; []; end
 end
 
-class User
+class User < ActiveRecord::Base
+  def active?; status == 1; end
+  has_many :email_addresses
+  scope :active, -> { where(status: 1) }
   class << self
     attr_accessor :current
   end
@@ -38,6 +42,8 @@ require_relative '../lib/redmine_slack_notification'
 ActiveRecord::Base.establish_connection(adapter: 'sqlite3', database: ':memory:')
 ActiveRecord::Schema.verbose = false
 ActiveRecord::Schema.define do
+  create_table(:users) { |t| t.string :login; t.integer :status; t.string :mail }
+  create_table(:email_addresses) { |t| t.integer :user_id; t.string :address }
   create_table(:issues) { |t| t.string :subject }
   create_table(:journals) do |t|
     t.integer :issue_id
@@ -45,6 +51,9 @@ ActiveRecord::Schema.define do
     t.text :notes
     t.datetime :created_on, precision: 6
   end
+end
+
+class EmailAddress < ActiveRecord::Base
 end
 
 class Issue < ActiveRecord::Base
@@ -74,6 +83,8 @@ class ThreadCommentsPersistenceTest < Minitest::Test
   COMMENTS = RedmineSlackNotification::ThreadComments
 
   def setup
+    EmailAddress.delete_all
+    User.delete_all
     Journal.delete_all
     Issue.delete_all
     @project = Project.new(identifier: 'agentic', active?: true)
@@ -225,6 +236,77 @@ class ThreadCommentsPersistenceTest < Minitest::Test
         assert_nil COMMENTS.process('ATEST', 'TTEST', @event)
       end
     end
+  end
+
+  def test_automatic_channel_projects_accept_replies_without_project_yaml_entries
+    @settings['slack']['auto_map_channels_by_name'] = true
+    RedmineSlackNotification.stub(:config, @settings) do
+      Project.stub(:active, [@project]) do
+        RedmineSlackNotification::ChannelMatching.stub(:channel_for, 'C123') do
+          assert_includes COMMENTS.contexts('ATEST', 'TTEST', 'C123'), @project
+          assert COMMENTS.accepted_reply?('ATEST', 'TTEST', @event)
+        end
+      end
+    end
+  end
+
+  def email_viewer(member = {})
+    profile = { 'id' => 'U123', 'team_id' => 'TTEST', 'profile' => { 'email' => 'KOTA@EXAMPLE.COM' } }.merge(member)
+    RedmineSlackNotification.stub(:config, @settings) do
+      RedmineSlackNotification.stub(:slack_api, ->(*) { { 'user' => profile } }) do
+        RedmineSlackNotification::WorkObjects.viewer_for('U123')
+      end
+    end
+  end
+
+  def create_email_user(login: 'kota', status: 1)
+    user = User.create!(login: login, status: status, mail: 'kota@example.com')
+    user.email_addresses.create!(address: 'kota@example.com')
+    user
+  end
+
+  def test_email_matching_is_opt_in_and_requires_unique_active_user
+    user = create_email_user
+    assert_nil email_viewer
+    @settings['slack']['auto_map_users_by_email'] = true
+    assert_equal user, email_viewer
+    create_email_user(login: 'duplicate')
+    assert_nil email_viewer
+    User.where(login: 'duplicate').update_all(status: 3)
+    assert_equal user, email_viewer
+    user.update!(status: 3)
+    assert_nil email_viewer
+  end
+
+  def test_email_matching_rejects_foreign_bot_deleted_and_missing_email_identities
+    create_email_user
+    @settings['slack']['auto_map_users_by_email'] = true
+    [{ 'id' => 'UOTHER' }, { 'team_id' => 'TOTHER' }, { 'is_bot' => true },
+     { 'is_app_user' => true }, { 'deleted' => true }, { 'is_stranger' => true },
+     { 'profile' => {} }].each { |member| assert_nil email_viewer(member) }
+  end
+
+  def test_explicit_user_mapping_wins_even_when_invalid_or_locked
+    user = create_email_user
+    @settings['slack']['auto_map_users_by_email'] = true
+    @settings['users'] = { 'kota' => 'UOTHER' }
+    assert_nil email_viewer
+    @settings['users'] = { 'kota' => 'U123' }
+    assert_equal user, email_viewer
+    user.update!(status: 3)
+    assert_nil email_viewer
+    @settings['users'] = { 'missing-user' => 'U123' }
+    assert_nil email_viewer
+  end
+
+  def test_email_api_failure_denies_access_without_saving
+    @settings['slack']['auto_map_users_by_email'] = true
+    RedmineSlackNotification.stub(:config, @settings) do
+      RedmineSlackNotification.stub(:slack_api, ->(*) { raise IOError, 'Unavailable' }) do
+        assert_nil RedmineSlackNotification::WorkObjects.viewer_for('U123')
+      end
+    end
+    assert_equal 0, Journal.count
   end
 
   def test_processing_fetches_only_parent_and_does_not_post_feedback_twice

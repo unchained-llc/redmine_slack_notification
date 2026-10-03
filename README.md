@@ -40,7 +40,7 @@ The plugin reads the first configuration file it finds:
 1. `<Redmine root>/config/redmine_slack_notification.yml`
 2. `plugins/redmine_slack_notification/config/redmine_slack_notification.yml`
 
-Every top-level configuration group can be overridden under `projects.<identifier>`: `slack`, `events`, `messages`, `users`, and `due_reminders`. Nested maps merge by key, so omitted project keys inherit the global value. Explicit `false` values override `true`. For Bot Tokens, the priority is `projects.<identifier>.slack.bot_token`, then `SLACK_BOT_TOKEN`, then global `slack.bot_token`. For channels, `projects.<identifier>.slack.default_channel_id` takes priority over the older `projects.<identifier>.channel_id`, then global `slack.default_channel_id`. Project keys are Redmine **identifiers**, not display names. A missing token or channel prevents delivery and is logged. Channel IDs typically begin with `C` for public channels or `G` for private channels. Keep every project token out of Git and restart Redmine and Sidekiq after changing the YAML.
+Every top-level configuration group can be overridden under `projects.<identifier>`: `slack`, `events`, `messages`, `users`, and `due_reminders`. Nested maps merge by key, so omitted project keys inherit the global value. Explicit `false` values override `true`. For Bot Tokens, the priority is `projects.<identifier>.slack.bot_token`, then `SLACK_BOT_TOKEN`, then global `slack.bot_token`. For channels, `projects.<identifier>.slack.default_channel_id` takes priority over the older `projects.<identifier>.channel_id`, then a unique automatic name match when enabled, then global `slack.default_channel_id`. Project keys are Redmine **identifiers**, not display names. A missing token or channel prevents delivery and is logged. Channel IDs typically begin with `C` for public channels or `G` for private channels. Keep every project token out of Git and restart Redmine and Sidekiq after changing the YAML.
 
 For example, this project uses its own token and channel, disables comment notifications, hides Issue project metadata, changes the card color and heading, and overrides one Slack user mapping. Other settings retain their global values:
 
@@ -242,13 +242,47 @@ users:
 3. Add `entity_details_requested` under **Subscribe to bot events** and **Save Changes**. No additional OAuth scopes are required for this event or `entity.presentDetails`.
 4. Open a Work Object card and check status, assignee, due date, and description. Change the Issue in Redmine and refresh the detail pane to verify the current values. A new notification is unnecessary.
 
-The endpoint verifies the signature, timestamp, app, and workspace before enqueueing work on the existing `slack` queue. Authorization uses explicit `users` mappings from Redmine login/email to Slack ID; `auto_map_users_by_name` is never used to grant access. Unmapped, locked, or unauthorized users, private Issues, inactive projects, and projects with previews disabled receive a restricted response without Issue content. Project-specific apps can override `projects.<identifier>.slack.events` and `users`.
+The endpoint verifies the signature, timestamp, app, and workspace before enqueueing work on the existing `slack` queue. Authorization uses explicit `users` mappings from Redmine login/email to Slack ID or enabled `auto_map_users_by_email` matching; `auto_map_users_by_name` is never used to grant access. Unmapped, locked, or unauthorized users, private Issues, inactive projects, and projects with previews disabled receive a restricted response without Issue content. Project-specific apps can override `projects.<identifier>.slack.events` and `users`.
 
 Authorized details include the current title, Issue ID, tracker, project, status, priority, assignee, author, due date, creation/update timestamps, and description (up to 10,000 characters). Detail fields are independent of notification `slack.metadata.issue` settings. Comments, Redmine custom fields, editing inside Slack, and pasted-link unfurls are not included.
 
 Check Redmine/Sidekiq logs for `Work Object details`: `shown`/`restricted` describe the response path; `failed` includes the Slack API error code. If Slack returns `missing_interactivity_url`, configure the app's **Interactivity & Shortcuts** Request URL.
 
 The Work Object's conversation view is separate from Redmine's comment history. Displaying and posting Redmine comments inside the detail pane are not implemented yet. Posting comments from notification threads is available through the following setting.
+
+### Match viewers by email
+
+Set `slack.auto_map_users_by_email: true` to authorize Work Object details and Slack thread replies by matching the Slack member's email to exactly one active Redmine user's registered email address (including additional addresses). Matching is case-insensitive. Existing `users` mappings take priority, including mappings that are invalid, locked, ambiguous, or assign the Redmine user to another Slack identity; email matching does not bypass them. Issue visibility and comment permissions are still checked.
+
+```yaml
+slack:
+  auto_map_users_by_email: true
+```
+
+Add both `users:read` and `users:read.email` Bot Token scopes, then reinstall the app. The plugin fetches fresh identity data with `users.info` for each authorization. Missing email, multiple active Redmine matches, inactive users, bots, deleted Slack users, foreign-workspace identities, and API failures deny automatic access. The configured `slack.events.team_id` must match the Slack identity's workspace. Email identity data is not cached or saved in a new table, Redis, or a file, and is not included in diagnostic logs. Override the switch under `projects.<identifier>.slack.auto_map_users_by_email`.
+
+This is distinct from `auto_map_users_by_name`, which only resolves outgoing mentions and due-reminder recipients. Email matching is for incoming viewer/comment authorization and does not automatically enable outgoing mentions or DMs.
+
+### Match projects to channels by name
+
+Enable `slack.auto_map_channels_by_name: true` to match Redmine project **display names** to Slack channel names. Names are trimmed and compared case-insensitively; whitespace becomes a hyphen (`Customer Support` → `customer-support`). Project identifiers are not used for matching. No fuzzy matching, channel creation, or automatic joining is performed.
+
+```yaml
+slack:
+  auto_map_channels_by_name: true
+  default_channel_id: 'C0123456789' # Optional fallback
+projects:
+  example:
+    slack:
+      auto_map_channels_by_name: false
+      default_channel_id: 'C0234567890'
+```
+
+Routing priority is explicit project `slack.default_channel_id`, legacy project `channel_id`, a unique name match, then global `slack.default_channel_id`. A missing match, ambiguous match, or API failure uses the global fallback; without a fallback, delivery is skipped and logged. The switch can be overridden per project.
+
+The plugin uses `users.conversations` to list only channels the Bot belongs to. Add `channels:read` for public channels and `groups:read` for private channels, then reinstall the app. These are separate from the `*:history` scopes used for threaded notifications. Archived channels and DMs are excluded. Listings are cached by Bot Token in process memory for ten minutes; no DB, Redis, file storage, or Rails cache is used. Rename/membership changes can take up to ten minutes to be reflected; restarting workers clears their caches. Listing is bounded to ten pages of 200 channels; incomplete or failed listings are not used for matching. Each worker has its own cache.
+
+Automatic routing also applies to comment notification threads and Slack-to-Redmine thread replies. Projects do not need YAML entries to participate when the global switch is enabled; existing reply permissions and explicit user mappings or enabled email matching still apply.
 
 ### Threaded Redmine comment notifications
 
@@ -298,7 +332,7 @@ For private channels, add the Bot Token scope `groups:history` and subscribe to 
 
 No extra tables, DB migrations, or Redis processing-state entries are required. The plugin fetches only the parent notification through `conversations.history`, verifies its app ID and canonical Issue subject URL, and accepts replies only in channels currently configured as notification destinations. Existing notifications are supported. Replies to other apps, users, or arbitrary Issue links are ignored.
 
-Authorization requires an explicit `users` mapping to an active Redmine user, Issue visibility, and tracker-aware permission to add notes. Private Issues, inactive projects, and unmapped users are denied. Incoming Slack text is stored up to 10,000 characters without adding IDs or provenance lines. The existing Journal `created_on` is set to the original Slack posting time, parsed without floating-point conversion. The Issue, mapped author, and posting time identify repeated deliveries. The existing Issue row lock serializes duplicate checks and comment saves. No additional tables, columns, Redis state, or state files are required. Editing the comment text does not affect duplicate detection. Legacy comments containing provenance lines are still recognized as duplicates.
+Authorization requires an explicit `users` mapping or enabled unique email matching to an active Redmine user, Issue visibility, and tracker-aware permission to add notes. Private Issues, inactive projects, and unmapped users are denied. Incoming Slack text is stored up to 10,000 characters without adding IDs or provenance lines. The existing Journal `created_on` is set to the original Slack posting time, parsed without floating-point conversion. The Issue, mapped author, and posting time identify repeated deliveries. The existing Issue row lock serializes duplicate checks and comment saves. No additional tables, columns, Redis state, or state files are required. Editing the comment text does not affect duplicate detection. Legacy comments containing provenance lines are still recognized as duplicates.
 
 Reliable duplicate detection requires the existing `journals.created_on` column to preserve microseconds (six fractional digits). Lower timestamp precision may treat distinct replies from the same author as duplicates. A different comment by the same mapped author on the same Issue at the exact same timestamp is also treated as a duplicate. Deleting the comment or changing its author or posting time removes its duplicate protection. Existing provenance lines are not removed automatically.
 

@@ -8,13 +8,23 @@ slack:
   default_channel_id: 'C0123456789'
   # Requires users:read and an app reinstall. Ambiguous names are not mentioned.
   auto_map_users_by_name: false
+  # Authorize Work Object details/thread replies using a unique active Redmine
+  # user with a matching registered email. Explicit users mappings take priority.
+  # Requires users:read + users:read.email and an app reinstall.
+  auto_map_users_by_email: false
+  # Match project display names to bot-member channel names (case-insensitive;
+  # spaces become hyphens). Explicit project channel IDs take priority.
+  # No unique match/API failure falls back to default_channel_id.
+  # Requires channels:read (public) / groups:read (private) and app reinstall.
+  # Channel listings are cached in process memory for 10 minutes.
+  auto_map_channels_by_name: false
   # Add a Task Work Object preview to public Issue creation/update/comment
   # notifications. Enable Work Object Previews > Task in the Slack app too.
   # Existing event cards remain. Deleted Issues and due-date DMs are excluded.
   # Override per project with projects.<identifier>.slack.work_object_previews.
   work_object_previews: false
   # Save text replies to Issue notification threads as Redmine notes.
-  # Requires slack.events, explicit users mappings,
+  # Requires slack.events, explicit users mappings or auto_map_users_by_email,
   # message.groups + groups:history (private channels), and an app reinstall.
   thread_comments: false
   # Post comment-only additions/edits/deletions in the latest Issue notification
