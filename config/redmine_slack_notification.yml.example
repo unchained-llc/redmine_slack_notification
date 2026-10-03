@@ -17,8 +17,14 @@ slack:
   # Requires slack.events, explicit users mappings,
   # message.groups + groups:history (private channels), and an app reinstall.
   thread_comments: false
+  # Post comment-only additions/edits/deletions in the latest Issue notification
+  # thread, showing only the comment body (edits/deletions retain body/diffs).
+  # Falls back to a full channel notification if no match is found or lookup fails.
+  # Requires slack.events.app_id and groups:history / channels:history.
+  # Search is bounded to 3 pages of up to 100 channel messages each.
+  comment_notifications_in_threads: false
   # Required for clickable Work Object details. Configure the Slack app's
-  # Events Request URL as https://YOUR-REDMINE/redmine_slack/events and subscribe
+  # Events Request URL as https://redmine.example.com/redmine_slack/events and subscribe
   # to entity_details_requested. The Signing Secret is NOT the Bot Token.
   # events:
   #   app_id: 'A0123456789'
@@ -244,6 +250,13 @@ messages:
   # Projects may override any messages key under projects.<identifier>.messages.
   work_objects:
     product_name: 'Redmine'
+  # Headings for compact comment notifications inside Slack threads.
+  # Supports %{product_name}, %{id}, %{actor}, and %{subject}.
+  # References to the current Issue as #%{id} automatically become links.
+  thread_notifications:
+    added_header: '%{product_name} #%{id}: New comment'
+    updated_header: '%{product_name} #%{id}: Comment updated'
+    deleted_header: '%{product_name} #%{id}: Comment deleted'
   thread_comments:
     # Supports %{id} and %{product_name}.
     saved: '✅ Comment added to Redmine #%{id}.'
