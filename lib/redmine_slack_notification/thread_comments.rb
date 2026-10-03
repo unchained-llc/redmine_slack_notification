@@ -84,6 +84,7 @@ module RedmineSlackNotification
           key = result == :saved ? 'saved' : 'restricted'
           text = Formatter.interpolate(Formatter.message('thread_comments', key), { id: issue.id, product_name: Formatter.message('work_objects', 'product_name') },
                                        fallback: Formatter::DEFAULT_MESSAGES.dig('thread_comments', key))
+          text = Formatter.link_issue_reference(text, issue.id)
           begin
             RedmineSlackNotification.slack_api('chat.postMessage', {
               'channel' => event['channel'], 'thread_ts' => event['thread_ts'], 'text' => text,

@@ -336,7 +336,7 @@ Authorization requires an explicit `users` mapping or enabled unique email match
 
 Reliable duplicate detection requires the existing `journals.created_on` column to preserve microseconds (six fractional digits). Lower timestamp precision may treat distinct replies from the same author as duplicates. A different comment by the same mapped author on the same Issue at the exact same timestamp is also treated as a duplicate. Deleting the comment or changing its author or posting time removes its duplicate protection. Existing provenance lines are not removed automatically.
 
-Customize the service name shown in Work Object cards and detail headers/open buttons with `messages.work_objects.product_name` (default: `Redmine`). Thread reply feedback supports `%{id}` and `%{product_name}`. All these keys support overrides under `projects.<identifier>.messages`.
+Customize the service name shown in Work Object cards and detail headers/open buttons with `messages.work_objects.product_name` (default: `Redmine`). Thread reply feedback supports `%{id}` and `%{product_name}`. References using `#%{id}` automatically link to the Issue, including success and restriction feedback. All these keys support overrides under `projects.<identifier>.messages`.
 
 ```yaml
 messages:

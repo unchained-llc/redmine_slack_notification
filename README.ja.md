@@ -336,7 +336,7 @@ Slack 側では非公開チャンネル用の Bot Token スコープ `groups:his
 
 正確な重複判定には、既存の `journals.created_on` がマイクロ秒（小数点以下6桁）を保持できることが必要です。日時の精度が低い環境では、同じ投稿者の別の返信を重複と判断する場合があります。同じチケット・対応付けた投稿者・完全に同じ投稿時刻の別コメントも重複と判断します。コメントを削除したり、投稿者や投稿時刻を変更したりすると、その返信の重複判定はできなくなります。既存コメントの出典行は自動では削除しません。
 
-Work Objectのカードや詳細ヘッダー、「〜で開く」に使うサービス名は `messages.work_objects.product_name` で変更できます（既定値: `Redmine`）。返信結果の文言には `%{id}` と `%{product_name}` を使えます。すべて `projects.<identifier>.messages` でプロジェクト別に上書きできます。
+Work Objectのカードや詳細ヘッダー、「〜で開く」に使うサービス名は `messages.work_objects.product_name` で変更できます（既定値: `Redmine`）。返信結果の文言には `%{id}` と `%{product_name}` を使えます。成功・拒否の確認メッセージ内の `#%{id}` もチケットへのリンクになります。すべて `projects.<identifier>.messages` でプロジェクト別に上書きできます。
 
 ```yaml
 messages:
