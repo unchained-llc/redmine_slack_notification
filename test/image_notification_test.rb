@@ -2890,3 +2890,94 @@ class CommentThreadDeliveryTest < Minitest::Test
     refute checker.notification_for_issue?(@root, 7, 'ATEST')
   end
 end
+
+class AutomaticChannelMatchingTest < Minitest::Test
+  MATCHING = RedmineSlackNotification::ChannelMatching
+
+  def setup
+    MATCHING.instance_variable_set(:@cache, {})
+    @project = OpenStruct.new(identifier: 'support', name: 'Customer Support')
+    @settings = { 'slack' => { 'auto_map_channels_by_name' => true,
+      'bot_token' => 'channel-test-token', 'default_channel_id' => 'CDEFAULT' } }
+  end
+
+  def resolve(api)
+    RedmineSlackNotification.stub(:config, @settings) do
+      RedmineSlackNotification.stub(:slack_api, api) { RedmineSlackNotification.channel_id(@project) }
+    end
+  end
+
+  def channel(id = 'CMATCH', name = 'customer-support')
+    { 'id' => id, 'name' => name }
+  end
+
+  def test_display_name_matches_case_and_spaces_without_identifier_guessing
+    api = ->(method, request, token, **options) do
+      assert_equal 'users.conversations', method
+      assert_equal 'public_channel,private_channel', request['types']
+      assert request['exclude_archived']
+      assert options[:form]
+      assert_equal 'channel-test-token', token
+      { 'channels' => [channel] }
+    end
+    assert_equal 'CMATCH', resolve(api)
+    @project.name = ' CUSTOMER   SUPPORT '
+    assert_equal 'CMATCH', resolve(->(*) { flunk 'Directory should be cached' })
+    @project.name = 'Different name'
+    assert_equal 'CDEFAULT', resolve(->(*) { flunk 'Directory should be cached' })
+  end
+
+  def test_explicit_project_channel_ids_take_priority_and_do_not_fetch
+    @settings['projects'] = { 'support' => { 'slack' => { 'default_channel_id' => 'CEXPLICIT' }, 'channel_id' => 'CLEGACY' } }
+    assert_equal 'CEXPLICIT', resolve(->(*) { flunk 'Explicit channel lookup' })
+    @settings['projects']['support']['slack'].delete('default_channel_id')
+    assert_equal 'CLEGACY', resolve(->(*) { flunk 'Explicit legacy channel lookup' })
+  end
+
+  def test_disabled_project_override_and_non_boolean_settings_preserve_default
+    [false, nil, 'true'].each do |value|
+      @settings['projects'] = { 'support' => { 'slack' => { 'auto_map_channels_by_name' => value } } }
+      assert_equal 'CDEFAULT', resolve(->(*) { flunk 'Disabled matching' })
+    end
+  end
+
+  def test_ambiguous_or_unavailable_channels_fall_back
+    api = ->(*) { { 'channels' => [channel, channel('CSECOND')] } }
+    assert_equal 'CDEFAULT', resolve(api)
+    MATCHING.instance_variable_set(:@cache, {})
+    invalid = [channel.merge('is_archived' => true), channel.merge('is_member' => false),
+      channel.merge('is_im' => true), channel.merge('is_mpim' => true)]
+    assert_equal 'CDEFAULT', resolve(->(*) { { 'channels' => invalid } })
+    @settings['slack'].delete('default_channel_id')
+    assert_equal '', resolve(->(*) { flunk 'Directory should be cached' })
+  end
+
+  def test_pagination_and_token_specific_cache
+    calls = []
+    api = ->(_method, request, token, **_options) do
+      calls << [request, token]
+      request['cursor'] ? { 'channels' => [channel] } : { 'channels' => [], 'response_metadata' => { 'next_cursor' => 'next' } }
+    end
+    assert_equal 'CMATCH', resolve(api)
+    assert_equal 'next', calls[1][0]['cursor']
+    assert_equal 'CMATCH', resolve(->(*) { flunk 'Cached directory' })
+    @settings['projects'] = { 'support' => { 'slack' => { 'bot_token' => 'other-token' } } }
+    assert_equal 'CMATCH', resolve(api)
+    assert_equal 'other-token', calls.last[1]
+  end
+
+  def test_api_failures_and_incomplete_lists_do_not_route_to_partial_matches
+    assert_equal 'CDEFAULT', resolve(->(*) { raise IOError, 'API failure' })
+    MATCHING.instance_variable_set(:@cache, {})
+    calls = 0
+    api = ->(*) { calls += 1; { 'channels' => [channel], 'response_metadata' => { 'next_cursor' => 'repeated' } } }
+    assert_equal 'CDEFAULT', resolve(api)
+    assert_equal 2, calls
+  end
+
+  def test_expired_memory_cache_is_refreshed
+    key = Digest::SHA256.hexdigest('channel-test-token')
+    MATCHING.instance_variable_set(:@cache, { key => { expires_at: 0, channels: { 'customer-support' => ['COLD'] } } })
+    assert_equal 'CMATCH', resolve(->(*) { { 'channels' => [channel] } })
+  end
+end

@@ -24,7 +24,11 @@ module RedmineSlackNotification
       candidates = [nil]
       projects = base['projects']
       candidates.concat(projects.keys.map { |key| Project.find_by(identifier: key) }.compact) if projects.is_a?(Hash)
-      candidates.select do |project|
+      auto_scopes = [base] + (projects.is_a?(Hash) ? projects.values.select { |value| value.is_a?(Hash) } : [])
+      if auto_scopes.any? { |scope| scope.dig('slack', 'auto_map_channels_by_name') == true }
+        candidates.concat(Project.active.to_a)
+      end
+      candidates.uniq.select do |project|
         settings = RedmineSlackNotification.effective_config(project)
         slack = settings['slack']
         events = slack['events'] if slack.is_a?(Hash)

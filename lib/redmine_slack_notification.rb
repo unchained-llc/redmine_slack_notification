@@ -158,7 +158,7 @@ module RedmineSlackNotification
     project_slack = settings['slack']
     project_channel = project_slack['default_channel_id'].to_s.strip.presence if project_slack.is_a?(Hash)
     project_channel ||= settings['channel_id'].to_s.strip.presence
-    (project_channel.presence || config.dig('slack', 'default_channel_id')).to_s.strip
+    (project_channel.presence || ChannelMatching.channel_for(project) || config.dig('slack', 'default_channel_id')).to_s.strip
   end
 
   def user_mapping
@@ -533,6 +533,7 @@ require_relative 'redmine_slack_notification/generic_patches'
 require_relative 'redmine_slack_notification/work_objects'
 require_relative 'redmine_slack_notification/thread_comments'
 require_relative 'redmine_slack_notification/comment_threads'
+require_relative 'redmine_slack_notification/channel_matching'
 
 
 module RedmineSlackNotification
