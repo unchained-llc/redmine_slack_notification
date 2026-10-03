@@ -234,7 +234,7 @@ slack:
     team_id: 'T0123456789'
     signing_secret: 'REPLACE-ME'
 users:
-  kota: 'U0123456789' # 実際のSlackメンバーIDに置き換える
+  alice: 'U0123456789' # 実際のSlackメンバーIDに置き換える
 ```
 
 1. コードと YAML を配置し、Redmine と Sidekiq を再起動します。Sidekiq が `slack` キューを処理していることを確認してください。
@@ -321,7 +321,7 @@ slack:
     team_id: 'T0123456789'
     signing_secret: 'REPLACE-ME'
 users:
-  kota: 'U0123456789' # 実際のSlackメンバーID
+  alice: 'U0123456789' # 実際のSlackメンバーID
 projects:
   another-project:
     slack:
@@ -341,7 +341,7 @@ Work Objectのカードや詳細ヘッダー、「〜で開く」に使うサー
 ```yaml
 messages:
   work_objects:
-    product_name: 'Redmine'
+    product_name: 'Example Tracker'
   thread_comments:
     saved: '✅ Comment added to %{product_name} #%{id}.'
     restricted: '⚠️ Could not add the comment. Check your permissions.'
@@ -399,7 +399,7 @@ slack:
 | `messages.templates` | Issue 更新時の見出しと、attachment のプレーンテキスト代替表示 |
 | `messages.due_reminders` | 毎日の DM の見出し、ラベル、相対日数、代替表示 |
 
-Issue の更新通知の見出しには、更新した Redmine ユーザーを使います。Slack マークアップでの初期形式は `🔄 Kota *Issue updated*` です。プラグインを編集せずに、アイコンの後の文言を変更できます。
+Issue の更新通知の見出しには、更新した Redmine ユーザーを使います。Slack マークアップでの初期形式は `🔄 Alice *Issue updated*` です。プラグインを編集せずに、アイコンの後の文言を変更できます。
 
 ```yaml
 messages:

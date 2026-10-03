@@ -251,7 +251,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
   end
 
   def email_viewer(member = {})
-    profile = { 'id' => 'U123', 'team_id' => 'TTEST', 'profile' => { 'email' => 'KOTA@EXAMPLE.COM' } }.merge(member)
+    profile = { 'id' => 'U123', 'team_id' => 'TTEST', 'profile' => { 'email' => 'ALICE@EXAMPLE.COM' } }.merge(member)
     RedmineSlackNotification.stub(:config, @settings) do
       RedmineSlackNotification.stub(:slack_api, ->(*) { { 'user' => profile } }) do
         RedmineSlackNotification::WorkObjects.viewer_for('U123')
@@ -259,9 +259,9 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     end
   end
 
-  def create_email_user(login: 'kota', status: 1)
-    user = User.create!(login: login, status: status, mail: 'kota@example.com')
-    user.email_addresses.create!(address: 'kota@example.com')
+  def create_email_user(login: 'alice', status: 1)
+    user = User.create!(login: login, status: status, mail: 'alice@example.com')
+    user.email_addresses.create!(address: 'alice@example.com')
     user
   end
 
@@ -289,9 +289,9 @@ class ThreadCommentsPersistenceTest < Minitest::Test
   def test_explicit_user_mapping_wins_even_when_invalid_or_locked
     user = create_email_user
     @settings['slack']['auto_map_users_by_email'] = true
-    @settings['users'] = { 'kota' => 'UOTHER' }
+    @settings['users'] = { 'alice' => 'UOTHER' }
     assert_nil email_viewer
-    @settings['users'] = { 'kota' => 'U123' }
+    @settings['users'] = { 'alice' => 'U123' }
     assert_equal user, email_viewer
     user.update!(status: 3)
     assert_nil email_viewer
@@ -310,7 +310,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
   end
 
   def test_processing_fetches_only_parent_and_does_not_post_feedback_twice
-    @settings['messages'] = { 'work_objects' => { 'product_name' => 'Redmine' },
+    @settings['messages'] = { 'work_objects' => { 'product_name' => 'Example Tracker' },
                               'thread_comments' => { 'saved' => '✅ %{product_name} #%{id} にコメントを追加しました。' } }
     calls = []
     api = ->(method, body, token, **_options) do
@@ -329,7 +329,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     assert_equal 1, Journal.count
     assert_equal 1, calls.count { |call| call[0] == 'chat.postMessage' }
     feedback = calls.find { |call| call[0] == 'chat.postMessage' }
-    assert_equal "✅ Redmine <https://redmine.example.com/issues/#{@issue.id}|##{@issue.id}> にコメントを追加しました。", feedback[1]['text']
+    assert_equal "✅ Example Tracker <https://redmine.example.com/issues/#{@issue.id}|##{@issue.id}> にコメントを追加しました。", feedback[1]['text']
     history = calls.first[1]
     assert_equal @event['thread_ts'], history['oldest']
     assert_equal @event['thread_ts'], history['latest']

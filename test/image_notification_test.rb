@@ -135,7 +135,7 @@ class User
   end
 
   def self.current
-    OpenStruct.new(name: 'Kota')
+    OpenStruct.new(name: 'Alice')
   end
 end
 
@@ -164,16 +164,16 @@ class AutomaticUserMappingTest < Minitest::Test
   def test_disabled_mapping_does_not_fetch_users
     RedmineSlackNotification.stub(:config, { 'slack' => { 'auto_map_users_by_name' => false } }) do
       RedmineSlackNotification.stub(:slack_user_directory, -> { flunk 'users.list was called' }) do
-        assert_nil RedmineSlackNotification.slack_user_id_for_name('kota')
+        assert_nil RedmineSlackNotification.slack_user_id_for_name('alice')
       end
     end
   end
 
   def test_matches_only_a_unique_name_without_case_sensitivity
-    directory = { 'kota' => ['U123'], 'jun' => %w[U456 U789] }
+    directory = { 'alice' => ['U123'], 'jun' => %w[U456 U789] }
     RedmineSlackNotification.stub(:config, { 'slack' => { 'auto_map_users_by_name' => true } }) do
       RedmineSlackNotification.stub(:slack_user_directory, directory) do
-        assert_equal 'U123', RedmineSlackNotification.slack_user_id_for_name(' Kota ')
+        assert_equal 'U123', RedmineSlackNotification.slack_user_id_for_name(' Alice ')
         assert_nil RedmineSlackNotification.slack_user_id_for_name('jun')
         assert_nil RedmineSlackNotification.slack_user_id_for_name('missing')
       end
@@ -182,10 +182,10 @@ class AutomaticUserMappingTest < Minitest::Test
 
   def test_explicit_mapping_takes_precedence_over_automatic_lookup
     user = User.new
-    user.login = 'kota'
-    user.mail = 'kota@example.com'
-    user.name = 'Kota'
-    RedmineSlackNotification.stub(:user_mapping, { 'kota' => PresenceValue.new('U123') }) do
+    user.login = 'alice'
+    user.mail = 'alice@example.com'
+    user.name = 'Alice'
+    RedmineSlackNotification.stub(:user_mapping, { 'alice' => PresenceValue.new('U123') }) do
       RedmineSlackNotification.stub(:slack_user_id_for_name, ->(*) { flunk 'automatic lookup ran' }) do
         assert_equal '<@U123>', RedmineSlackNotification::Formatter.user_mention(user)
       end
@@ -194,9 +194,9 @@ class AutomaticUserMappingTest < Minitest::Test
 
   def test_unmapped_user_uses_automatic_lookup
     user = User.new
-    user.login = 'kota'
-    user.mail = 'kota@example.com'
-    user.name = 'Kota'
+    user.login = 'alice'
+    user.mail = 'alice@example.com'
+    user.name = 'Alice'
     RedmineSlackNotification.stub(:user_mapping, {}) do
       RedmineSlackNotification.stub(:slack_user_id_for_name, PresenceValue.new('U123')) do
         assert_equal '<@U123>', RedmineSlackNotification::Formatter.user_mention(user)
@@ -208,12 +208,12 @@ class AutomaticUserMappingTest < Minitest::Test
     calls = []
     responses = [
       { 'members' => [
-          { 'id' => 'U123', 'name' => 'kota', 'profile' => { 'display_name' => 'Kota' } },
+          { 'id' => 'U123', 'name' => 'alice', 'profile' => { 'display_name' => 'Alice' } },
           { 'id' => 'B123', 'name' => 'bot', 'is_bot' => true },
           { 'id' => 'U456', 'name' => 'former', 'deleted' => true }
         ], 'response_metadata' => { 'next_cursor' => 'next' } },
       { 'members' => [
-          { 'id' => 'U789', 'name' => 'jun', 'profile' => { 'display_name' => 'Kota' } },
+          { 'id' => 'U789', 'name' => 'jun', 'profile' => { 'display_name' => 'Alice' } },
           { 'id' => 'U999', 'name' => 'outsider', 'is_stranger' => true }
         ], 'response_metadata' => { 'next_cursor' => '' } }
     ]
@@ -224,7 +224,7 @@ class AutomaticUserMappingTest < Minitest::Test
 
     RedmineSlackNotification.stub(:slack_api, api) do
       directory = RedmineSlackNotification.fetch_slack_user_directory('token')
-      assert_equal %w[U123 U789], directory['kota']
+      assert_equal %w[U123 U789], directory['alice']
       assert_equal ['U789'], directory['jun']
       refute directory.key?('bot')
       refute directory.key?('former')
@@ -431,7 +431,7 @@ class EventConfigurationTest < Minitest::Test
     item.journalized = issue
     item.notes = 'Comment ![](screenshot.png)'
     item.details = [:changed]
-    item.user = OpenStruct.new(name: 'Kota')
+    item.user = OpenStruct.new(name: 'Alice')
     item.id = 12
     item
   end
@@ -1023,7 +1023,7 @@ end
 
 class ImageNotificationTest < Minitest::Test
   def payload
-    { 'attachments' => [{ 'fallback' => 'Redmine notification', 'blocks' => [{ 'type' => 'section', 'text' => { 'type' => 'mrkdwn', 'text' => '*追加コメント*\n> ![](clipboard-202609281254-s6trp@2x.png)' } }] }] }
+    { 'attachments' => [{ 'fallback' => 'Example Tracker notification', 'blocks' => [{ 'type' => 'section', 'text' => { 'type' => 'mrkdwn', 'text' => '*追加コメント*\n> ![](clipboard-202609281254-s6trp@2x.png)' } }] }] }
   end
 
   def journal(private_note: false, attachments: [])
@@ -1118,7 +1118,7 @@ class ImageNotificationTest < Minitest::Test
   def test_ordered_lists_use_markdown_inside_the_colored_attachment
     notes = "1. first\n1. second\n1. third\n\n![](screenshot.png)\n\nDone"
     blocks = RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', notes)
-    message = RedmineSlackNotification::Formatter.payload('Redmine notification', blocks: blocks)
+    message = RedmineSlackNotification::Formatter.payload('Example Tracker notification', blocks: blocks)
 
     assert_equal '#6D5DFB', message.dig('attachments', 0, 'color')
     assert_equal [{ 'type' => 'markdown', 'text' => "**追加コメント**\n\n#{notes}" }], message.dig('attachments', 0, 'blocks')
@@ -1168,7 +1168,7 @@ class ImageNotificationTest < Minitest::Test
     name = 'screenshot.png'
     attachment = OpenStruct.new(id: 42, filename: name)
     notes = "1. first\n1. second\n\n![](#{name})\n\nDone"
-    message = RedmineSlackNotification::Formatter.payload('Redmine notification', blocks: RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', notes))
+    message = RedmineSlackNotification::Formatter.payload('Example Tracker notification', blocks: RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', notes))
     Journal.stub(:find_by, journal(attachments: [attachment])) do
       RedmineSlackNotification.stub(:upload_image, 'F123') do
         RedmineSlackNotification.add_images(message, [name], 1, 'token')
@@ -1188,7 +1188,7 @@ class ImageNotificationTest < Minitest::Test
     diff = RedmineSlackNotification::Formatter.body_diff_blocks('説明', '', "![](#{name})").first
     comment_diff = RedmineSlackNotification::Formatter.body_diff_blocks('コメント', '', "![](#{name})").first
     comment = RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', "1. See image\n![](#{name})").first
-    message = RedmineSlackNotification::Formatter.payload('Redmine notification', blocks: [diff, comment_diff, comment])
+    message = RedmineSlackNotification::Formatter.payload('Example Tracker notification', blocks: [diff, comment_diff, comment])
 
     Journal.stub(:find_by, journal(attachments: [attachment])) do
       RedmineSlackNotification.stub(:upload_image, 'F123') do
@@ -1242,7 +1242,7 @@ class ImageNotificationTest < Minitest::Test
   def test_failed_markdown_image_upload_keeps_a_redmine_link
     attachment = OpenStruct.new(id: 42, filename: 'screenshot.png')
     notes = "1. first\n\n![](screenshot.png)"
-    message = RedmineSlackNotification::Formatter.payload('Redmine notification', blocks: RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', notes))
+    message = RedmineSlackNotification::Formatter.payload('Example Tracker notification', blocks: RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', notes))
     Journal.stub(:find_by, journal(attachments: [attachment])) do
       RedmineSlackNotification.stub(:upload_image, nil) do
         RedmineSlackNotification.add_images(message, [attachment.filename], 1, 'token')
@@ -1261,7 +1261,7 @@ class ImageNotificationTest < Minitest::Test
       end
     end
 
-    assert_equal 'Redmine notification', message.dig('attachments', 0, 'fallback')
+    assert_equal 'Example Tracker notification', message.dig('attachments', 0, 'fallback')
     blocks = message.dig('attachments', 0, 'blocks')
     assert_equal 2, blocks.length
     refute_includes blocks.first.dig('text', 'text'), 'Image:'
@@ -1286,7 +1286,7 @@ class ImageNotificationTest < Minitest::Test
     names = %w[english.png japanese.png chinese.png]
     attachments = names.each_with_index.map { |name, index| OpenStruct.new(id: index + 1, filename: name) }
     message = {
-      'attachments' => [{ 'fallback' => 'Redmine notification', 'blocks' => [
+      'attachments' => [{ 'fallback' => 'Example Tracker notification', 'blocks' => [
         { 'type' => 'section', 'text' => { 'type' => 'mrkdwn', 'text' => "*追加コメント*\nEN\n![English](english.png)\n\nJA\n![](japanese.png)\n\nZH\n![](chinese.png)" } },
         { 'type' => 'divider' }
       ] }]
@@ -1381,7 +1381,7 @@ class ImageNotificationTest < Minitest::Test
   end
 
   def test_image_message_keeps_the_colored_card_after_file_sharing
-    message = RedmineSlackNotification::Formatter.payload('Redmine notification', blocks: [
+    message = RedmineSlackNotification::Formatter.payload('Example Tracker notification', blocks: [
       { 'type' => 'markdown', 'text' => "**追加コメント**\n\n1. first" },
       { 'type' => 'image', 'slack_file' => { 'id' => 'F123' }, 'alt_text' => 'screenshot' },
       { 'type' => 'markdown', 'text' => 'after image' }
@@ -1410,7 +1410,7 @@ class ImageNotificationTest < Minitest::Test
   end
 
   def test_retries_attachment_until_new_image_is_ready
-    message = RedmineSlackNotification::Formatter.payload('Redmine notification', blocks: [
+    message = RedmineSlackNotification::Formatter.payload('Example Tracker notification', blocks: [
       { 'type' => 'image', 'slack_file' => { 'id' => 'F123' }, 'alt_text' => 'screenshot' }
     ])
     methods = []
@@ -1438,7 +1438,7 @@ end
 class WorkObjectNotificationTest < Minitest::Test
   def setup
     @project = OpenStruct.new(identifier: 'agentic', name: 'Agentic')
-    @actor = OpenStruct.new(name: 'Kota')
+    @actor = OpenStruct.new(name: 'Alice')
     @issue = OpenStruct.new(id: 7, subject: 'Fix A & B', description: 'Issue body', project: @project,
                             tracker: OpenStruct.new(name: 'Task'), status: OpenStruct.new(name: 'In progress'),
                             priority: OpenStruct.new(name: 'High'), assigned_to: OpenStruct.new(name: 'Alice'),
@@ -1466,7 +1466,7 @@ class WorkObjectNotificationTest < Minitest::Test
   end
 
   def test_product_name_is_configurable_for_previews_and_details_with_project_override
-    @settings['messages'] = { 'work_objects' => { 'product_name' => 'Redmine' } }
+    @settings['messages'] = { 'work_objects' => { 'product_name' => 'Example Tracker' } }
     @settings['projects'] = { 'agentic' => { 'messages' => { 'work_objects' => { 'product_name' => 'W.A.C' } } } }
     RedmineSlackNotification.stub(:config, @settings) do
       assert_equal 'W.A.C', issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'attributes', 'product_name')
@@ -1475,7 +1475,7 @@ class WorkObjectNotificationTest < Minitest::Test
         assert_equal 'W.A.C', details.dig('entity_payload', 'attributes', 'product_name')
       end
       @settings.delete('projects')
-      assert_equal 'Redmine', issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'attributes', 'product_name')
+      assert_equal 'Example Tracker', issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'attributes', 'product_name')
       @settings['messages']['work_objects']['product_name'] = ''
       assert_equal 'Redmine', issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'attributes', 'product_name')
     end
@@ -1504,16 +1504,16 @@ class WorkObjectNotificationTest < Minitest::Test
 
   def test_thread_notification_heading_supports_project_templates_and_safe_fallback
     @settings['slack']['comment_notifications_in_threads'] = true
-    @settings['messages'] = { 'work_objects' => { 'product_name' => 'Redmine' } }
+    @settings['messages'] = { 'work_objects' => { 'product_name' => 'Example Tracker' } }
     @settings['projects'] = { 'agentic' => { 'messages' => { 'thread_notifications' => {
       'added_header' => '%{product_name} #%{id} の新規コメント · %{actor}: %{subject}'
     } } } }
     RedmineSlackNotification.stub(:config, @settings) do
       result = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: 'Body')
-      assert_equal 'Redmine <https://redmine.example.com/issues/7|#7> の新規コメント · Kota: Fix A &amp; B', result.dig('_redmine_thread_comment_payload', 'text')
+      assert_equal 'Example Tracker <https://redmine.example.com/issues/7|#7> の新規コメント · Alice: Fix A &amp; B', result.dig('_redmine_thread_comment_payload', 'text')
       @settings['projects']['agentic']['messages']['thread_notifications']['added_header'] = '%{unknown}'
       result = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: 'Body')
-      assert_equal 'Redmine <https://redmine.example.com/issues/7|#7>: New comment', result.dig('_redmine_thread_comment_payload', 'text')
+      assert_equal 'Example Tracker <https://redmine.example.com/issues/7|#7>: New comment', result.dig('_redmine_thread_comment_payload', 'text')
     end
   end
 
@@ -1649,7 +1649,7 @@ class WorkObjectDetailsTest < Minitest::Test
 
   def setup
     @project = OpenStruct.new(identifier: 'agentic', name: 'Agentic', active?: true)
-    @user = OpenStruct.new(id: 3, name: 'Kota', active?: true)
+    @user = OpenStruct.new(id: 3, name: 'Alice', active?: true)
     @issue = OpenStruct.new(id: 7, subject: 'Current title', description: 'Current description',
                             project: @project, tracker: OpenStruct.new(name: 'Task'),
                             status: OpenStruct.new(name: 'In progress'), assigned_to: @user,
@@ -1657,7 +1657,7 @@ class WorkObjectDetailsTest < Minitest::Test
     @issue.define_singleton_method(:visible?) { |user| user.id == 3 }
     @settings = { 'slack' => { 'work_object_previews' => true, 'bot_token' => 'test-token',
                               'events' => { 'app_id' => 'ATEST', 'team_id' => 'TTEST', 'signing_secret' => 'test-secret' } },
-                  'users' => { 'kota' => 'U123' } }
+                  'users' => { 'alice' => 'U123' } }
     @url = 'https://redmine.example.com/issues/7'
     @event = { 'type' => 'entity_details_requested', 'trigger_id' => 'trigger', 'user' => 'U123',
                'entity_url' => @url, 'external_ref' => { 'id' => Digest::SHA256.hexdigest(@url), 'type' => 'redmine_issue' } }
@@ -1805,7 +1805,7 @@ class WorkObjectDetailsTest < Minitest::Test
     end
     @settings['users']['another'] = 'U123'
     RedmineSlackNotification.stub(:config, @settings) do
-      User.stub(:find_by, ->(**keys) { keys[:login] == 'kota' ? @user : OpenStruct.new(id: 4, active?: true) }) do
+      User.stub(:find_by, ->(**keys) { keys[:login] == 'alice' ? @user : OpenStruct.new(id: 4, active?: true) }) do
         assert_nil WORK.viewer_for('U123')
       end
     end
@@ -1839,7 +1839,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
 
     RedmineSlackNotification.stub(:config, settings) do
       RedmineSlackNotification::Formatter.stub(:change_fields, no_changes) do
-        blocks = RedmineSlackNotification::Formatter.issue_payload(issue, actor: OpenStruct.new(name: 'Kota'), action: 'created')
+        blocks = RedmineSlackNotification::Formatter.issue_payload(issue, actor: OpenStruct.new(name: 'Alice'), action: 'created')
                                             .dig('attachments', 0, 'blocks')
         fields = blocks.flat_map { |block| block.fetch('fields', []) }.map { |entry| entry.fetch('text') }
         assert fields.any? { |value| value == "*Target version*\nRelease 2" }
@@ -1860,7 +1860,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
     RedmineSlackNotification.stub(:config, {}) do
       RedmineSlackNotification::Formatter.stub(:change_fields, no_changes) do
         fields = RedmineSlackNotification::Formatter.issue_payload(
-          issue, actor: OpenStruct.new(name: 'Kota'), action: 'created'
+          issue, actor: OpenStruct.new(name: 'Alice'), action: 'created'
         ).dig('attachments', 0, 'blocks').flat_map { |block| block.fetch('fields', []) }
         assert_equal 5, fields.length
         refute fields.any? { |entry| entry.fetch('text').include?('Release 2') }
@@ -1908,7 +1908,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
     RedmineSlackNotification.stub(:config, settings) do
       heading = ->(block) { block['text']['text'] if block['text'].is_a?(Hash) }
       payload = RedmineSlackNotification::Formatter.issue_payload(
-        issue, actor: OpenStruct.new(name: 'Kota'), action: 'updated', details: details
+        issue, actor: OpenStruct.new(name: 'Alice'), action: 'updated', details: details
       )
       blocks = payload.dig('attachments', 0, 'blocks')
       fields = blocks.flat_map { |block| block.fetch('fields', []) }.map { |entry| entry.fetch('text') }
@@ -1920,7 +1920,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
       assert blocks.any? { |block| heading.call(block) == '*Changes*' }
 
       combined = RedmineSlackNotification::Formatter.journal_payload(
-        issue, actor: OpenStruct.new(name: 'Kota'), notes: 'Comment', details: details
+        issue, actor: OpenStruct.new(name: 'Alice'), notes: 'Comment', details: details
       ).dig('attachments', 0, 'blocks')
       assert combined.any? { |block| heading.call(block) == '*Metadata*' }
       assert combined.any? { |block| heading.call(block) == '*Changes*' }
@@ -1980,7 +1980,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
       'project' => { 'updater' => false }
     } } }
     project = OpenStruct.new(name: 'Agentic', identifier: 'agentic')
-    actor = OpenStruct.new(name: 'Kota')
+    actor = OpenStruct.new(name: 'Alice')
     issue = OpenStruct.new(id: 7, subject: 'Subject', description: '', project: project,
                            tracker: OpenStruct.new(name: 'Task'))
     no_changes = []
@@ -2022,7 +2022,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
 
   def test_metadata_section_disappears_when_its_group_or_all_fields_are_disabled
     project = OpenStruct.new(name: 'Agentic')
-    actor = OpenStruct.new(name: 'Kota')
+    actor = OpenStruct.new(name: 'Alice')
     settings = { 'slack' => { 'metadata' => {
       'news' => false, 'project' => { 'project' => false, 'updater' => false }
     } } }
@@ -2043,7 +2043,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
     project = OpenStruct.new(name: 'Agentic')
     issue = OpenStruct.new(id: 7, subject: 'Subject', description: '', project: project,
                            tracker: OpenStruct.new(name: 'Task'))
-    actor = OpenStruct.new(name: 'Kota')
+    actor = OpenStruct.new(name: 'Alice')
     empty_changes = []
     empty_changes.define_singleton_method(:present?) { false }
 
@@ -2053,8 +2053,8 @@ class NotificationDisplaySettingsTest < Minitest::Test
       combined = RedmineSlackNotification::Formatter.journal_payload(
         issue, actor: actor, notes: '', details: [OpenStruct.new(property: 'attr', prop_key: 'status_id')]
       )
-      assert_equal '🔄 Kota *Issue updated*', updated.dig('attachments', 0, 'blocks', 0, 'text', 'text')
-      assert_equal '🔄 Kota *Issue updated*', combined.dig('attachments', 0, 'blocks', 0, 'text', 'text')
+      assert_equal '🔄 Alice *Issue updated*', updated.dig('attachments', 0, 'blocks', 0, 'text', 'text')
+      assert_equal '🔄 Alice *Issue updated*', combined.dig('attachments', 0, 'blocks', 0, 'text', 'text')
       assert_equal '🆕 *Issue created*', created.dig('attachments', 0, 'blocks', 0, 'text', 'text')
     end
 
@@ -2063,7 +2063,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
     } } }) do
       RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
         customized = RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'updated')
-        assert_equal '🔄 *Issue updated* by Kota', customized.dig('attachments', 0, 'blocks', 0, 'text', 'text')
+        assert_equal '🔄 *Issue updated* by Alice', customized.dig('attachments', 0, 'blocks', 0, 'text', 'text')
       end
     end
   end
@@ -2072,7 +2072,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
     project = OpenStruct.new(name: 'Agentic')
     issue = OpenStruct.new(id: 7, subject: 'Subject', description: '', project: project,
                            tracker: OpenStruct.new(name: 'Task'))
-    actor = OpenStruct.new(name: 'Kota')
+    actor = OpenStruct.new(name: 'Alice')
     changes = [[RedmineSlackNotification::Formatter.field_label('status'), 'Open → Closed']]
     changes.define_singleton_method(:present?) { true }
     no_changes = []
@@ -2116,7 +2116,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
     RedmineSlackNotification.stub(:config, settings) do
       payload = RedmineSlackNotification::Formatter.generic_payload(
         noun: 'News', action: 'updated', subject: 'Headline', url: 'https://example.com/news/1',
-        project: project, actor: OpenStruct.new(name: 'Kota'), summary: 'Changed text'
+        project: project, actor: OpenStruct.new(name: 'Alice'), summary: 'Changed text'
       )
       card = payload.fetch('attachments').first
       assert_equal '#12Ab34', card['color']
@@ -2135,7 +2135,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
                                           'messages' => { 'templates' => { 'generic_fallback' => '%{missing}' } } }) do
       payload = RedmineSlackNotification::Formatter.generic_payload(
         noun: 'Project', action: 'updated', subject: 'Agentic', url: 'https://example.com/projects/agentic',
-        project: OpenStruct.new(name: 'Agentic'), actor: OpenStruct.new(name: 'Kota')
+        project: OpenStruct.new(name: 'Agentic'), actor: OpenStruct.new(name: 'Alice')
       )
       assert_equal '#6D5DFB', payload.dig('attachments', 0, 'color')
       assert_equal 'Project updated - Agentic', payload.dig('attachments', 0, 'fallback')
