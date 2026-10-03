@@ -8,6 +8,18 @@ slack:
   default_channel_id: 'C0123456789'
   # Requires users:read and an app reinstall. Ambiguous names are not mentioned.
   auto_map_users_by_name: false
+  # Add a Task Work Object preview to public Issue creation/update/comment
+  # notifications. Enable Work Object Previews > Task in the Slack app too.
+  # Existing event cards remain. Deleted Issues and due-date DMs are excluded.
+  # Override per project with projects.<identifier>.slack.work_object_previews.
+  work_object_previews: false
+  # Required for clickable Work Object details. Configure the Slack app's
+  # Events Request URL as https://YOUR-REDMINE/redmine_slack/events and subscribe
+  # to entity_details_requested. The Signing Secret is NOT the Bot Token.
+  # events:
+  #   app_id: 'A0123456789'
+  #   team_id: 'T0123456789'
+  #   signing_secret: 'REPLACE-ME' # or SLACK_SIGNING_SECRET
   # true/false still applies to all edits. Use this map to choose per content type.
   # Deleted comments always show removed lines regardless of these settings.
   body_diff:
@@ -306,6 +318,7 @@ projects:
       bot_token: 'xoxb-AGENTIC-BOT-TOKEN'
       default_channel_id: 'C0123456789'
       attachment_color: '#123456'
+      # work_object_previews: true
     # The older project-level channel_id remains supported.
     # channel_id: 'C0123456789'
     # Every events key can override the matching global value.

@@ -196,6 +196,60 @@ Issue creation includes the description. New comments include their text. An Iss
 
 Redmine Markdown is converted for Slack text. Numbered lists use Slack `markdown` blocks so repeated `1.` markers render as an ordered list; longer content uses `mrkdwn` sections to stay within Slack's 12,000-character Markdown-block budget.
 
+### Ticket Work Object Previews
+
+Set `slack.work_object_previews: true` to add Slack **Task Work Object** metadata to public Issue creation, update, and comment notifications. Omitted or `false` preserves existing notifications. The event body, change diffs, colored attachments, and images remain; Slack can display an additional Work Object card. Deleted Issues, non-Issue notifications, and daily due-date DMs are excluded.
+
+```yaml
+slack:
+  work_object_previews: true
+  metadata:
+    issue:
+      status: true
+      assignee: true
+      due_date: true
+projects:
+  another-project:
+    slack:
+      work_object_previews: false
+```
+
+You can also disable this globally and enable it for individual projects. Restart both Redmine and Sidekiq after changing YAML.
+
+In the Slack app settings, enable **Work Object Previews**, select **Task**, and save. Check workspace preview restrictions too. Notifications use the existing `chat.postMessage` call; notification previews alone do not require new event subscriptions or link-unfurl scopes. See [Slack's notifications implementation](https://docs.slack.dev/messaging/work-objects-implementation/#notifications-implementation).
+
+The header contains the subject, Issue number, and tracker. Standard fields include status, priority, assignee, author, and due date only when enabled by `slack.metadata.issue`. Project, tracker, category, updater, and target version use custom fields with the same visibility settings and `messages.fields` labels. Other fields, descriptions, and comments remain in the existing event card. Assignees and authors use display names without introducing mentions or additional user-directory requests.
+
+The SHA-256 digest of the Issue URL is used as `external_ref.id` to satisfy Slack's ID character restrictions, keeping creation, updates, and comments associated with the same object while distinguishing identical Issue numbers on different Redmine instances. Changing the Redmine hostname changes this identity. The link's `url` remains the original Issue URL.
+
+Notification cards contain a **snapshot from notification generation**. Opening a card or refreshing its detail pane sends `entity_details_requested`; the plugin returns current Issue data through `entity.presentDetails`. See [Slack's details API](https://docs.slack.dev/reference/methods/entity.presentDetails/).
+
+To enable details, configure the Slack app and workspace IDs and the **Basic Information → App Credentials → Signing Secret**. This is separate from the Bot Token; `SLACK_SIGNING_SECRET` can supply it instead.
+
+```yaml
+slack:
+  work_object_previews: true
+  events:
+    app_id: 'AMNLYCD0C'
+    team_id: 'T04AF12HM'
+    signing_secret: 'REPLACE-ME'
+users:
+  kota: 'U0123456789' # Replace with the actual Slack member ID
+```
+
+1. Deploy the code and YAML, restart Redmine and Sidekiq, and ensure Sidekiq consumes the `slack` queue.
+2. Enable **Event Subscriptions** in the Slack app. Set Request URL to `https://redmine.example.com/redmine_slack/events` and confirm **Verified**. Adjust the host and any Redmine installation subdirectory for your deployment.
+3. Add `entity_details_requested` under **Subscribe to bot events** and **Save Changes**. No additional OAuth scopes are required for this event or `entity.presentDetails`.
+4. Open a Work Object card and check status, assignee, due date, and description. Change the Issue in Redmine and refresh the detail pane to verify the current values. A new notification is unnecessary.
+
+The endpoint verifies the signature, timestamp, app, and workspace before enqueueing work on the existing `slack` queue. Authorization uses explicit `users` mappings from Redmine login/email to Slack ID; `auto_map_users_by_name` is never used to grant access. Unmapped, locked, or unauthorized users, private Issues, inactive projects, and projects with previews disabled receive a restricted response without Issue content. Project-specific apps can override `projects.<identifier>.slack.events` and `users`.
+
+Authorized details include the current title, Issue ID, tracker, project, status, priority, assignee, author, due date, creation/update timestamps, and description (up to 10,000 characters). Detail fields are independent of notification `slack.metadata.issue` settings. Comments, Redmine custom fields, editing inside Slack, and pasted-link unfurls are not included.
+
+Replies in a notification's Slack thread are not currently saved as Redmine comments. The Work Object's conversation view is also separate from Redmine's comment history. Adding Redmine comments from Slack and displaying or posting Redmine comments inside the Work Object are not implemented yet.
+
+Check Redmine/Sidekiq logs for `Work Object details`: `shown`/`restricted` describe the response path; `failed` includes the Slack API error code. If Slack returns `missing_interactivity_url`, configure the app's **Interactivity & Shortcuts** Request URL.
+
 ### Body diffs
 
 By default, edits to Issue descriptions and comments, Wiki bodies, and News descriptions and comments show a line diff. The `diff` code block marks removed lines with `-` and added lines with `+`, with two unchanged lines of context. Long lines and large diffs are shortened; follow the record link for the full text. A Wiki edit that changes only its edit comment has no body diff.
@@ -385,6 +439,7 @@ The repository's local test suite can be run with:
 
 ```bash
 ruby -Itest test/image_notification_test.rb
+ruby -Itest test/slack_events_controller_test.rb
 ```
 
 These tests exercise notification formatting and delivery logic with stubs. They do not post to Slack or verify a live Redmine installation.

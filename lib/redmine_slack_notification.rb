@@ -352,6 +352,10 @@ module RedmineSlackNotification
         'blocks' => [],
         'attachments' => payload.fetch('attachments')
       }
+      if payload.key?('metadata')
+        update['metadata'] = payload['metadata']
+        update['text'] = payload['text']
+      end
       post_with_image_retry(update, token, method: 'chat.update')
     rescue StandardError => e
       # The initial message already contains the complete colored card. Do
@@ -364,7 +368,23 @@ module RedmineSlackNotification
   def post_with_image_retry(request, token, method: 'chat.postMessage')
     retries = 0
     begin
-      slack_api(method, request, token)
+      # Match Slack's Work Object documentation and official SDK transport:
+      # entity metadata is JSON-serialized inside a URL-encoded form.
+      work_object = request.dig('metadata', 'entities').is_a?(Array)
+      result = work_object ? slack_api(method, request, token, form: true) : slack_api(method, request, token)
+      if work_object
+        message = result['message'].is_a?(Hash) ? result['message'] : {}
+        metadata = message['metadata'].is_a?(Hash) ? message['metadata'] : {}
+        summary = {
+          method: method, ts: result['ts'], metadata_keys: metadata.keys,
+          returned_entity_count: Array(metadata['entities']).length,
+          attachment_count: Array(message['attachments']).length,
+          warnings: Array(result.dig('response_metadata', 'warnings')),
+          messages: Array(result.dig('response_metadata', 'messages'))
+        }
+        Rails.logger&.info("RedmineSlackNotification: Work Object response #{JSON.generate(summary)}")
+      end
+      result
     rescue SlackApiError => e
       image_message = Array(request['blocks']).any? { |block| block['type'] == 'image' || block.dig('accessory', 'slack_file', 'id') } ||
         Array(request.dig('attachments', 0, 'blocks')).any? { |block| block['type'] == 'image' }
@@ -500,6 +520,7 @@ require_relative 'redmine_slack_notification/issue_patch'
 require_relative 'redmine_slack_notification/journal_patch'
 require_relative 'redmine_slack_notification/wiki_content_patch'
 require_relative 'redmine_slack_notification/generic_patches'
+require_relative 'redmine_slack_notification/work_objects'
 
 
 module RedmineSlackNotification
