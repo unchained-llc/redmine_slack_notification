@@ -230,8 +230,8 @@ To enable details, configure the Slack app and workspace IDs and the **Basic Inf
 slack:
   work_object_previews: true
   events:
-    app_id: 'AMNLYCD0C'
-    team_id: 'T04AF12HM'
+    app_id: 'A0123456789'
+    team_id: 'T0123456789'
     signing_secret: 'REPLACE-ME'
 users:
   kota: 'U0123456789' # Replace with the actual Slack member ID
@@ -250,6 +250,31 @@ Check Redmine/Sidekiq logs for `Work Object details`: `shown`/`restricted` descr
 
 The Work Object's conversation view is separate from Redmine's comment history. Displaying and posting Redmine comments inside the detail pane are not implemented yet. Posting comments from notification threads is available through the following setting.
 
+### Threaded Redmine comment notifications
+
+Set `slack.comment_notifications_in_threads: true` to post comment-only additions, edits, and deletions in the latest matching Issue notification thread in the configured channel. Omitted or `false` keeps channel posts. Updates that also contain enabled Issue changes remain channel posts. When a thread is found, new comments show a configurable heading and the formatted comment body, without repeating the Issue link, full event card, or Work Object preview. Comment edits retain the configured body/diff presentation; deletions retain the removal diff. Images continue to be supported. Channel fallback uses the full notification. This option works independently of `slack.thread_comments` and Work Object Previews.
+
+```yaml
+slack:
+  comment_notifications_in_threads: true
+  events:
+    app_id: 'A0123456789'
+```
+
+Override per project under `projects.<identifier>.slack.comment_notifications_in_threads`. The Bot must belong to the channel and have `groups:history` for private channels or `channels:history` for public channels; reinstall the app after adding scopes. `slack.events.app_id` identifies this app's notifications. No new Event Subscription is required for outgoing comment notifications.
+
+Customize the compact notification heading with `messages.thread_notifications.added_header`, `updated_header`, and `deleted_header`. Templates support `%{product_name}`, `%{id}`, `%{actor}`, and `%{subject}`, including project-specific overrides under `projects.<identifier>.messages`. Defaults and examples are English. The heading is separate from the comment body, which is displayed only once. References to the current Issue using `#%{id}` in the heading automatically link to its Redmine page.
+
+```yaml
+messages:
+  thread_notifications:
+    added_header: '%{product_name} #%{id}: New comment'
+    updated_header: '%{product_name} #%{id}: Comment updated'
+    deleted_header: '%{product_name} #%{id}: Comment deleted'
+```
+
+Each delivery searches up to three history pages, requesting 100 messages per page (Slack may return fewer). Only root notifications from the configured app with the exact Issue subject link qualify; user messages, links in comment bodies, and broadcast replies do not. Missing matches, missing app configuration, and lookup errors fall back to a normal channel post. No thread mapping is saved in a database, Redis, or a file. The latest notification may differ from the thread where a conversation started; older threads outside the search range are not found. History requests add latency and consume Slack API rate limits. Existing cards are not moved.
+
 ### Add Redmine comments from notification threads
 
 Set `slack.thread_comments: true` to save text replies to this plugin's Issue notifications as Redmine comments authored by the replying user. Omitted or `false` disables the feature. Work Object Previews are optional.
@@ -258,8 +283,8 @@ Set `slack.thread_comments: true` to save text replies to this plugin's Issue no
 slack:
   thread_comments: true
   events:
-    app_id: 'AMNLYCD0C'
-    team_id: 'T04AF12HM'
+    app_id: 'A0123456789'
+    team_id: 'T0123456789'
     signing_secret: 'REPLACE-ME'
 users:
   kota: 'U0123456789' # Actual Slack member ID

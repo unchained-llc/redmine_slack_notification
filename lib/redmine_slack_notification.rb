@@ -315,6 +315,16 @@ module RedmineSlackNotification
         return
       end
 
+      payload = payload.dup
+      comment_issue_id = payload.delete('_redmine_comment_issue_id')
+      thread_payload = payload.delete('_redmine_thread_comment_payload')
+      if comment_issue_id && effective_config.dig('slack', 'comment_notifications_in_threads') == true
+        thread_ts = CommentThreads.latest_thread(comment_issue_id, channel, token)
+        if thread_ts
+          payload = thread_payload if thread_payload.is_a?(Hash)
+          payload = payload.merge('thread_ts' => thread_ts)
+        end
+      end
       add_images(payload, image_names, journal_id, token, issue_id: issue_id) if image_names.present? && (journal_id || issue_id)
       post_message(payload, channel, token)
     end
@@ -522,6 +532,7 @@ require_relative 'redmine_slack_notification/wiki_content_patch'
 require_relative 'redmine_slack_notification/generic_patches'
 require_relative 'redmine_slack_notification/work_objects'
 require_relative 'redmine_slack_notification/thread_comments'
+require_relative 'redmine_slack_notification/comment_threads'
 
 
 module RedmineSlackNotification

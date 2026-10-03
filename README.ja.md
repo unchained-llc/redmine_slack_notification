@@ -230,8 +230,8 @@ Slack アプリの管理画面でも **Work Object Previews → ON → Task を�
 slack:
   work_object_previews: true
   events:
-    app_id: 'AMNLYCD0C'
-    team_id: 'T04AF12HM'
+    app_id: 'A0123456789'
+    team_id: 'T0123456789'
     signing_secret: 'REPLACE-ME'
 users:
   kota: 'U0123456789' # 実際のSlackメンバーIDに置き換える
@@ -250,6 +250,31 @@ users:
 
 Work Object の「会話」表示は Redmine のコメント履歴とは別です。詳細パネル内での Redmine コメント表示・投稿は未実装です。通知スレッドからのコメント追加は、次の設定で利用できます。
 
+### Redmineコメント通知をスレッドにまとめる
+
+`slack.comment_notifications_in_threads: true` にすると、コメントだけの追加・編集・削除通知を、設定したチャンネル内の同じチケットの最新通知スレッドに投稿します。省略時・`false` は従来どおりチャンネルに投稿します。有効なチケット項目の変更も含む更新はチャンネルに投稿します。スレッドが見つかった場合、新規コメントは設定可能な見出しと書式付きの本文を表示し、チケットリンク・完全なイベントカード・Work Objectプレビューは繰り返しません。編集は設定された本文・差分表示、削除は削除差分を維持し、画像も引き続き扱います。通常のチャンネル投稿に戻る場合は完全な通知形式を使います。`slack.thread_comments` やWork Object Previewsとは独立した設定です。
+
+```yaml
+slack:
+  comment_notifications_in_threads: true
+  events:
+    app_id: 'A0123456789'
+```
+
+`projects.<identifier>.slack.comment_notifications_in_threads` でプロジェクト別に上書きできます。Botのチャンネル参加と、非公開チャンネルでは `groups:history`、公開チャンネルでは `channels:history` が必要です。スコープ追加後はアプリを再インストールしてください。`slack.events.app_id` でこのアプリの通知を識別します。コメント通知の送信だけならEvent Subscriptionの追加は不要です。
+
+簡易通知の見出しは `messages.thread_notifications.added_header`・`updated_header`・`deleted_header` で変更できます。`%{product_name}`・`%{id}`・`%{actor}`・`%{subject}` を利用でき、`projects.<identifier>.messages` でプロジェクト別に上書きできます。既定値と設定例は英語です。見出しとコメント本文を分け、本文は一度だけ表示します。見出し内の `#%{id}` は、そのチケットのRedmineページへのリンクになります。
+
+```yaml
+messages:
+  thread_notifications:
+    added_header: '%{product_name} #%{id}: New comment'
+    updated_header: '%{product_name} #%{id}: Comment updated'
+    deleted_header: '%{product_name} #%{id}: Comment deleted'
+```
+
+通知ごとに履歴を最大3ページ、各ページ100件を要求して検索します（Slackが返す件数は少ない場合があります）。設定したアプリの最上位通知で、件名のチケットURLが完全一致するものだけを対象にします。利用者の投稿、コメント本文中のリンク、チャンネルにも送信されたスレッド返信は対象外です。見つからない場合、アプリID未設定、履歴取得エラー時は通常のチャンネル投稿に戻ります。DB・Redis・ファイルにスレッドの対応表は保存しません。会話開始時と最新通知のスレッドが異なる場合があり、検索範囲外の古い通知には戻れません。履歴取得による遅延とSlack API利用回数が増えます。既存の通知は移動しません。
+
 ### 通知スレッドからRedmineにコメントを追加
 
 `slack.thread_comments: true` にすると、このプラグインが送った Issue 通知へのテキスト返信を、返信者本人の Redmine コメントとして登録します。省略時・`false` は無効です。Work Object Previews は必須ではありません。
@@ -258,8 +283,8 @@ Work Object の「会話」表示は Redmine のコメント履歴とは別で�
 slack:
   thread_comments: true
   events:
-    app_id: 'AMNLYCD0C'
-    team_id: 'T04AF12HM'
+    app_id: 'A0123456789'
+    team_id: 'T0123456789'
     signing_secret: 'REPLACE-ME'
 users:
   kota: 'U0123456789' # 実際のSlackメンバーID

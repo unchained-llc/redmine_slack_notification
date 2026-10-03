@@ -857,6 +857,24 @@ class EventConfigurationTest < Minitest::Test
     end
   end
 
+  def test_thread_routing_hint_is_only_added_to_comment_only_updates
+    captured = []
+    settings = { 'slack' => { 'comment_notifications_in_threads' => true } }
+    RedmineSlackNotification.stub(:config, settings) do
+      RedmineSlackNotification::Formatter.stub(:journal_payload, ->(*) { { 'text' => 'Comment' } }) do
+        RedmineSlackNotification.stub(:enqueue, ->(payload, **_options) { captured << payload }) do
+          item = journal
+          item.details = []
+          item.send(:notify_slack_journal_created)
+          item.details = [OpenStruct.new(property: 'attr', prop_key: 'status_id', value: 2)]
+          item.send(:notify_slack_journal_created)
+        end
+      end
+    end
+    assert captured[0].key?('_redmine_comment_issue_id')
+    refute captured[1].key?('_redmine_comment_issue_id')
+  end
+
   def test_both_disabled_send_nothing
     RedmineSlackNotification.stub(:config, { 'events' => { 'comment_added' => false, 'issue_updated' => false } }) do
       RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'disabled journal was enqueued' }) do
@@ -1460,6 +1478,42 @@ class WorkObjectNotificationTest < Minitest::Test
       assert_equal 'Redmine', issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'attributes', 'product_name')
       @settings['messages']['work_objects']['product_name'] = ''
       assert_equal 'Redmine', issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'attributes', 'product_name')
+    end
+  end
+
+  def test_thread_comment_body_omits_issue_card_and_headings_but_keeps_formatting
+    @settings['slack']['comment_notifications_in_threads'] = true
+    RedmineSlackNotification.stub(:config, @settings) do
+      result = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: 'Hello **team**')
+      compact = result.fetch('_redmine_thread_comment_payload')
+      assert_equal 'Redmine <https://redmine.example.com/issues/7|#7>: New comment', compact['text']
+      assert_equal 'Hello *team*', compact.dig('attachments', 0, 'blocks', 0, 'text', 'text')
+      refute compact.key?('metadata')
+      refute compact.dig('attachments', 0).key?('color')
+      edited = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: 'New',
+        previous_notes: 'Old', comment_action: 'updated')
+      assert edited.fetch('_redmine_thread_comment_payload').dig('attachments', 0, 'blocks').any?
+      assert_equal 'Redmine <https://redmine.example.com/issues/7|#7>: Comment updated', edited.fetch('_redmine_thread_comment_payload')['text']
+      deleted = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: '',
+        previous_notes: 'Old', comment_action: 'deleted')
+      assert_equal 'Redmine <https://redmine.example.com/issues/7|#7>: Comment deleted', deleted.fetch('_redmine_thread_comment_payload')['text']
+      assert deleted.fetch('_redmine_thread_comment_payload').dig('attachments', 0, 'blocks').any?
+      assert result.key?('metadata'), 'Fallback retains the full notification'
+    end
+  end
+
+  def test_thread_notification_heading_supports_project_templates_and_safe_fallback
+    @settings['slack']['comment_notifications_in_threads'] = true
+    @settings['messages'] = { 'work_objects' => { 'product_name' => 'Redmine' } }
+    @settings['projects'] = { 'agentic' => { 'messages' => { 'thread_notifications' => {
+      'added_header' => '%{product_name} #%{id} の新規コメント · %{actor}: %{subject}'
+    } } } }
+    RedmineSlackNotification.stub(:config, @settings) do
+      result = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: 'Body')
+      assert_equal 'Redmine <https://redmine.example.com/issues/7|#7> の新規コメント · Kota: Fix A &amp; B', result.dig('_redmine_thread_comment_payload', 'text')
+      @settings['projects']['agentic']['messages']['thread_notifications']['added_header'] = '%{unknown}'
+      result = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: 'Body')
+      assert_equal 'Redmine <https://redmine.example.com/issues/7|#7>: New comment', result.dig('_redmine_thread_comment_payload', 'text')
     end
   end
 
@@ -2733,5 +2787,106 @@ class DueReminderTaskTest < Minitest::Test
         end
       end
     end
+  end
+end
+
+class CommentThreadDeliveryTest < Minitest::Test
+  def setup
+    @project = OpenStruct.new(identifier: 'agentic')
+    @settings = { 'slack' => { 'bot_token' => 'token', 'default_channel_id' => 'C123',
+      'comment_notifications_in_threads' => true, 'events' => { 'app_id' => 'ATEST' } } }
+    @root = { 'ts' => '1000.000001', 'bot_id' => 'B123', 'app_id' => 'ATEST', 'attachments' => [
+      { 'blocks' => [{}, { 'text' => { 'text' => '*<https://redmine.example.com/issues/7|Subject>*' } }] }
+    ] }
+    @payload = { 'text' => 'Comment', '_redmine_comment_issue_id' => 7 }
+  end
+
+  def deliver(api)
+    posts = []
+    RedmineSlackNotification.stub(:config, @settings) do
+      RedmineSlackNotification.stub(:slack_api, api) do
+        RedmineSlackNotification.stub(:post_message, ->(payload, channel, token) { posts << [payload, channel, token] }) do
+          RedmineSlackNotification.notify(@payload, project: @project)
+        end
+      end
+    end
+    posts.first.first
+  end
+
+  def test_latest_root_is_used_and_internal_hint_is_not_sent
+    api = ->(method, request, token, **options) do
+      assert_equal 'conversations.history', method
+      assert_equal 'C123', request['channel']
+      assert_equal 'token', token
+      assert options[:form]
+      { 'messages' => [@root, @root.merge('ts' => '999.000001')] }
+    end
+    result = deliver(api)
+    assert_equal '1000.000001', result['thread_ts']
+    refute result.key?('_redmine_comment_issue_id')
+    refute @payload.key?('thread_ts')
+  end
+
+  def test_compact_payload_is_used_only_when_a_thread_is_found
+    @payload['_redmine_thread_comment_payload'] = { 'text' => 'Just the comment' }
+    result = deliver(->(*) { { 'messages' => [@root] } })
+    assert_equal({ 'text' => 'Just the comment', 'thread_ts' => @root['ts'] }, result)
+    result = deliver(->(*) { { 'messages' => [] } })
+    assert_equal({ 'text' => 'Comment' }, result)
+    assert @payload.key?('_redmine_thread_comment_payload'), 'Queued source remains unchanged'
+  end
+
+  def test_disabled_switch_and_non_comment_notifications_do_not_fetch_history
+    [false, nil, 'true'].each do |value|
+      @settings['slack']['comment_notifications_in_threads'] = value
+      result = deliver(->(*) { flunk 'Disabled lookup' })
+      refute result.key?('thread_ts')
+      refute result.key?('_redmine_comment_issue_id')
+    end
+    @settings['slack']['comment_notifications_in_threads'] = true
+    @payload.delete('_redmine_comment_issue_id')
+    refute deliver(->(*) { flunk 'Not a comment' }).key?('thread_ts')
+  end
+
+  def test_project_override_disables_lookup
+    @settings['projects'] = { 'agentic' => { 'slack' => { 'comment_notifications_in_threads' => false } } }
+    refute deliver(->(*) { flunk 'Disabled project lookup' }).key?('thread_ts')
+  end
+
+  def test_missing_app_configuration_and_lookup_failure_fall_back_to_channel_post
+    @settings['slack'].delete('events')
+    refute deliver(->(*) { flunk 'Missing app ID' }).key?('thread_ts')
+    @settings['slack']['events'] = { 'app_id' => 'ATEST' }
+    refute deliver(->(*) { raise IOError, 'History unavailable' }).key?('thread_ts')
+  end
+
+  def test_pagination_finds_an_older_matching_root
+    requests = []
+    api = ->(_method, request, _token, **_options) do
+      requests << request
+      requests.length == 1 ? { 'messages' => [], 'response_metadata' => { 'next_cursor' => 'page2' } } : { 'messages' => [@root] }
+    end
+    assert_equal '1000.000001', deliver(api)['thread_ts']
+    assert_equal 'page2', requests[1]['cursor']
+    assert_equal 100, requests[1]['limit']
+  end
+
+  def test_no_match_search_stops_after_three_pages
+    calls = 0
+    api = ->(*) { calls += 1; { 'messages' => [], 'response_metadata' => { 'next_cursor' => "page#{calls}" } } }
+    refute deliver(api).key?('thread_ts')
+    assert_equal 3, calls
+  end
+
+  def test_untrusted_links_other_apps_and_broadcast_replies_are_ignored
+    checker = RedmineSlackNotification::CommentThreads
+    assert checker.notification_for_issue?(@root, 7, 'ATEST')
+    [@root.merge('app_id' => 'AOTHER'), @root.merge('bot_id' => nil),
+     @root.merge('thread_ts' => '999.000001'), @root.merge('ts' => 'invalid')].each do |message|
+      refute checker.notification_for_issue?(message, 7, 'ATEST')
+    end
+    refute checker.notification_for_issue?(@root, 8, 'ATEST')
+    @root['attachments'][0]['blocks'][1]['text']['text'] = '*<https://evil.example/issues/7|Subject>*'
+    refute checker.notification_for_issue?(@root, 7, 'ATEST')
   end
 end

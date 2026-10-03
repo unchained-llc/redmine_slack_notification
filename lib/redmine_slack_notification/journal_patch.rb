@@ -34,6 +34,10 @@ module RedmineSlackNotification
                     issue, actor: user, action: 'updated', details: enabled_details
                   )
                 end
+      if comment_enabled && enabled_details.empty? &&
+         RedmineSlackNotification.effective_config(issue.project).dig('slack', 'comment_notifications_in_threads') == true
+        payload = payload.merge('_redmine_comment_issue_id' => issue.id)
+      end
       RedmineSlackNotification.enqueue(
         payload,
         project: issue.project,
@@ -58,11 +62,15 @@ module RedmineSlackNotification
 
       image_names = action == 'updated' ? RedmineSlackNotification::Formatter.image_references(notes) : []
 
+      payload = RedmineSlackNotification::Formatter.journal_payload(
+        issue, actor: updated_by || User.current, notes: notes, comment_action: action,
+        previous_notes: notes_before_last_save
+      )
+      if RedmineSlackNotification.effective_config(issue.project).dig('slack', 'comment_notifications_in_threads') == true
+        payload = payload.merge('_redmine_comment_issue_id' => issue.id)
+      end
       RedmineSlackNotification.enqueue(
-        RedmineSlackNotification::Formatter.journal_payload(
-          issue, actor: updated_by || User.current, notes: notes, comment_action: action,
-          previous_notes: notes_before_last_save
-        ),
+        payload,
         project: issue.project, event: event,
         image_names: image_names, journal_id: action == 'updated' ? id : nil
       )

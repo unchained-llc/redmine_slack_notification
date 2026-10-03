@@ -24,6 +24,11 @@ module RedmineSlackNotification
                                       custom_fields attachments watchers].freeze
     DEFAULT_MESSAGES = {
       'work_objects' => { 'product_name' => 'Redmine' },
+      'thread_notifications' => {
+        'added_header' => '%{product_name} #%{id}: New comment',
+        'updated_header' => '%{product_name} #%{id}: Comment updated',
+        'deleted_header' => '%{product_name} #%{id}: Comment deleted'
+      },
       'thread_comments' => {
         'saved' => '✅ Comment added to Redmine #%{id}.',
         'restricted' => '⚠️ Could not add the comment. Check the user mapping, Issue permissions and state, and text length.'
@@ -373,7 +378,22 @@ module RedmineSlackNotification
         blocks.concat(change_field_blocks(changes))
       end
       append_metadata(blocks, 'issue', metadata_fields(issue, actor, 'updated'), action: 'updated') if combined_update
-      with_issue_work_object(payload(fallback, blocks: blocks), issue, actor: actor, action: 'updated')
+      result = with_issue_work_object(payload(fallback, blocks: blocks), issue, actor: actor, action: 'updated')
+      if !combined_update && RedmineSlackNotification.effective_config.dig('slack', 'comment_notifications_in_threads') == true
+        body = comment_action == 'added' ? mrkdwn_sections(nil, notes.to_s) : blocks.drop(3)
+        header_key = "#{comment_action}_header"
+        header = interpolate(message('thread_notifications', header_key),
+          { product_name: message('work_objects', 'product_name'), id: issue.id,
+            actor: actor&.name || message('values', 'unknown_user'), subject: issue.subject.to_s },
+          fallback: DEFAULT_MESSAGES.dig('thread_notifications', header_key))
+        result['_redmine_thread_comment_payload'] = {
+          # Only the heading is top-level text; the body is rendered once.
+          'text' => text(header).gsub(/##{issue.id}(?!\d)/) { "<#{url('/issues/' + issue.id.to_s)}|##{issue.id}>" },
+          'attachments' => [{ 'fallback' => notes.to_s, 'blocks' => body }],
+          'unfurl_links' => false, 'unfurl_media' => false
+        }
+      end
+      result
     end
 
     # Work Object metadata augments the existing event card; it never contains
@@ -560,14 +580,14 @@ module RedmineSlackNotification
 
     def mrkdwn_sections(heading, value, limit: 2800)
       markdown = value.to_s.gsub("\r\n", "\n").gsub("\r", "\n")
-      markdown_text = "**#{text(heading)}**\n\n#{markdown}"
+      markdown_text = heading ? "**#{text(heading)}**\n\n#{markdown}" : markdown
       # Slack caps all Markdown blocks in one message at 12,000 characters.
       # Keep the existing section path for longer notes rather than dropping text.
       return [{ 'type' => 'markdown', 'text' => markdown_text }] if ordered_list?(markdown) && markdown_text.length <= 12_000
 
       chunks = value.to_s.each_char.each_slice(limit).map(&:join)
       chunks.each_with_index.map do |chunk, index|
-        content = index.zero? ? "*#{text(heading)}*\n#{mrkdwn(chunk)}" : mrkdwn(chunk)
+        content = index.zero? && heading ? "*#{text(heading)}*\n#{mrkdwn(chunk)}" : mrkdwn(chunk)
         section_text(content)
       end
     end
