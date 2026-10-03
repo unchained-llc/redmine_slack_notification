@@ -1417,6 +1417,331 @@ class ImageNotificationTest < Minitest::Test
   end
 end
 
+class WorkObjectNotificationTest < Minitest::Test
+  def setup
+    @project = OpenStruct.new(identifier: 'agentic', name: 'Agentic')
+    @actor = OpenStruct.new(name: 'Kota')
+    @issue = OpenStruct.new(id: 7, subject: 'Fix A & B', description: 'Issue body', project: @project,
+                            tracker: OpenStruct.new(name: 'Task'), status: OpenStruct.new(name: 'In progress'),
+                            priority: OpenStruct.new(name: 'High'), assigned_to: OpenStruct.new(name: 'Alice'),
+                            author: @actor, due_date: Date.new(2026, 10, 5), is_private?: false)
+    @settings = { 'slack' => { 'work_object_previews' => true, 'metadata' => { 'issue' => {
+      'status' => true, 'assignee' => true, 'due_date' => true, 'author' => true
+    } } } }
+  end
+
+  def issue_payload(action = 'created')
+    RedmineSlackNotification::Formatter.issue_payload(@issue, actor: @actor, action: action)
+  end
+
+  def test_preview_is_opt_in_and_does_not_change_existing_cards
+    [nil, false, 'true'].each do |value|
+      RedmineSlackNotification.stub(:config, { 'slack' => { 'work_object_previews' => value } }) do
+        refute issue_payload.key?('metadata')
+        refute issue_payload.key?('text')
+      end
+    end
+    original = RedmineSlackNotification.stub(:config, @settings.merge('slack' => @settings['slack'].merge('work_object_previews' => false))) { issue_payload }
+    enabled = RedmineSlackNotification.stub(:config, @settings) { issue_payload }
+    assert_equal original['attachments'], enabled['attachments']
+    assert_equal original.dig('attachments', 0, 'fallback'), enabled['text']
+  end
+
+  def test_task_schema_and_identity_are_shared_by_creation_updates_and_comments
+    RedmineSlackNotification.stub(:config, @settings) do
+      created = issue_payload
+      updated = issue_payload('updated')
+      comment = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: 'A comment')
+      entities = [created, updated, comment].map { |message| message.dig('metadata', 'entities', 0) }
+      entities.each do |entity|
+        assert_equal 'slack#/entities/task', entity['entity_type']
+        assert_equal 'https://wac.example.com/issues/7', entity['url']
+        assert_equal({ 'id' => Digest::SHA256.hexdigest(entity['url']), 'type' => 'redmine_issue' }, entity['external_ref'])
+        assert_match(/\A[0-9a-zA-Z\-_:!\/=]+\z/, entity.dig('external_ref', 'id'))
+        assert_equal 'Fix A & B', entity.dig('entity_payload', 'attributes', 'title', 'text')
+        assert_equal '#7', entity.dig('entity_payload', 'attributes', 'display_id')
+        assert_equal 'In progress', entity.dig('entity_payload', 'fields', 'status', 'value')
+        assert_equal 'Alice', entity.dig('entity_payload', 'fields', 'assignee', 'user', 'text')
+        assert_equal({ 'value' => '2026-10-05', 'type' => 'slack#/types/date' }, entity.dig('entity_payload', 'fields', 'due_date'))
+        refute entity.dig('entity_payload', 'fields').key?('description')
+        refute entity.key?('app_unfurl_url')
+      end
+      assert_equal entities[0]['external_ref'], entities[2]['external_ref']
+    end
+  end
+
+  def test_work_object_id_distinguishes_redmine_hosts_and_issues
+    RedmineSlackNotification.stub(:config, @settings) do
+      original = issue_payload.dig('metadata', 'entities', 0, 'external_ref', 'id')
+      Setting.stub(:host_name, 'another.example.com/redmine') do
+        other_host = issue_payload.dig('metadata', 'entities', 0, 'external_ref', 'id')
+        refute_equal original, other_host
+        assert_match(/\A[0-9a-zA-Z\-_:!\/=]+\z/, other_host)
+      end
+      @issue.id = 8
+      refute_equal original, issue_payload.dig('metadata', 'entities', 0, 'external_ref', 'id')
+    end
+  end
+
+  def test_project_switch_overrides_global_in_both_directions
+    [true, false].each do |value|
+      settings = { 'slack' => { 'work_object_previews' => !value }, 'projects' => {
+        'agentic' => { 'slack' => { 'work_object_previews' => value } }
+      } }
+      RedmineSlackNotification.stub(:config, settings) do
+        assert_equal value, issue_payload.key?('metadata')
+      end
+    end
+  end
+
+  def test_hidden_metadata_is_not_exposed_in_work_object
+    @settings['slack']['metadata']['issue'] = false
+    RedmineSlackNotification.stub(:config, @settings) do
+      entity = issue_payload.dig('metadata', 'entities', 0, 'entity_payload')
+      assert_empty entity['fields']
+      refute entity.key?('custom_fields')
+    end
+  end
+
+  def test_project_field_override_is_applied
+    @settings['projects'] = { 'agentic' => { 'slack' => { 'metadata' => { 'issue' => {
+      'status' => false, 'project' => false, 'priority' => false
+    } } } } }
+    RedmineSlackNotification.stub(:config, @settings) do
+      entity = issue_payload.dig('metadata', 'entities', 0, 'entity_payload')
+      refute entity['fields'].key?('status')
+      refute entity['fields'].key?('priority')
+      refute entity['custom_fields'].any? { |field| field['key'] == 'project' }
+      assert entity['fields'].key?('assignee')
+    end
+  end
+
+  def test_deleted_and_private_issues_have_no_work_object
+    RedmineSlackNotification.stub(:config, @settings) do
+      refute issue_payload('deleted').key?('metadata')
+      @issue.define_singleton_method(:is_private?) { true }
+      refute issue_payload.key?('metadata')
+      comment = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: 'Private')
+      refute comment.key?('metadata')
+    end
+  end
+
+  def test_preview_reaches_slack_and_survives_image_cleanup
+    message = RedmineSlackNotification.stub(:config, @settings) { issue_payload }
+    message['attachments'][0]['blocks'] << { 'type' => 'image', 'slack_file' => { 'id' => 'F123' }, 'alt_text' => 'image' }
+    calls = []
+    api = lambda do |method, body, _token, **options|
+      assert_equal true, options[:form]
+      calls << [method, body]
+      { 'ok' => true, 'ts' => '123.456' }
+    end
+    RedmineSlackNotification.stub(:slack_api, api) { RedmineSlackNotification.post_message(message, 'C123', 'token') }
+    assert_equal %w[chat.postMessage chat.update], calls.map(&:first)
+    calls.each do |_method, body|
+      assert_equal message['metadata'], body['metadata']
+      assert_equal message['text'], body['text']
+      assert_equal 'C123', body['channel']
+    end
+  end
+
+  def test_non_issue_notifications_remain_unchanged
+    RedmineSlackNotification.stub(:config, @settings) do
+      message = RedmineSlackNotification::Formatter.generic_payload(project: @project, noun: 'News', action: 'created',
+                                                                   subject: 'News', url: 'https://wac.example.com/news/1', actor: @actor)
+      refute message.key?('metadata')
+    end
+  end
+
+  def test_work_object_is_sent_as_a_json_encoded_form_without_losing_attachments
+    message = RedmineSlackNotification.stub(:config, @settings) { issue_payload }
+    response = Net::HTTPOK.new('1.1', '200', 'OK')
+    response.define_singleton_method(:body) { '{"ok":true,"ts":"123.456"}' }
+    http = Object.new
+    captured = nil
+    http.define_singleton_method(:request) do |request|
+      captured = request
+      response
+    end
+    Net::HTTP.stub(:start, ->(*, &block) { block.call(http) }) do
+      RedmineSlackNotification.post_message(message, 'C123', 'token')
+    end
+    assert_equal 'application/x-www-form-urlencoded', captured['Content-Type']
+    form = URI.decode_www_form(captured.body).to_h
+    assert_equal message['metadata'], JSON.parse(form.fetch('metadata'))
+    assert_equal message['attachments'], JSON.parse(form.fetch('attachments'))
+    assert_equal 'C123', form['channel']
+    assert_equal message['text'], form['text']
+  end
+end
+
+class WorkObjectDetailsTest < Minitest::Test
+  WORK = RedmineSlackNotification::WorkObjects
+
+  def setup
+    @project = OpenStruct.new(identifier: 'agentic', name: 'Agentic', active?: true)
+    @user = OpenStruct.new(id: 3, name: 'Kota', active?: true)
+    @issue = OpenStruct.new(id: 7, subject: 'Current title', description: 'Current description',
+                            project: @project, tracker: OpenStruct.new(name: 'Task'),
+                            status: OpenStruct.new(name: 'In progress'), assigned_to: @user,
+                            due_date: Date.new(2026, 10, 10), is_private?: false)
+    @issue.define_singleton_method(:visible?) { |user| user.id == 3 }
+    @settings = { 'slack' => { 'work_object_previews' => true, 'bot_token' => 'test-token',
+                              'events' => { 'app_id' => 'ATEST', 'team_id' => 'TTEST', 'signing_secret' => 'test-secret' } },
+                  'users' => { 'kota' => 'U123' } }
+    @url = 'https://wac.example.com/issues/7'
+    @event = { 'type' => 'entity_details_requested', 'trigger_id' => 'trigger', 'user' => 'U123',
+               'entity_url' => @url, 'external_ref' => { 'id' => Digest::SHA256.hexdigest(@url), 'type' => 'redmine_issue' } }
+  end
+
+  def test_signature_requires_unmodified_body_and_fresh_timestamp
+    body = '{"type":"url_verification","challenge":"test"}'
+    timestamp = '1000'
+    signature = 'v0=' + OpenSSL::HMAC.hexdigest('SHA256', 'test-secret', "v0:#{timestamp}:#{body}")
+    RedmineSlackNotification.stub(:config, @settings) do
+      assert WORK.verified_integration(body, timestamp, signature, now: 1000)
+      refute WORK.verified_integration(body + ' ', timestamp, signature, now: 1000)
+      refute WORK.verified_integration(body, timestamp, signature, now: 1301)
+      refute WORK.verified_integration(body, timestamp, signature, now: 699)
+      refute WORK.verified_integration(body, timestamp, 'v0=bad', now: 1000)
+      refute WORK.verified_integration(body, timestamp, signature, now: 1000, app_id: 'AOTHER')
+      refute WORK.verified_integration(body, timestamp, signature, now: 1000, team_id: 'TOTHER')
+    end
+  end
+
+  def test_project_integrations_with_same_secret_are_routed_to_the_correct_app
+    @settings['projects'] = { 'agentic' => { 'slack' => { 'events' => { 'app_id' => 'ASECOND' } } } }
+    signature = 'v0=' + OpenSSL::HMAC.hexdigest('SHA256', 'test-secret', 'v0:1000:body')
+    RedmineSlackNotification.stub(:config, @settings) do
+      assert_equal 'ASECOND', WORK.verified_integration('body', '1000', signature, now: 1000, app_id: 'ASECOND')['app_id']
+    end
+  end
+
+  def test_missing_event_configuration_and_invalid_project_overrides_are_ignored
+    RedmineSlackNotification.stub(:config, { 'projects' => { 'invalid' => false } }) do
+      assert_empty WORK.integrations
+    end
+    @settings['projects'] = { 'invalid' => false }
+    RedmineSlackNotification.stub(:config, @settings) do
+      assert_equal 1, WORK.integrations.length
+    end
+  end
+
+  def test_environment_signing_secret_fallback
+    previous = ENV['SLACK_SIGNING_SECRET']
+    ENV['SLACK_SIGNING_SECRET'] = 'environment-test-secret'
+    @settings['slack']['events'].delete('signing_secret')
+    RedmineSlackNotification.stub(:config, @settings) do
+      assert_equal 'environment-test-secret', WORK.integrations.first['signing_secret']
+    end
+  ensure
+    ENV['SLACK_SIGNING_SECRET'] = previous
+  end
+
+  def capture_details
+    calls = []
+    RedmineSlackNotification.stub(:config, @settings) do
+      Issue.stub(:find_by, @issue) do
+        User.stub(:find_by, @user) do
+          RedmineSlackNotification.stub(:slack_api, ->(method, body, token, **options) {
+            calls << [method, body, token, options]
+            { 'ok' => true }
+          }) { WORK.present_details('ATEST', 'TTEST', @event) }
+        end
+      end
+    end
+    calls
+  end
+
+  def test_authorized_viewer_receives_current_details_with_single_entity_schema
+    calls = capture_details
+    assert_equal 1, calls.length
+    method, body, token, options = calls.first
+    assert_equal 'entity.presentDetails', method
+    assert_equal 'test-token', token
+    assert_equal true, options[:form]
+    assert_equal 'trigger', body['trigger_id']
+    metadata = body.fetch('metadata')
+    refute metadata.key?('entities')
+    assert_equal @event['external_ref'], metadata['external_ref']
+    assert_equal 'Current title', metadata.dig('entity_payload', 'attributes', 'title', 'text')
+    assert_equal 'Current description', metadata.dig('entity_payload', 'fields', 'description', 'value')
+    assert_equal 'In progress', metadata.dig('entity_payload', 'fields', 'status', 'value')
+    assert_equal '2026-10-10', metadata.dig('entity_payload', 'fields', 'due_date', 'value')
+  end
+
+  def test_unmapped_and_locked_users_receive_only_restricted_error
+    @event['user'] = 'U999'
+    body = capture_details.first[1]
+    assert_equal({ 'status' => 'restricted' }, body['error'])
+    refute body.key?('metadata')
+    @event['user'] = 'U123'
+    @user.define_singleton_method(:active?) { false }
+    refute capture_details.first[1].key?('metadata')
+  end
+
+  def test_description_limit_and_details_independent_of_notification_visibility
+    @issue.description = 'x' * 10_001
+    @settings['slack']['metadata'] = { 'issue' => { 'status' => false } }
+    fields = capture_details.first[1].dig('metadata', 'entity_payload', 'fields')
+    assert_equal 10_000, fields.dig('description', 'value').length
+    assert_equal 'In progress', fields.dig('status', 'value')
+  end
+
+  def test_invisible_private_disabled_and_archived_issues_are_restricted
+    @issue.define_singleton_method(:visible?) { |_user| false }
+    refute capture_details.first[1].key?('metadata')
+    @issue.define_singleton_method(:visible?) { |_user| true }
+    @issue.define_singleton_method(:is_private?) { true }
+    refute capture_details.first[1].key?('metadata')
+    @issue.define_singleton_method(:is_private?) { false }
+    @settings['slack']['work_object_previews'] = false
+    refute capture_details.first[1].key?('metadata')
+    @settings['slack']['work_object_previews'] = true
+    @project.define_singleton_method(:active?) { false }
+    refute capture_details.first[1].key?('metadata')
+  end
+
+  def test_foreign_urls_and_mismatched_references_never_call_slack
+    @event['entity_url'] = 'https://evil.example/issues/7'
+    assert_empty capture_details
+    @event['entity_url'] = @url + '?redirect=evil'
+    assert_empty capture_details
+    @event['entity_url'] = @url
+    @event['external_ref']['id'] = 'another-id'
+    assert_empty capture_details
+    @event['external_ref']['id'] = Digest::SHA256.hexdigest(@url)
+    @event['external_ref']['type'] = 'other'
+    assert_empty capture_details
+  end
+
+  def test_wrong_app_never_uses_project_bot_token
+    @settings['slack']['events']['app_id'] = 'AOTHER'
+    assert_empty capture_details
+  end
+
+  def test_deleted_issue_does_not_raise_or_send_content
+    RedmineSlackNotification.stub(:config, @settings) do
+      Issue.stub(:find_by, nil) do
+        RedmineSlackNotification.stub(:slack_api, ->(*) { flunk 'Unexpected Slack request' }) do
+          assert_nil WORK.present_details('ATEST', 'TTEST', @event)
+        end
+      end
+    end
+  end
+
+  def test_missing_and_ambiguous_redmine_user_mappings_are_denied
+    RedmineSlackNotification.stub(:config, @settings) do
+      User.stub(:find_by, nil) { assert_nil WORK.viewer_for('U123') }
+    end
+    @settings['users']['another'] = 'U123'
+    RedmineSlackNotification.stub(:config, @settings) do
+      User.stub(:find_by, ->(**keys) { keys[:login] == 'kota' ? @user : OpenStruct.new(id: 4, active?: true) }) do
+        assert_nil WORK.viewer_for('U123')
+      end
+    end
+  end
+end
+
 class NotificationDisplaySettingsTest < Minitest::Test
   def test_optional_issue_metadata_includes_selected_version_relation_and_custom_field
     project = OpenStruct.new(name: 'Agentic')

@@ -196,6 +196,60 @@ Issue の作成通知には説明文、新しいコメントの通知にはコ�
 
 Redmine の Markdown は Slack 用テキストに変換します。番号付きリストには Slack の `markdown` ブロックを使い、繰り返し現れる `1.` が順序付きリストとして表示されるようにします。長い内容には `mrkdwn` セクションを使い、Slack の Markdown ブロックの 12,000 文字制限に収めます。
 
+### チケットの Work Object Previews
+
+`slack.work_object_previews: true` にすると、公開 Issue の作成・更新・コメント通知に Slack の **Task Work Object** メタデータを追加します。省略時と `false` は従来の通知です。既存のイベント本文・変更差分・色付きカード・画像を維持し、Work Object のカードを追加表示できるようにします。Issue の削除通知、Wiki などの通知、毎日の期日リマインダー DM には追加しません。
+
+```yaml
+slack:
+  work_object_previews: true
+  metadata:
+    issue:
+      status: true
+      assignee: true
+      due_date: true
+projects:
+  another-project:
+    slack:
+      work_object_previews: false
+```
+
+全体設定を `false` にして特定プロジェクトだけ `true` にすることもできます。YAML の変更後は Redmine と Sidekiq を再起動してください。
+
+Slack アプリの管理画面でも **Work Object Previews → ON → Task を選択 → Save** を設定してください。ワークスペース側でプレビューが制限されている場合は、その設定も確認してください。通知は既存の `chat.postMessage` で送信します。通知プレビューだけのために新しいイベント購読やリンク展開のスコープを追加する必要はありません。[Slack の実装仕様](https://docs.slack.dev/messaging/work-objects-implementation/#notifications-implementation)
+
+件名・チケット番号・トラッカーを Work Object の見出しに使います。ステータス、優先度、担当者、作成者、期日は `slack.metadata.issue` で表示が有効な場合だけ標準フィールドとして送ります。プロジェクト、トラッカー、カテゴリ、更新者、対象バージョンも同じ表示設定に従ってカスタムフィールドとして送ります。ラベルには `messages.fields` を使います。それ以外の項目と説明文・コメント本文は既存の通知カードで表示します。担当者・作成者は表示名を使い、Work Object 用に新たなメンションやユーザー一覧取得を行いません。
+
+チケットの URL の SHA-256 値を `external_ref.id` に使い、Slack の ID 文字制限を満たしながら、同じチケットの作成・更新・コメントで共通の識別子を送ります。別の Redmine の同番号チケットとは区別されます。Redmine のホスト名を変更すると識別子も変わります。リンク先の `url` は元のチケット URL のままです。
+
+通知カードは**通知を生成した時点の情報**です。カードを開いたときと詳細パネルの再読み込み時には、`entity_details_requested` を受け取り、`entity.presentDetails` で最新のチケット情報を返します。[Slack の詳細表示 API](https://docs.slack.dev/reference/methods/entity.presentDetails/)
+
+詳細表示を使う場合は、次の設定を追加してください。`signing_secret` は Slack アプリの **Basic Information → App Credentials → Signing Secret** の値です。Bot Token とは別の値です。環境変数 `SLACK_SIGNING_SECRET` でも指定できます。
+
+```yaml
+slack:
+  work_object_previews: true
+  events:
+    app_id: 'AMNLYCD0C'
+    team_id: 'T04AF12HM'
+    signing_secret: 'REPLACE-ME'
+users:
+  kota: 'U0123456789' # 実際のSlackメンバーIDに置き換える
+```
+
+1. コードと YAML を配置し、Redmine と Sidekiq を再起動します。Sidekiq が `slack` キューを処理していることを確認してください。
+2. Slack アプリの **Event Subscriptions → Enable Events** を ON にします。Request URL を `https://wac.unchained.co.jp/redmine_slack/events` にし、**Verified** を確認します。別のサーバーでは Redmine の公開 URL に合わせてください。サブディレクトリ配置の場合は、そのパスも含めます。
+3. **Subscribe to bot events** に `entity_details_requested` を追加し、**Save Changes** します。このイベントと `entity.presentDetails` に追加 OAuth スコープは不要です。
+4. チャンネルの Work Object カードを開き、ステータス・担当者・期日・説明文を確認します。Redmine で変更後、詳細パネルを再読み込みし、最新値になることを確認します。新しい通知を送る必要はありません。
+
+要求の署名・タイムスタンプ・アプリとワークスペースを検証してから、既存の `slack` キューで応答します。閲覧ユーザーは `users` の明示的なログイン名／メールアドレスと Slack ID の対応付けで確認します。`auto_map_users_by_name` は閲覧許可に使いません。未対応付け・ロック済み・閲覧権限なしのユーザー、非公開チケット、無効なプロジェクト、`work_object_previews: false` のプロジェクトには内容を返さず、アクセス制限を表示します。プロジェクト別の Slack アプリでは `projects.<identifier>.slack.events` と `users` を上書きできます。
+
+権限確認後の詳細には、最新の件名・チケット番号・トラッカー・プロジェクト・状態・優先度・担当者・作成者・期日・作成／更新日時・説明文（最大10,000文字）を返します。詳細表示の項目は通知用の `slack.metadata.issue` 設定とは独立しています。コメントや Redmine カスタムフィールド、Slack 内での編集、貼り付けたリンクの自動展開は含みません。
+
+現時点では、通知の Slack スレッドへの返信は Redmine のコメントに登録されません。Work Object の「会話」表示も Redmine のコメント履歴とは別です。Slack から Redmine へのコメント追加と、Work Object 内での Redmine コメント表示・投稿は未実装です。
+
+動かない場合は Redmine／Sidekiq ログの `Work Object details` を確認してください。`shown`／`restricted` は応答処理の結果、`failed` は Slack API のエラーコードです。`missing_interactivity_url` が返る場合は、Slack アプリの **Interactivity & Shortcuts** の Request URL を設定してください。
+
 ### 本文の差分
 
 初期状態では、Issue の説明文・コメント、Wiki の本文、News の説明文・コメントを編集すると行単位の差分を表示します。`diff` コードブロックでは、削除行に `-`、追加行に `+` を付け、前後に変更のない行を 2 行ずつ含めます。長い行や大きな差分は短縮されるため、全文はレコードのリンクから確認してください。編集コメントだけを変更した Wiki 更新には本文差分を表示しません。
@@ -385,6 +439,7 @@ YAML を変更した場合は Redmine と Sidekiq の両方を再起動してく
 
 ```bash
 ruby -Itest test/image_notification_test.rb
+ruby -Itest test/slack_events_controller_test.rb
 ```
 
 テストはスタブを使って通知の整形と配信ロジックを確認します。Slack への投稿や稼働中の Redmine 環境は検証しません。

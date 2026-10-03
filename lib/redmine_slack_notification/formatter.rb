@@ -321,7 +321,8 @@ module RedmineSlackNotification
         append_metadata(blocks, 'issue', metadata_fields(issue, actor, action), action: action)
       end
 
-      payload(title, blocks: blocks)
+      result = payload(title, blocks: blocks)
+      action == 'deleted' ? result : with_issue_work_object(result, issue, actor: actor, action: action)
     end
 
     def journal_payload(issue, **options)
@@ -367,7 +368,100 @@ module RedmineSlackNotification
         blocks.concat(change_field_blocks(changes))
       end
       append_metadata(blocks, 'issue', metadata_fields(issue, actor, 'updated'), action: 'updated') if combined_update
-      payload(fallback, blocks: blocks)
+      with_issue_work_object(payload(fallback, blocks: blocks), issue, actor: actor, action: 'updated')
+    end
+
+    # Work Object metadata augments the existing event card; it never contains
+    # comments or description bodies. Hidden Issue fields stay hidden here too.
+    def with_issue_work_object(result, issue, actor:, action:)
+      return result unless RedmineSlackNotification.effective_config.dig('slack', 'work_object_previews') == true
+      return result if issue.is_private?
+
+      attributes = {
+        'title' => { 'text' => issue.subject.to_s },
+        'display_id' => "##{issue.id}",
+        'display_type' => issue.tracker.name.to_s,
+        'product_name' => 'Redmine'
+      }
+      fields = {}
+      {
+        'status' => ['status', -> { issue.status&.name }],
+        'priority' => ['priority', -> { issue.priority&.name }],
+        'due_date' => ['due_date', -> { issue.due_date&.iso8601 }]
+      }.each do |key, (setting, getter)|
+        next unless metadata_enabled?('issue', setting, action: action)
+
+        value = getter.call.to_s
+        next if value.empty?
+
+        fields[key] = { 'value' => value }
+        fields[key]['type'] = 'slack#/types/date' if key == 'due_date'
+      end
+      { 'assignee' => ['assignee', :assigned_to], 'created_by' => ['author', :author] }.each do |key, (setting, accessor)|
+        next unless metadata_enabled?('issue', setting, action: action)
+
+        user = issue.public_send(accessor)
+        next unless user
+
+        # Keep these as display names, avoiding new mentions or directory calls.
+        fields[key] = { 'type' => 'slack#/types/user', 'user' => { 'text' => user.name.to_s } }
+      end
+      custom_fields = []
+      {
+        'project' => -> { issue.project.name },
+        'tracker' => -> { issue.tracker.name },
+        'category' => -> { issue.category&.name },
+        'updater' => -> { actor&.name },
+        'target_version' => -> { issue.fixed_version&.name }
+      }.each do |key, getter|
+        next unless metadata_enabled?('issue', key, action: action)
+
+        value = getter.call.to_s
+        next if value.empty?
+
+        custom_fields << { 'key' => key, 'label' => field_label(key), 'type' => 'string', 'value' => value }
+      end
+      issue_url = url("/issues/#{issue.id}")
+      entity_payload = { 'attributes' => attributes, 'fields' => fields }
+      entity_payload['custom_fields'] = custom_fields unless custom_fields.empty?
+      result.merge(
+        'text' => result.dig('attachments', 0, 'fallback'),
+        'metadata' => { 'entities' => [{
+          'entity_type' => 'slack#/entities/task',
+          'url' => issue_url,
+          # Slack restricts IDs to [0-9a-zA-Z\-_:!/=]. URLs contain dots (and
+          # potentially other forbidden characters), so use an opaque stable ID.
+          'external_ref' => { 'id' => Digest::SHA256.hexdigest(issue_url), 'type' => 'redmine_issue' },
+          'entity_payload' => entity_payload
+        }] }
+      )
+    end
+
+    def issue_work_object_details(issue)
+      fields = {}
+      { 'status' => issue.status&.name, 'priority' => issue.priority&.name }.each do |key, value|
+        fields[key] = { 'value' => value.to_s } unless value.to_s.empty?
+      end
+      { 'assignee' => issue.assigned_to, 'created_by' => issue.author }.each do |key, user|
+        fields[key] = { 'type' => 'slack#/types/user', 'user' => { 'text' => user.name.to_s } } if user
+      end
+      fields['due_date'] = { 'type' => 'slack#/types/date', 'value' => issue.due_date.iso8601 } if issue.due_date
+      { 'date_created' => issue.created_on, 'date_updated' => issue.updated_on }.each do |key, value|
+        fields[key] = { 'type' => 'slack#/types/timestamp', 'value' => value.to_i } if value
+      end
+      description = issue.description.to_s.strip
+      fields['description'] = { 'value' => description[0, 10_000], 'format' => 'markdown' } unless description.empty?
+      issue_url = url("/issues/#{issue.id}")
+      {
+        'entity_type' => 'slack#/entities/task', 'url' => issue_url,
+        'external_ref' => { 'id' => Digest::SHA256.hexdigest(issue_url), 'type' => 'redmine_issue' },
+        'entity_payload' => {
+          'attributes' => { 'title' => { 'text' => issue.subject.to_s }, 'display_id' => "##{issue.id}",
+                            'display_type' => issue.tracker.name.to_s, 'product_name' => 'Redmine' },
+          'fields' => fields,
+          'custom_fields' => [{ 'key' => 'project', 'label' => field_label('project'), 'type' => 'string', 'value' => issue.project.name.to_s }]
+        }
+      }
     end
 
     def wiki_payload(content, project, **options)
