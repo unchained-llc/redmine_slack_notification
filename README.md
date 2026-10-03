@@ -234,7 +234,7 @@ slack:
     team_id: 'T0123456789'
     signing_secret: 'REPLACE-ME'
 users:
-  kota: 'U0123456789' # Replace with the actual Slack member ID
+  alice: 'U0123456789' # Replace with the actual Slack member ID
 ```
 
 1. Deploy the code and YAML, restart Redmine and Sidekiq, and ensure Sidekiq consumes the `slack` queue.
@@ -321,7 +321,7 @@ slack:
     team_id: 'T0123456789'
     signing_secret: 'REPLACE-ME'
 users:
-  kota: 'U0123456789' # Actual Slack member ID
+  alice: 'U0123456789' # Actual Slack member ID
 projects:
   another-project:
     slack:
@@ -341,7 +341,7 @@ Customize the service name shown in Work Object cards and detail headers/open bu
 ```yaml
 messages:
   work_objects:
-    product_name: 'WAC'
+    product_name: 'Example Tracker'
   thread_comments:
     saved: '✅ Comment added to %{product_name} #%{id}.'
     restricted: '⚠️ Could not add the comment. Check your permissions.'
@@ -399,7 +399,7 @@ The top-level `messages` tree changes notification wording; it does not control 
 | `messages.templates` | Visible Issue-update heading and plain-text attachment fallbacks |
 | `messages.due_reminders` | Daily DM headings, labels, relative timing, and fallbacks |
 
-An Issue update heading uses the Redmine user who made the update. Its default format is `🔄 Kota *Issue updated*` in Slack markup. You can change the text after the icon without editing the plugin:
+An Issue update heading uses the Redmine user who made the update. Its default format is `🔄 Alice *Issue updated*` in Slack markup. You can change the text after the icon without editing the plugin:
 
 ```yaml
 messages:
