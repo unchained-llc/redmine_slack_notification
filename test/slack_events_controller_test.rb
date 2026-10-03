@@ -26,6 +26,7 @@ end
 
 require_relative '../app/controllers/redmine_slack_events_controller'
 require_relative '../app/jobs/redmine_slack_work_object_details_job'
+require_relative '../app/jobs/redmine_slack_thread_comment_job'
 
 class SlackEventsControllerTest < Minitest::Test
   def setup
@@ -107,5 +108,28 @@ class SlackEventsControllerTest < Minitest::Test
       RedmineSlackWorkObjectDetailsJob.new.perform('ATEST', 'TTEST', @payload['event'])
     end
     assert_equal ['ATEST', 'TTEST', @payload['event']], arguments
+  end
+
+  def test_thread_reply_is_queued_only_when_enabled_and_for_the_configured_channel
+    @settings['slack'].merge!('thread_comments' => true, 'default_channel_id' => 'C123')
+    @payload['event'] = { 'type' => 'message', 'user' => 'U123', 'text' => 'Reply',
+                          'channel' => 'C123', 'ts' => '1000.000002', 'thread_ts' => '1000.000001' }
+    queued = []
+    RedmineSlackThreadCommentJob.stub(:perform_later, ->(*args) { queued << args }) do
+      assert_equal :ok, dispatch.status
+      assert_equal 1, queued.length
+      assert_equal @payload['event'], queued.first.last
+      @settings['slack']['thread_comments'] = false
+      dispatch
+      assert_equal 1, queued.length
+      @settings['slack']['thread_comments'] = true
+      @payload['event']['channel'] = 'COTHER'
+      dispatch
+      assert_equal 1, queued.length
+      @payload['event']['channel'] = 'C123'
+      @payload['event']['bot_id'] = 'B123'
+      dispatch
+      assert_equal 1, queued.length
+    end
   end
 end

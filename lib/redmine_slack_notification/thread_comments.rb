@@ -1,0 +1,149 @@
+# frozen_string_literal: true
+
+module RedmineSlackNotification
+  module ThreadComments
+    module_function
+
+    def enabled?(project)
+      RedmineSlackNotification.effective_config(project).dig('slack', 'thread_comments') == true
+    end
+
+    def reply_event?(event)
+      event.is_a?(Hash) && event['type'] == 'message' &&
+        [nil, '', 'thread_broadcast'].include?(event['subtype']) &&
+        !event['bot_id'] && !event['app_id'] && !event['edited'] &&
+        event['user'].to_s.match?(/\A[UW][A-Z0-9]+\z/) &&
+        event['channel'].to_s.match?(/\A[CG][A-Z0-9]+\z/) &&
+        event['thread_ts'].to_s.match?(/\A\d+\.\d+\z/) &&
+        posted_at(event['ts']) && event['ts'] != event['thread_ts'] &&
+        event['text'].is_a?(String) && !event['text'].strip.empty?
+    end
+
+    def contexts(app_id, team_id, channel)
+      base = RedmineSlackNotification.config
+      candidates = [nil]
+      projects = base['projects']
+      candidates.concat(projects.keys.map { |key| Project.find_by(identifier: key) }.compact) if projects.is_a?(Hash)
+      candidates.select do |project|
+        settings = RedmineSlackNotification.effective_config(project)
+        slack = settings['slack']
+        events = slack['events'] if slack.is_a?(Hash)
+        configured_channel = project ? RedmineSlackNotification.channel_id(project) : (slack['default_channel_id'] if slack.is_a?(Hash))
+        slack.is_a?(Hash) && slack['thread_comments'] == true && events.is_a?(Hash) &&
+          events['app_id'] == app_id && events['team_id'] == team_id && configured_channel == channel
+      end
+    end
+
+    def accepted_reply?(app_id, team_id, event)
+      reply_event?(event) && !contexts(app_id, team_id, event['channel']).empty?
+    end
+
+    def issue_from_parent(message, app_id, thread_ts)
+      return unless message.is_a?(Hash) && message['ts'] == thread_ts && message['bot_id'] &&
+                    (message['app_id'] || message.dig('bot_profile', 'app_id')) == app_id
+      # Only our formatter's subject section identifies the Issue. Never scan
+      # user comments or arbitrary links in a message for a target Issue.
+      Array(message['attachments']).each do |attachment|
+        next unless attachment.is_a?(Hash)
+        subject = attachment.dig('blocks', 1, 'text', 'text').to_s
+        match = subject.match(/\A\*<([^|>]+)\|/)
+        next unless match
+        url = match[1]
+        id = url.match(%r{/issues/([1-9]\d*)\z})
+        next unless id && url == Formatter.url("/issues/#{id[1]}")
+        return Issue.find_by(id: id[1].to_i)
+      end
+      nil
+    end
+
+    def process(app_id, team_id, event)
+      return unless reply_event?(event)
+      tried_tokens = []
+      contexts(app_id, team_id, event['channel']).each do |context|
+        token = RedmineSlackNotification.bot_token(context)
+        next if token.to_s.empty? || tried_tokens.include?(token)
+        tried_tokens << token
+        response = RedmineSlackNotification.slack_api('conversations.history', {
+          'channel' => event['channel'], 'oldest' => event['thread_ts'], 'latest' => event['thread_ts'],
+          'inclusive' => true, 'limit' => 1
+        }, token, form: true)
+        issue = issue_from_parent(Array(response['messages']).first, app_id, event['thread_ts'])
+        next unless issue && enabled?(issue.project) &&
+                    RedmineSlackNotification.channel_id(issue.project) == event['channel'] &&
+                    WorkObjects.integration_for(app_id, team_id, project: issue.project) &&
+                    RedmineSlackNotification.bot_token(issue.project) == token
+
+        RedmineSlackNotification.with_project(issue.project) do
+          result = persist_reply(issue, event, team_id)
+          # A duplicate never creates a second Journal or a second feedback post.
+          return if result == :duplicate
+          key = result == :saved ? 'saved' : 'restricted'
+          text = Formatter.interpolate(Formatter.message('thread_comments', key), { id: issue.id, product_name: Formatter.message('work_objects', 'product_name') },
+                                       fallback: Formatter::DEFAULT_MESSAGES.dig('thread_comments', key))
+          begin
+            RedmineSlackNotification.slack_api('chat.postMessage', {
+              'channel' => event['channel'], 'thread_ts' => event['thread_ts'], 'text' => text,
+              'unfurl_links' => false, 'unfurl_media' => false
+            }, token)
+          rescue StandardError => e
+            # Saving already succeeded. Feedback failure must not replay a note.
+            Rails.logger&.error("RedmineSlackNotification: thread comment feedback failed: #{e.class}")
+          end
+          Rails.logger&.info("RedmineSlackNotification: thread comment issue=#{issue.id} result=#{result}")
+        end
+        return
+      end
+      nil
+    end
+
+    def source_marker(team_id, event)
+      "[Slack reply: #{team_id}/#{event['channel']}/#{event['ts']}]"
+    end
+
+    def posted_at(timestamp)
+      match = timestamp.to_s.match(/\A(\d{1,12})\.(\d{1,6})\z/)
+      return unless match
+      # Parse integers, not a Float: current epoch values lose microseconds
+      # when converted through floating point.
+      Time.at(match[1].to_i, match[2].ljust(6, '0').to_i, :microsecond).utc
+    end
+
+    def persist_reply(issue, event, team_id)
+      previous_user = User.current
+      previous_origin = Thread.current[:redmine_slack_thread_comment]
+      original_project = issue.project.identifier
+      Thread.current[:redmine_slack_thread_comment] = true
+      timestamp = posted_at(event['ts'])
+      return :restricted unless timestamp
+
+      issue.with_lock do
+        next :restricted unless issue.project.identifier == original_project && enabled?(issue.project)
+        # Keep recognizing the initial version's visible markers on retries.
+        marker = source_marker(team_id, event)
+        legacy_duplicate = issue.journals.where('notes LIKE ?', "%#{marker}%").any? do |journal|
+          journal.notes.to_s.end_with?("\n\n#{marker}")
+        end
+        next :duplicate if legacy_duplicate
+        viewer = WorkObjects.viewer_for(event['user'])
+        allowed = viewer && issue.project.active? && !issue.is_private? && issue.visible?(viewer) &&
+                  issue.notes_addable?(viewer) && event['text'].length <= 10_000
+        next :restricted unless allowed
+        # The existing comment author and original posting time identify a
+        # retry, even after the comment text has been edited in Redmine.
+        next :duplicate if issue.journals.exists?(user_id: viewer.id, created_on: timestamp)
+
+        User.current = viewer
+        journal = issue.init_journal(viewer, event['text'])
+        journal.created_on = timestamp
+        issue.save!
+        raise 'Slack reply Journal was not persisted' unless journal.persisted?
+        :saved
+      end
+    rescue ActiveRecord::RecordInvalid
+      :restricted
+    ensure
+      User.current = previous_user
+      Thread.current[:redmine_slack_thread_comment] = previous_origin
+    end
+  end
+end

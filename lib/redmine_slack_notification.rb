@@ -521,6 +521,7 @@ require_relative 'redmine_slack_notification/journal_patch'
 require_relative 'redmine_slack_notification/wiki_content_patch'
 require_relative 'redmine_slack_notification/generic_patches'
 require_relative 'redmine_slack_notification/work_objects'
+require_relative 'redmine_slack_notification/thread_comments'
 
 
 module RedmineSlackNotification

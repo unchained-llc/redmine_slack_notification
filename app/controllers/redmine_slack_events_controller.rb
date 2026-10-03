@@ -32,6 +32,10 @@ class RedmineSlackEventsController < ActionController::Base
       RedmineSlackWorkObjectDetailsJob.perform_later(payload['api_app_id'], payload['team_id'], event.slice(
         'type', 'trigger_id', 'user', 'entity_url', 'external_ref'
       ))
+    elsif payload['type'] == 'event_callback' && RedmineSlackNotification::ThreadComments.accepted_reply?(payload['api_app_id'], payload['team_id'], event)
+      RedmineSlackThreadCommentJob.perform_later(payload['api_app_id'], payload['team_id'], event.slice(
+        'type', 'subtype', 'user', 'text', 'channel', 'ts', 'thread_ts'
+      ))
     end
     head :ok
   rescue JSON::ParserError

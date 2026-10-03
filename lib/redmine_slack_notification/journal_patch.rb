@@ -13,7 +13,7 @@ module RedmineSlackNotification
     private
 
     def notify_slack_journal_created
-
+      return if Thread.current[:redmine_slack_thread_comment]
       issue = journalized
       return unless issue.is_a?(Issue)
       return if issue.is_private? || private_notes?
