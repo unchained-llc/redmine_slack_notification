@@ -1447,6 +1447,22 @@ class WorkObjectNotificationTest < Minitest::Test
     assert_equal original.dig('attachments', 0, 'fallback'), enabled['text']
   end
 
+  def test_product_name_is_configurable_for_previews_and_details_with_project_override
+    @settings['messages'] = { 'work_objects' => { 'product_name' => 'WAC' } }
+    @settings['projects'] = { 'agentic' => { 'messages' => { 'work_objects' => { 'product_name' => 'W.A.C' } } } }
+    RedmineSlackNotification.stub(:config, @settings) do
+      assert_equal 'W.A.C', issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'attributes', 'product_name')
+      RedmineSlackNotification.with_project(@project) do
+        details = RedmineSlackNotification::Formatter.issue_work_object_details(@issue)
+        assert_equal 'W.A.C', details.dig('entity_payload', 'attributes', 'product_name')
+      end
+      @settings.delete('projects')
+      assert_equal 'WAC', issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'attributes', 'product_name')
+      @settings['messages']['work_objects']['product_name'] = ''
+      assert_equal 'Redmine', issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'attributes', 'product_name')
+    end
+  end
+
   def test_task_schema_and_identity_are_shared_by_creation_updates_and_comments
     RedmineSlackNotification.stub(:config, @settings) do
       created = issue_payload

@@ -246,9 +246,53 @@ The endpoint verifies the signature, timestamp, app, and workspace before enqueu
 
 Authorized details include the current title, Issue ID, tracker, project, status, priority, assignee, author, due date, creation/update timestamps, and description (up to 10,000 characters). Detail fields are independent of notification `slack.metadata.issue` settings. Comments, Redmine custom fields, editing inside Slack, and pasted-link unfurls are not included.
 
-Replies in a notification's Slack thread are not currently saved as Redmine comments. The Work Object's conversation view is also separate from Redmine's comment history. Adding Redmine comments from Slack and displaying or posting Redmine comments inside the Work Object are not implemented yet.
-
 Check Redmine/Sidekiq logs for `Work Object details`: `shown`/`restricted` describe the response path; `failed` includes the Slack API error code. If Slack returns `missing_interactivity_url`, configure the app's **Interactivity & Shortcuts** Request URL.
+
+The Work Object's conversation view is separate from Redmine's comment history. Displaying and posting Redmine comments inside the detail pane are not implemented yet. Posting comments from notification threads is available through the following setting.
+
+### Add Redmine comments from notification threads
+
+Set `slack.thread_comments: true` to save text replies to this plugin's Issue notifications as Redmine comments authored by the replying user. Omitted or `false` disables the feature. Work Object Previews are optional.
+
+```yaml
+slack:
+  thread_comments: true
+  events:
+    app_id: 'AMNLYCD0C'
+    team_id: 'T04AF12HM'
+    signing_secret: 'REPLACE-ME'
+users:
+  kota: 'U0123456789' # Actual Slack member ID
+projects:
+  another-project:
+    slack:
+      thread_comments: false
+```
+
+For private channels, add the Bot Token scope `groups:history` and subscribe to `message.groups`. Public channels use `channels:history` and `message.channels`. Reinstall the app after adding scopes. Request URL and signature verification are shared with Work Object details. The bot must be a member of the channel. See [Slack's message events](https://docs.slack.dev/reference/events/message/).
+
+No extra tables, DB migrations, or Redis processing-state entries are required. The plugin fetches only the parent notification through `conversations.history`, verifies its app ID and canonical Issue subject URL, and accepts replies only in channels currently configured as notification destinations. Existing notifications are supported. Replies to other apps, users, or arbitrary Issue links are ignored.
+
+Authorization requires an explicit `users` mapping to an active Redmine user, Issue visibility, and tracker-aware permission to add notes. Private Issues, inactive projects, and unmapped users are denied. Incoming Slack text is stored up to 10,000 characters without adding IDs or provenance lines. The existing Journal `created_on` is set to the original Slack posting time, parsed without floating-point conversion. The Issue, mapped author, and posting time identify repeated deliveries. The existing Issue row lock serializes duplicate checks and comment saves. No additional tables, columns, Redis state, or state files are required. Editing the comment text does not affect duplicate detection. Legacy comments containing provenance lines are still recognized as duplicates.
+
+Reliable duplicate detection requires the existing `journals.created_on` column to preserve microseconds (six fractional digits). Lower timestamp precision may treat distinct replies from the same author as duplicates. A different comment by the same mapped author on the same Issue at the exact same timestamp is also treated as a duplicate. Deleting the comment or changing its author or posting time removes its duplicate protection. Existing provenance lines are not removed automatically.
+
+Customize the service name shown in Work Object cards and detail headers/open buttons with `messages.work_objects.product_name` (default: `Redmine`). Thread reply feedback supports `%{id}` and `%{product_name}`. All these keys support overrides under `projects.<identifier>.messages`.
+
+```yaml
+messages:
+  work_objects:
+    product_name: 'WAC'
+  thread_comments:
+    saved: '✅ Comment added to %{product_name} #%{id}.'
+    restricted: '⚠️ Could not add the comment. Check your permissions.'
+```
+
+These settings affect new notifications and freshly requested details. Existing notification cards are not rewritten. Slack-owned UI text such as “Details” and “Conversations” follows Slack’s language settings.
+
+The result is posted to the same thread. Customize the text with `messages.thread_comments.saved` (supports `%{id}` and `%{product_name}`) and `messages.thread_comments.restricted`. The normal Slack notification for the newly saved comment is suppressed; standard Redmine email notifications and other callbacks still run. Bot messages, Slack edits/deletions, and attached files are not synchronized. Slack mentions and link syntax are not converted to Redmine markup. If result feedback fails after saving, the comment remains saved and the failure is logged. Disabling the feature keeps previously saved comments.
+
+After deploying code and YAML, restart Redmine and Sidekiq. Reply to a test Issue notification and verify the author, exact comment text, and success response. Also check unauthorized users, bot replies, and Slack edits to ensure they do not add comments.
 
 ### Body diffs
 
@@ -442,4 +486,4 @@ ruby -Itest test/image_notification_test.rb
 ruby -Itest test/slack_events_controller_test.rb
 ```
 
-These tests exercise notification formatting and delivery logic with stubs. They do not post to Slack or verify a live Redmine installation.
+These tests exercise notification formatting and delivery logic with stubs. Additionally, run `ruby -Itest test/thread_comments_persistence_test.rb` where ActiveRecord and sqlite3 are available to check persistence, duplicate suppression, permission denial, and notification-loop suppression using in-memory Issue/Journal fixture tables. These tests do not connect to production databases or Redis, post to Slack, or verify a live Redmine installation.

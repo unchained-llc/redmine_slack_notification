@@ -246,9 +246,53 @@ users:
 
 権限確認後の詳細には、最新の件名・チケット番号・トラッカー・プロジェクト・状態・優先度・担当者・作成者・期日・作成／更新日時・説明文（最大10,000文字）を返します。詳細表示の項目は通知用の `slack.metadata.issue` 設定とは独立しています。コメントや Redmine カスタムフィールド、Slack 内での編集、貼り付けたリンクの自動展開は含みません。
 
-現時点では、通知の Slack スレッドへの返信は Redmine のコメントに登録されません。Work Object の「会話」表示も Redmine のコメント履歴とは別です。Slack から Redmine へのコメント追加と、Work Object 内での Redmine コメント表示・投稿は未実装です。
-
 動かない場合は Redmine／Sidekiq ログの `Work Object details` を確認してください。`shown`／`restricted` は応答処理の結果、`failed` は Slack API のエラーコードです。`missing_interactivity_url` が返る場合は、Slack アプリの **Interactivity & Shortcuts** の Request URL を設定してください。
+
+Work Object の「会話」表示は Redmine のコメント履歴とは別です。詳細パネル内での Redmine コメント表示・投稿は未実装です。通知スレッドからのコメント追加は、次の設定で利用できます。
+
+### 通知スレッドからRedmineにコメントを追加
+
+`slack.thread_comments: true` にすると、このプラグインが送った Issue 通知へのテキスト返信を、返信者本人の Redmine コメントとして登録します。省略時・`false` は無効です。Work Object Previews は必須ではありません。
+
+```yaml
+slack:
+  thread_comments: true
+  events:
+    app_id: 'AMNLYCD0C'
+    team_id: 'T04AF12HM'
+    signing_secret: 'REPLACE-ME'
+users:
+  kota: 'U0123456789' # 実際のSlackメンバーID
+projects:
+  another-project:
+    slack:
+      thread_comments: false
+```
+
+Slack 側では非公開チャンネル用の Bot Token スコープ `groups:history` とイベント `message.groups` を追加してください。公開チャンネルの場合は `channels:history` と `message.channels` を使います。スコープ追加後はアプリを再インストールします。署名検証と Request URL は詳細表示と共通です。Bot が対象チャンネルに参加している必要があります。[Slack のメッセージイベント](https://docs.slack.dev/reference/events/message/)
+
+追加テーブル・DBマイグレーション・Redisへの処理済みID保存は不要です。返信先の親通知1件だけを `conversations.history` で取得し、アプリIDとチケット見出しの正規URLを検証します。対象は現在の設定で通知先になっているチャンネルです。既存の通知にも返信できますが、他のアプリ・ユーザーの投稿や任意のチケットリンクへの返信は登録しません。
+
+`users` に明示的に対応付けた有効ユーザーについて、チケットの閲覧権限とトラッカーを含むコメント追加権限を確認します。非公開チケット・無効なプロジェクト・未対応付けユーザーは拒否します。本文はSlackから受信したテキスト形式で最大10,000文字まで保存し、識別子や出典行は追加しません。既存のJournalの `created_on` にSlackの元の投稿時刻を設定し、浮動小数点を経由せずマイクロ秒まで保持します。同じチケット・対応付けた投稿者・投稿時刻のコメントがあれば再送と判断します。既存のチケット行ロック中に重複確認と保存を行います。追加テーブル・カラム・Redisへの状態保存・状態ファイルは不要です。本文をRedmineで編集しても重複判定は維持されます。旧バージョンの出典行付きコメントも重複確認の対象です。
+
+正確な重複判定には、既存の `journals.created_on` がマイクロ秒（小数点以下6桁）を保持できることが必要です。日時の精度が低い環境では、同じ投稿者の別の返信を重複と判断する場合があります。同じチケット・対応付けた投稿者・完全に同じ投稿時刻の別コメントも重複と判断します。コメントを削除したり、投稿者や投稿時刻を変更したりすると、その返信の重複判定はできなくなります。既存コメントの出典行は自動では削除しません。
+
+Work Objectのカードや詳細ヘッダー、「〜で開く」に使うサービス名は `messages.work_objects.product_name` で変更できます（既定値: `Redmine`）。返信結果の文言には `%{id}` と `%{product_name}` を使えます。すべて `projects.<identifier>.messages` でプロジェクト別に上書きできます。
+
+```yaml
+messages:
+  work_objects:
+    product_name: 'WAC'
+  thread_comments:
+    saved: '✅ Comment added to %{product_name} #%{id}.'
+    restricted: '⚠️ Could not add the comment. Check your permissions.'
+```
+
+設定変更は新しい通知と再取得した詳細に反映されます。既存の通知カードは書き換えません。「詳細」「会話」などSlack側のUI文言はSlackの言語設定に従います。
+
+保存結果は同じスレッドに返します。文言は `messages.thread_comments.saved`（`%{id}` と `%{product_name}` を利用可）と `messages.thread_comments.restricted` で変更できます。成功コメントの通常のSlack通知は抑制しますが、Redmineの標準メール通知等は通常どおり動きます。Bot投稿・Slackでの編集／削除・添付ファイルは同期しません。Slackのメンションやリンク表記をRedmine形式へ変換する処理も含みません。保存後の結果返信に失敗してもコメントは残り、ログに記録します。スイッチをOFFにしても既に登録されたコメントは残ります。
+
+コード・YAMLの反映後、RedmineとSidekiqを再起動してください。テスト用チケットの通知へ返信し、本人名義のコメント本文と成功返信を確認します。権限のないユーザー、Bot返信、Slack側での編集も試し、コメントが増えないことを確認してください。
 
 ### 本文の差分
 
@@ -442,4 +486,4 @@ ruby -Itest test/image_notification_test.rb
 ruby -Itest test/slack_events_controller_test.rb
 ```
 
-テストはスタブを使って通知の整形と配信ロジックを確認します。Slack への投稿や稼働中の Redmine 環境は検証しません。
+テストはスタブを使って通知の整形と配信ロジックを確認します。追加の `ruby -Itest test/thread_comments_persistence_test.rb` は ActiveRecord と sqlite3 が利用できる環境で実行し、メモリ内のテスト用チケット・コメントテーブルで保存、重複抑制、権限拒否、通知ループ抑制を確認します。本番DBやRedisへ接続せず、Slackへの投稿や稼働中のRedmine環境も検証しません。

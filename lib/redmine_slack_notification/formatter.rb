@@ -23,6 +23,11 @@ module RedmineSlackNotification
                                       estimated_hours done_ratio parent_issue children relations
                                       custom_fields attachments watchers].freeze
     DEFAULT_MESSAGES = {
+      'work_objects' => { 'product_name' => 'Redmine' },
+      'thread_comments' => {
+        'saved' => '✅ Comment added to Redmine #%{id}.',
+        'restricted' => '⚠️ Could not add the comment. Check the user mapping, Issue permissions and state, and text length.'
+      },
       'events' => {
         'issue' => { 'created' => 'Issue created', 'updated' => 'Issue updated', 'deleted' => 'Issue deleted' },
         'comment' => { 'added' => 'Comment added', 'updated' => 'Comment updated', 'deleted' => 'Comment deleted' },
@@ -381,7 +386,7 @@ module RedmineSlackNotification
         'title' => { 'text' => issue.subject.to_s },
         'display_id' => "##{issue.id}",
         'display_type' => issue.tracker.name.to_s,
-        'product_name' => 'Redmine'
+        'product_name' => message('work_objects', 'product_name')
       }
       fields = {}
       {
@@ -457,7 +462,7 @@ module RedmineSlackNotification
         'external_ref' => { 'id' => Digest::SHA256.hexdigest(issue_url), 'type' => 'redmine_issue' },
         'entity_payload' => {
           'attributes' => { 'title' => { 'text' => issue.subject.to_s }, 'display_id' => "##{issue.id}",
-                            'display_type' => issue.tracker.name.to_s, 'product_name' => 'Redmine' },
+                            'display_type' => issue.tracker.name.to_s, 'product_name' => message('work_objects', 'product_name') },
           'fields' => fields,
           'custom_fields' => [{ 'key' => 'project', 'label' => field_label('project'), 'type' => 'string', 'value' => issue.project.name.to_s }]
         }

@@ -13,6 +13,10 @@ slack:
   # Existing event cards remain. Deleted Issues and due-date DMs are excluded.
   # Override per project with projects.<identifier>.slack.work_object_previews.
   work_object_previews: false
+  # Save text replies to Issue notification threads as Redmine notes.
+  # Requires slack.events, explicit users mappings,
+  # message.groups + groups:history (private channels), and an app reinstall.
+  thread_comments: false
   # Required for clickable Work Object details. Configure the Slack app's
   # Events Request URL as https://YOUR-REDMINE/redmine_slack/events and subscribe
   # to entity_details_requested. The Signing Secret is NOT the Bot Token.
@@ -236,6 +240,14 @@ messages:
     issue_fallback: "[%{project}] %{actor} %{action} %{tracker} #%{id}: %{subject}"
     journal_fallback: "[%{project}] %{actor} %{event} %{tracker} #%{id}: %{subject}"
     generic_fallback: '%{event} - %{subject}'
+  # Service name in Work Object cards and the details header/open button.
+  # Projects may override any messages key under projects.<identifier>.messages.
+  work_objects:
+    product_name: 'Redmine'
+  thread_comments:
+    # Supports %{id} and %{product_name}.
+    saved: '✅ Comment added to Redmine #%{id}.'
+    restricted: '⚠️ Could not add the comment. Check the user mapping, Issue permissions and state, and text length.'
   due_reminders:
     # Omit a key to use its built-in default. Projects can override keys under
     # projects.<identifier>.messages.due_reminders.
