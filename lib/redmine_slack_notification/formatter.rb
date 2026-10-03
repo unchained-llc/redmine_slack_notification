@@ -114,6 +114,13 @@ module RedmineSlackNotification
       configured.is_a?(String) && !configured.empty? ? configured : default
     end
 
+    def link_issue_reference(value, issue_id)
+      # Preserve existing Slack links and mentions instead of nesting links.
+      value.to_s.split(/(<[^>]*>)/).map do |part|
+        part.start_with?('<') ? part : part.gsub(/##{issue_id}(?!\d)/) { "<#{url('/issues/' + issue_id.to_s)}|##{issue_id}>" }
+      end.join
+    end
+
     def interpolate(template, values, fallback: nil)
       template % values
     rescue KeyError, ArgumentError
@@ -281,8 +288,9 @@ module RedmineSlackNotification
                  due_message('upcoming_timing', days: days_left)
                end
       suffix = timing ? due_message('timing_suffix', timing: timing) : ''
-      due_message('issue_line', url: url("/issues/#{issue.id}"), id: issue.id,
-                                subject: subject, project: project, timing: suffix)
+      line = due_message('issue_line', url: url("/issues/#{issue.id}"), id: issue.id,
+                                       subject: subject, project: project, timing: suffix)
+      link_issue_reference(line, issue.id)
     end
 
     def issue_payload(issue, **options)
@@ -388,7 +396,7 @@ module RedmineSlackNotification
           fallback: DEFAULT_MESSAGES.dig('thread_notifications', header_key))
         result['_redmine_thread_comment_payload'] = {
           # Only the heading is top-level text; the body is rendered once.
-          'text' => text(header).gsub(/##{issue.id}(?!\d)/) { "<#{url('/issues/' + issue.id.to_s)}|##{issue.id}>" },
+          'text' => link_issue_reference(text(header), issue.id),
           'attachments' => [{ 'fallback' => notes.to_s, 'blocks' => body }],
           'unfurl_links' => false, 'unfurl_media' => false
         }
@@ -450,7 +458,7 @@ module RedmineSlackNotification
       entity_payload = { 'attributes' => attributes, 'fields' => fields }
       entity_payload['custom_fields'] = custom_fields unless custom_fields.empty?
       result.merge(
-        'text' => result.dig('attachments', 0, 'fallback'),
+        'text' => link_issue_reference(result.dig('attachments', 0, 'fallback'), issue.id),
         'metadata' => { 'entities' => [{
           'entity_type' => 'slack#/entities/task',
           'url' => issue_url,
@@ -967,7 +975,11 @@ module RedmineSlackNotification
 
     def relation_issue_link(issue_id)
       related_issue = Issue.find_by(id: issue_id)
-      return "##{text(issue_id)}" unless related_issue
+      unless related_issue
+        id = issue_id.to_s
+        return "##{text(id)}" unless id.match?(/\A[1-9]\d*\z/)
+        return "<#{url('/issues/' + id)}|##{id}>"
+      end
 
       "<#{url('/issues/' + related_issue.id.to_s)}|##{related_issue.id} #{text(related_issue.subject)}>"
     end

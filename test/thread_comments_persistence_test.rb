@@ -329,7 +329,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     assert_equal 1, Journal.count
     assert_equal 1, calls.count { |call| call[0] == 'chat.postMessage' }
     feedback = calls.find { |call| call[0] == 'chat.postMessage' }
-    assert_equal "✅ WAC ##{@issue.id} にコメントを追加しました。", feedback[1]['text']
+    assert_equal "✅ WAC <https://wac.example.com/issues/#{@issue.id}|##{@issue.id}> にコメントを追加しました。", feedback[1]['text']
     history = calls.first[1]
     assert_equal @event['thread_ts'], history['oldest']
     assert_equal @event['thread_ts'], history['latest']

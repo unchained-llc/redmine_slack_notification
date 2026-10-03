@@ -1154,7 +1154,7 @@ class ImageNotificationTest < Minitest::Test
     changes = RedmineSlackNotification::Formatter.change_fields(issue, details)
     assert_equal ['Attachment', 'Attachment', 'Parent issue', 'Target version', '顧客分類'], changes.map(&:first)
     assert_equal ['Added: one.png', 'Added: two.png'], changes.first(2).map(&:last)
-    assert_equal 'None → #7011', changes[2][1]
+    assert_equal 'None → <https://wac.example.com/issues/7011|#7011>', changes[2][1]
     assert_equal '旧版 → 新版', changes[3][1]
     assert_equal 'A → B', changes[4][1]
   end
@@ -1462,7 +1462,7 @@ class WorkObjectNotificationTest < Minitest::Test
     original = RedmineSlackNotification.stub(:config, @settings.merge('slack' => @settings['slack'].merge('work_object_previews' => false))) { issue_payload }
     enabled = RedmineSlackNotification.stub(:config, @settings) { issue_payload }
     assert_equal original['attachments'], enabled['attachments']
-    assert_equal original.dig('attachments', 0, 'fallback'), enabled['text']
+    assert_equal RedmineSlackNotification::Formatter.link_issue_reference(original.dig('attachments', 0, 'fallback'), @issue.id), enabled['text']
   end
 
   def test_product_name_is_configurable_for_previews_and_details_with_project_override
@@ -2979,5 +2979,20 @@ class AutomaticChannelMatchingTest < Minitest::Test
     key = Digest::SHA256.hexdigest('channel-test-token')
     MATCHING.instance_variable_set(:@cache, { key => { expires_at: 0, channels: { 'customer-support' => ['COLD'] } } })
     assert_equal 'CMATCH', resolve(->(*) { { 'channels' => [channel] } })
+  end
+end
+
+class IssueReferenceLinksTest < Minitest::Test
+  def test_links_plain_references_without_nesting_existing_links_or_matching_other_ids
+    formatter = RedmineSlackNotification::Formatter
+    link = '<https://wac.example.com/issues/7|#7>'
+    assert_equal "#{link} #{link} #70", formatter.link_issue_reference("#7 #{link} #70", 7)
+    assert_equal '<@U123> ' + link, formatter.link_issue_reference('<@U123> #7', 7)
+  end
+
+  def test_missing_related_issue_still_has_a_link_without_an_invented_subject
+    Issue.stub(:find_by, nil) do
+      assert_equal '<https://wac.example.com/issues/7|#7>', RedmineSlackNotification::Formatter.relation_issue_link(7)
+    end
   end
 end

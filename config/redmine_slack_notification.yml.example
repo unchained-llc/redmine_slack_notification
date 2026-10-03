@@ -268,7 +268,7 @@ messages:
     updated_header: '%{product_name} #%{id}: Comment updated'
     deleted_header: '%{product_name} #%{id}: Comment deleted'
   thread_comments:
-    # Supports %{id} and %{product_name}.
+    # Supports %{id} and %{product_name}; #%{id} automatically becomes a link.
     saved: '✅ Comment added to Redmine #%{id}.'
     restricted: '⚠️ Could not add the comment. Check the user mapping, Issue permissions and state, and text length.'
   due_reminders:
