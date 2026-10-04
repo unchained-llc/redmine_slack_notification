@@ -436,8 +436,7 @@ module RedmineSlackNotification
         user = issue.public_send(accessor)
         next unless user
 
-        # Keep these as display names, avoiding new mentions or directory calls.
-        fields[key] = { 'type' => 'slack#/types/user', 'user' => { 'text' => user.name.to_s } }
+        fields[key] = work_object_user_field(user)
       end
       custom_fields = []
       {
@@ -476,7 +475,7 @@ module RedmineSlackNotification
         fields[key] = { 'value' => value.to_s } unless value.to_s.empty?
       end
       { 'assignee' => issue.assigned_to, 'created_by' => issue.author }.each do |key, user|
-        fields[key] = { 'type' => 'slack#/types/user', 'user' => { 'text' => user.name.to_s } } if user
+        fields[key] = work_object_user_field(user) if user
       end
       fields['due_date'] = { 'type' => 'slack#/types/date', 'value' => issue.due_date.iso8601 } if issue.due_date
       { 'date_created' => issue.created_on, 'date_updated' => issue.updated_on }.each do |key, value|
@@ -495,6 +494,12 @@ module RedmineSlackNotification
           'custom_fields' => [{ 'key' => 'project', 'label' => field_label('project'), 'type' => 'string', 'value' => issue.project.name.to_s }]
         }
       }
+    end
+
+    def work_object_user_field(user)
+      slack_id = RedmineSlackNotification.slack_user_id_for(user)
+      identity = slack_id ? { 'user_id' => slack_id } : { 'text' => user.name.to_s }
+      { 'type' => 'slack#/types/user', 'user' => identity }
     end
 
     def wiki_payload(content, project, **options)

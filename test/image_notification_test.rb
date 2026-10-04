@@ -1544,6 +1544,30 @@ class WorkObjectNotificationTest < Minitest::Test
     end
   end
 
+  def test_work_object_uses_mapped_slack_user_id_for_assignee_and_creator
+    user = User.new
+    user.login = 'alice'
+    user.mail = 'alice@example.com'
+    user.name = 'Alice'
+    @issue.assigned_to = user
+    @issue.author = user
+    @settings['users'] = { 'alice' => 'U123ABC456' }
+
+    RedmineSlackNotification.stub(:config, @settings) do
+      preview = issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'fields')
+      details = RedmineSlackNotification::Formatter.issue_work_object_details(@issue).dig('entity_payload', 'fields')
+      [preview, details].each do |fields|
+        %w[assignee created_by].each do |key|
+          assert_equal({ 'user_id' => 'U123ABC456' }, fields.dig(key, 'user'))
+        end
+      end
+
+      @settings['users'].clear
+      fallback = RedmineSlackNotification::Formatter.issue_work_object_details(@issue).dig('entity_payload', 'fields')
+      assert_equal({ 'text' => 'Alice' }, fallback.dig('assignee', 'user'))
+    end
+  end
+
   def test_work_object_id_distinguishes_redmine_hosts_and_issues
     RedmineSlackNotification.stub(:config, @settings) do
       original = issue_payload.dig('metadata', 'entities', 0, 'external_ref', 'id')
