@@ -1,0 +1,3 @@
+ja:
+  label_slack_suppress_mail: "Slackで通知する内容のメールを停止"
+  text_slack_suppress_mail: "Slack通知が有効で、対応付けられた自分のSlackアカウントが通知先チャンネルに参加している場合、対象の通知メールを停止します。アカウント・セキュリティ関連のメールは引き続き送信されます。Slackへの配信成功は確認しません。"

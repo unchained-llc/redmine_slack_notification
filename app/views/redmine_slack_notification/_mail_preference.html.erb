@@ -1,0 +1,6 @@
+<%= labelled_fields_for :pref, @user.pref do |pref_fields| %>
+  <p>
+    <%= pref_fields.check_box :slack_suppress_mail, label: :label_slack_suppress_mail %>
+    <em class="info"><%= l(:text_slack_suppress_mail) %></em>
+  </p>
+<% end %>

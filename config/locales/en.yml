@@ -1,0 +1,3 @@
+en:
+  label_slack_suppress_mail: "Skip email for notifications covered by Slack"
+  text_slack_suppress_mail: "Skip supported notification emails when Slack notifications are enabled and your mapped Slack account belongs to the destination channel. Account and security emails are unaffected. Slack delivery success is not checked."

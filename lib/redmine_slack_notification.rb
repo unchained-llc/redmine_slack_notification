@@ -546,12 +546,18 @@ require_relative 'redmine_slack_notification/thread_comments'
 require_relative 'redmine_slack_notification/slash_commands'
 require_relative 'redmine_slack_notification/comment_threads'
 require_relative 'redmine_slack_notification/channel_matching'
+require_relative 'redmine_slack_notification/mail_preference'
 
 
 module RedmineSlackNotification
   module_function
 
   def install_patches
+    if defined?(UserPreference) && !(UserPreference < RedmineSlackNotification::UserPreferencePatch)
+      UserPreference.include RedmineSlackNotification::UserPreferencePatch
+      UserPreference.safe_attributes 'slack_suppress_mail'
+    end
+    Mailer.prepend RedmineSlackNotification::MailerPatch if defined?(Mailer) && !(Mailer < RedmineSlackNotification::MailerPatch)
 
     Issue.include RedmineSlackNotification::IssuePatch if defined?(Issue) && !(Issue < RedmineSlackNotification::IssuePatch)
     Journal.include RedmineSlackNotification::JournalPatch if defined?(Journal) && !(Journal < RedmineSlackNotification::JournalPatch)

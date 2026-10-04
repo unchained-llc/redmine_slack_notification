@@ -6,6 +6,24 @@ A Redmine 7 plugin that sends Issue, Wiki, News, time entry, Version, and Projec
 
 The plugin provides notifications, Work Object actions, and optional slash commands. It does not add project settings tabs or Redmine custom fields.
 
+## Features
+
+| Feature | What it does |
+| --- | --- |
+| [Redmine event notifications](#event-switches) | Notify Slack about Issue creation, changes, comments, and deletion, plus Wiki, News, time entry, Version, and Project events. Enable or disable individual events globally or per project. |
+| [Notification formatting](#notification-content) | Choose metadata, colors, and wording; show body diffs and inline Issue images; mention mapped assignees. |
+| [Project channel routing](#inherit-a-parent-project-channel) | Use an explicit channel or an optional unique name match, then try parent projects from nearest to farthest, and finally the default channel. Configure separate Slack apps/tokens per project when needed. |
+| [Issue Work Object previews](#ticket-work-object-previews) | Display Issue cards and details inside Slack, with configurable fields and current data fetched when details open. |
+| [Issue actions in Slack](#work-object-card-and-detail-actions) | Edit permitted status, assignee, priority, and due date; add comments; assign to yourself; start/complete work; watch/unwatch. The time-entry action opens the Redmine form. |
+| [Comment notification threads](#threaded-redmine-comment-notifications) | Group Redmine Issue comment notifications in a Slack thread. |
+| [Slack replies to Redmine comments](#add-redmine-comments-from-notification-threads) | Save text replies in supported notification threads as Redmine comments under the mapped user's identity. |
+| [Slash commands](#slash-command) | Find Issues, list your assigned/due Issues, request a personal reminder digest, create Issues, add comments, and change status or assignee through forms or direct command arguments. Single-Issue results can use Work Object cards, with text fallback when previews are disabled. |
+| [Due-date reminders](#daily-due-date-dms) | Send scheduled Slack DM digests of assigned open Issues that are overdue or due within a configurable window. Scheduling is configured separately. |
+| [User mapping](#assignee-mentions) | Map Redmine users to Slack IDs explicitly; optionally match names for outgoing mentions or [email addresses for incoming authorization](#match-viewers-by-email). Actions still enforce Redmine permissions and workflow rules. |
+| [Personal email preference](#personal-email-preference) | Let each user opt out of supported notification emails when Slack notification settings and channel membership qualify. Account/security emails remain enabled; Slack delivery success is not checked. |
+
+Work Object previews/actions, slash commands, thread integration, and reminders require their respective configuration and Slack app scopes/events. The personal email option is off by default. See each linked section for setup and limits.
+
 ## Requirements and setup
 
 - Redmine 7.0 or later.
@@ -627,6 +645,16 @@ messages:
 ```
 
 The same keys can be overridden under `projects.<identifier>.messages.due_reminders`.
+
+## Personal email preference
+
+In **My account → Preferences**, each user can enable **Skip email for notifications covered by Slack** (off by default). This uses the existing Redmine user preference storage; no database migration is required.
+
+The option applies to new Issues, Issue changes/comments, Wiki creation/updates, and News creation/comments. Email is skipped only when all visible parts of the notification have Slack events enabled, a Bot Token and destination channel resolve for that project, and an explicit `users` login/email mapping identifies a Slack member currently in that channel. Existing project/ancestor/default channel routing is used. Name matching alone does not qualify. Private Issues and private notes, unsupported notification types, and account/security emails retain their normal Redmine email behavior.
+
+Membership is checked synchronously using `conversations.members`, without caching positive results. The app needs `channels:read` for public channels or `groups:read` for private channels; reinstall after adding scopes. Missing configuration/mapping, nonmembership, API failures, malformed responses, and incomplete pagination retain email. Lookups are limited to ten pages of 200 members, with two-second connection and three-second read timeouts per request.
+
+This option checks notification configuration and channel membership, **not Slack delivery success**. It adds no delivery-coordination job: if a later Slack post fails, a skipped email is not sent as a fallback. It also does not change Redmine's existing mail notification selection; disabling the checkbox restores that selection.
 
 ## Delivery and operations
 
