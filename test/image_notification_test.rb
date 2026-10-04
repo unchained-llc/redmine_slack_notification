@@ -1558,8 +1558,10 @@ class WorkObjectNotificationTest < Minitest::Test
     @settings['slack']['metadata'] = { 'issue' => { 'status' => false, 'priority' => false,
                                                     'due_date' => false, 'assignee' => false } }
     @settings['slack']['work_object_actions'] = { 'issue_ids' => [7] }
+    @issue.updated_on = Time.utc(2026, 10, 4, 3, 0)
     RedmineSlackNotification.stub(:config, @settings) do
       entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
+      assert_equal @issue.updated_on.to_i, entity.dig('attributes', 'metadata_last_modified')
       assert_equal 'In progress', entity.dig('fields', 'status', 'value')
       assert_equal 'High', entity.dig('fields', 'priority', 'value')
       assert_equal '2026-10-05', entity.dig('fields', 'due_date', 'value')

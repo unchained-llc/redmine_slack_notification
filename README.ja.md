@@ -224,7 +224,7 @@ Slack アプリの管理画面でも **Work Object Previews → ON → Task を�
 
 通知カードは**通知を生成した時点の情報**です。カードを開いたときと詳細パネルの再読み込み時には、`entity_details_requested` を受け取り、`entity.presentDetails` で最新のチケット情報を返します。[Slack の詳細表示 API](https://docs.slack.dev/reference/methods/entity.presentDetails/)
 
-カード内の「再読み込み」とチケットURLのリンク展開には別途、Slackアプリの Bot Token Scopes に `links:read` と `links:write` を追加してアプリを再インストールし、**Subscribe to bot events** に `link_shared` を追加してください。チケットURLのドメインもアプリのリンク展開対象に登録します。Redmineは署名済み `link_shared` を受け取り、Redmineユーザーとの対応・閲覧権限を確認してから `chat.unfurl` に最新のWork Objectを渡します。[Slack の再読み込み仕様](https://docs.slack.dev/messaging/work-objects-implementation/#refreshing-unfurls)
+Slack標準のWork Object再読み込みは `link_shared` と `chat.unfurl` で処理します。`links:read`・`links:write`、`link_shared` の購読、**App unfurl domains**へのチケットURLのホスト登録を設定し、権限・ドメイン変更後にアプリを再インストールしてください。`cannot_unfurl_url` が出る場合は、**ワークスペースの設定と権限 → 添付 → ブロックされたプレビュー**を確認してください。対象ドメインがブロックされていると、権限が正しくても新規展開・再読み込みが失敗します。[Slack の更新イベント仕様](https://docs.slack.dev/reference/events/link_shared/)
 
 詳細表示を使う場合は、次の設定を追加してください。`signing_secret` は Slack アプリの **Basic Information → App Credentials → Signing Secret** の値です。Bot Token とは別の値です。環境変数 `SLACK_SIGNING_SECRET` でも指定できます。
 
@@ -248,7 +248,7 @@ users:
 
 権限確認後の詳細には、最新の件名・チケット番号・トラッカー・プロジェクト・状態・優先度・担当者・作成者・期日・作成／更新日時・説明文（最大10,000文字）を返します。詳細表示の項目は通知用の `slack.metadata.issue` 設定とは独立しています。既存コメントや Redmine カスタムフィールド、貼り付けたリンクの自動展開は含みません。編集は下記の設定で有効にできます。
 
-動かない場合は Redmine／Sidekiq ログの `Work Object details` を確認してください。`shown`／`restricted` は応答処理の結果、`failed` は Slack API のエラーコードです。`missing_interactivity_url` が返る場合は、Slack アプリの **Interactivity & Shortcuts** の Request URL を設定してください。
+失敗時は Redmine／Sidekiq ログの `Work Object details failed` または `Work Object unfurl failed` に Slack API のエラーコードを記録します。読み取り成功時の調査用ログは出力しません。`missing_interactivity_url` が返る場合は、Slack アプリの **Interactivity & Shortcuts** の Request URL を設定してください。
 
 ### Work Object カードと詳細パネルからの操作
 

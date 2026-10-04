@@ -224,7 +224,7 @@ The SHA-256 digest of the Issue URL is used as `external_ref.id` to satisfy Slac
 
 Notification cards contain a **snapshot from notification generation**. Opening a card or refreshing its detail pane sends `entity_details_requested`; the plugin returns current Issue data through `entity.presentDetails`. See [Slack's details API](https://docs.slack.dev/reference/methods/entity.presentDetails/).
 
-Refreshing the card itself or unfurling an Issue URL requires the Slack app's `links:read` and `links:write` bot scopes, an app reinstall, a `link_shared` bot event subscription, and the Issue URL's domain registered for app unfurling. The plugin handles signed `link_shared` events and verifies the mapped Redmine user's visibility before sending current Work Object metadata through `chat.unfurl`. See [Slack's refresh behavior](https://docs.slack.dev/messaging/work-objects-implementation/#refreshing-unfurls).
+Slack's built-in Work Object refresh uses `link_shared` and `chat.unfurl`. Configure `links:read`, `links:write`, the `link_shared` subscription, and the issue URL host under **App unfurl domains**, then reinstall the app after changing scopes or domains. If Slack returns `cannot_unfurl_url`, check **Workspace settings → Attachments → Blocked previews**: domain blocks prevent both initial unfurls and refreshes even with correct app permissions. See [Slack's refresh event specification](https://docs.slack.dev/reference/events/link_shared/).
 
 To enable details, configure the Slack app and workspace IDs and the **Basic Information → App Credentials → Signing Secret**. This is separate from the Bot Token; `SLACK_SIGNING_SECRET` can supply it instead.
 
@@ -248,7 +248,7 @@ The endpoint verifies the signature, timestamp, app, and workspace before enqueu
 
 Authorized details include the current title, Issue ID, tracker, project, status, priority, assignee, author, due date, creation/update timestamps, and description (up to 10,000 characters). Detail fields are independent of notification `slack.metadata.issue` settings. Existing comments, Redmine custom fields, and pasted-link unfurls are not included. Editing can be enabled with the setting below.
 
-Check Redmine/Sidekiq logs for `Work Object details`: `shown`/`restricted` describe the response path; `failed` includes the Slack API error code. If Slack returns `missing_interactivity_url`, configure the app's **Interactivity & Shortcuts** Request URL.
+Failures are logged in Redmine/Sidekiq as `Work Object details failed` or `Work Object unfurl failed`, with the Slack API error code. Successful reads do not produce diagnostic logs. If Slack returns `missing_interactivity_url`, configure the app's **Interactivity & Shortcuts** Request URL.
 
 ### Work Object card and detail actions
 

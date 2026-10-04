@@ -259,9 +259,7 @@ module RedmineSlackNotification
         else
           request['error'] = { 'status' => 'restricted' }
         end
-        result = RedmineSlackNotification.slack_api('entity.presentDetails', request, token, form: true)
-        Rails.logger&.info("RedmineSlackNotification: Work Object details issue=#{issue.id} result=#{allowed ? 'shown' : 'restricted'} warnings=#{Array(result['warnings']).inspect} messages=#{Array(result.dig('response_metadata', 'messages')).inspect}")
-        result
+        RedmineSlackNotification.slack_api('entity.presentDetails', request, token, form: true)
       end
     end
 
@@ -302,10 +300,8 @@ module RedmineSlackNotification
       end
       return if entities.empty?
 
-      result = RedmineSlackNotification.slack_api('chat.unfurl', target.merge('metadata' => { 'entities' => entities }),
-                                                 token, form: true)
-      Rails.logger&.info("RedmineSlackNotification: Work Object unfurl count=#{entities.length} refresh=#{event['is_unfurl_refresh'] == true}")
-      result
+      RedmineSlackNotification.slack_api('chat.unfurl', target.merge('metadata' => { 'entities' => entities }),
+                                        token, form: true)
     end
 
     def process_interaction(app_id, team_id, payload)

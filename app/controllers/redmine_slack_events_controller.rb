@@ -66,8 +66,6 @@ class RedmineSlackEventsController < ActionController::Base
     elsif payload['type'] == 'event_callback' && event.is_a?(Hash) && event['type'] == 'link_shared'
       return head :bad_request unless event['user'].is_a?(String) && event['links'].is_a?(Array)
 
-      # The same event serves initial link unfurls and the card's Refresh button.
-      # Keep only the fields required by chat.unfurl and look up each Issue anew.
       RedmineSlackWorkObjectUnfurlJob.perform_later(payload['api_app_id'], payload['team_id'], event.slice(
         'type', 'user', 'links', 'channel', 'message_ts', 'unfurl_id', 'source', 'is_unfurl_refresh'
       ))

@@ -416,6 +416,7 @@ module RedmineSlackNotification
         'display_type' => issue.tracker.name.to_s,
         'product_name' => message('work_objects', 'product_name')
       }
+      attributes['metadata_last_modified'] = issue.updated_on.to_i if issue.updated_on
       fields = {}
       {
         'status' => ['status', -> { issue.status&.name }],
@@ -504,7 +505,8 @@ module RedmineSlackNotification
         'external_ref' => { 'id' => Digest::SHA256.hexdigest(issue_url), 'type' => 'redmine_issue' },
         'entity_payload' => {
           'attributes' => { 'title' => { 'text' => issue.subject.to_s }, 'display_id' => "##{issue.id}",
-                            'display_type' => issue.tracker.name.to_s, 'product_name' => message('work_objects', 'product_name') },
+                            'display_type' => issue.tracker.name.to_s, 'product_name' => message('work_objects', 'product_name'),
+                            'metadata_last_modified' => issue.updated_on&.to_i }.compact,
           'fields' => fields,
           'custom_fields' => [{ 'key' => 'project', 'label' => field_label('project'), 'type' => 'string', 'value' => issue.project.name.to_s }]
         }
