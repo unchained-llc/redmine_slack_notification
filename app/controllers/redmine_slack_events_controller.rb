@@ -33,9 +33,18 @@ class RedmineSlackEventsController < ActionController::Base
       return render json: { challenge: payload['challenge'] } if payload['challenge'].is_a?(String)
       return head :bad_request
     end
-    return head :forbidden unless payload['api_app_id'] == integration['app_id'] && team_id == integration['team_id']
+    # Message shortcuts omit api_app_id. Resolve only this known shortcut from
+    # the verified signing secret, while still requiring the configured team.
+    app_id = payload['api_app_id']
+    if app_id.nil? && form && payload['type'] == 'message_action' && RedmineSlackNotification::MessageShortcuts.handles?(payload)
+      app_id = integration['app_id']
+    end
+    return head :forbidden unless app_id == integration['app_id'] && team_id == integration['team_id']
 
     if form
+      if RedmineSlackNotification::MessageShortcuts.handles?(payload)
+        return render json: RedmineSlackNotification::MessageShortcuts.interaction(app_id, team_id, payload)
+      end
       if RedmineSlackNotification::SlashCommands.handles?(payload)
         return render json: RedmineSlackNotification::SlashCommands.interaction(payload['api_app_id'], team_id, payload)
       end

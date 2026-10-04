@@ -18,6 +18,7 @@ The plugin provides notifications, Work Object actions, and optional slash comma
 | [Comment notification threads](#threaded-redmine-comment-notifications) | Group Redmine Issue comment notifications in a Slack thread. |
 | [Slack replies to Redmine comments](#add-redmine-comments-from-notification-threads) | Save text replies in supported notification threads as Redmine comments under the mapped user's identity. |
 | [Slash commands](#slash-command) | Find Issues, list your assigned/due Issues, request a personal reminder digest, create Issues, add comments, and change status or assignee through forms or direct command arguments. Single-Issue results can use Work Object cards, with text fallback when previews are disabled. |
+| [Create an Issue from a Slack message](#create-an-issue-from-a-slack-message) | Use a message shortcut, choose a permitted project, and review a new-Issue form prefilled with the selected message and its source link. |
 | [Due-date reminders](#daily-due-date-dms) | Send scheduled Slack DM digests of assigned open Issues that are overdue or due within a configurable window. Scheduling is configured separately. |
 | [User mapping](#assignee-mentions) | Map Redmine users to Slack IDs explicitly; optionally match names for outgoing mentions or [email addresses for incoming authorization](#match-viewers-by-email). Actions still enforce Redmine permissions and workflow rules. |
 | [Personal email preference](#personal-email-preference) | Let each user opt out of supported notification emails when Slack notification settings and channel membership qualify. Account/security emails remain enabled; Slack delivery success is not checked. |
@@ -553,6 +554,16 @@ With `slack.auto_map_users_by_name: true`, the plugin can also match a Redmine *
 
 The new assignee uses Slack's `<@U0123456789>` mention format. Issue authors, Journal authors, Wiki updaters, and the actor in the Issue-update heading are displayed as names without automatic mentions.
 
+## Create an Issue from a Slack message
+
+In the Slack app's **Interactivity & Shortcuts**, enable Interactivity with Request URL `https://redmine.example.com/redmine_slack/interactions`, then create a **message shortcut** with callback ID `redmine_message_create`. Use a label such as **Create Redmine issue**. Add the `commands` Bot scope and reinstall the app when scopes change. This feature reuses the [slash-command](#slash-command) integration: configure `slack.slash_command`, the global Bot Token, signing secret, app/team IDs, and user mapping. Work Object previews are optional.
+
+Open a message's **More actions** menu and choose the shortcut. Select a project, then review the tracker, subject, and description before saving. The first nonblank line becomes the subject; the description includes the message text and a permalink obtained with `chat.getPermalink`. Thread replies are supported, but only the selected message is copied. When the normal message text is empty, text from Block Kit sections and attachment cards (titles, bodies, and fields) is used instead. Attachment files, full thread history, and AI summaries are not imported. Slack's raw text formatting is retained. Subjects are limited to 255 characters, and descriptions to 3,000 characters with space reserved for the source link; review any shortened text before saving.
+
+The picker includes up to 100 active projects where the mapped user can create Issues and the configured app/team integration is authorized. Projects matching the source channel appear first. Permissions and allowed trackers are checked again in the next form and on save. No Issue is created by opening the shortcut or selecting a project. Required custom fields still use the full Redmine form link; opening that link does not transfer the draft. Saving follows the existing Issue-creation path and its cache-based retry protection and normal notifications.
+
+The selected message is temporarily stored in the existing `Rails.cache`, bound to the initiating user and app/team, for 30 minutes. After the picker changes to the creation form, the draft is held in the form. An expired or unavailable source cache requires reopening the shortcut. Multiple web workers need a shared cache or session affinity for this two-step flow. No new database tables or cache service are installed. Opening and updating modals is synchronous and subject to Slack's three-second response limit; test with the installed app after deployment. A private-channel or DM source can be copied into a project visible to other members: review the destination and draft before saving.
+
 ## Slash command
 
 Set `slack.slash_command: /redmine` (omit it to disable), register the same command in the Slack app, and set its Request URL to `https://redmine.example.com/redmine_slack/commands`. Add the `commands` scope and reinstall the app. Keep Interactivity enabled at `/redmine_slack/interactions` and configure the existing signing secret, app/team IDs, bot token, and user mappings. This command uses the global integration and user mapping; results are limited to projects belonging to that integration.
@@ -701,6 +712,7 @@ ruby -Itest test/image_notification_test.rb
 ruby -Itest test/slack_events_controller_test.rb
 ruby -Itest test/slash_commands_cache_test.rb
 ruby -Itest test/slash_commands_edit_test.rb
+ruby -Itest test/message_shortcuts_test.rb
 ```
 
 These tests exercise notification formatting and delivery logic with stubs. Additionally, run `ruby -Itest test/thread_comments_persistence_test.rb` where ActiveRecord and sqlite3 are available to check persistence, duplicate suppression, permission denial, and notification-loop suppression using in-memory Issue/Journal fixture tables. These tests do not connect to production databases or Redis, post to Slack, or verify a live Redmine installation.

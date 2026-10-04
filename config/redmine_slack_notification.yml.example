@@ -171,6 +171,12 @@ due_reminders:
 # edit individual keys as needed. %{...} are placeholders.
 messages:
   commands:
+    project: 'Project'
+    continue: 'Continue'
+    message_project: 'Choose a project (up to 100). The next form includes the selected message and its source link.'
+    source_message: 'Source Slack message'
+    message_expired: 'This form expired. Open the message shortcut again.'
+    message_retry: 'Could not retrieve the source link. Please retry.'
     processing: 'This submission is still processing. Check the issue before retrying.'
     full_form: 'Open the full form in Redmine'
     # %{command} is replaced with slack.slash_command.
