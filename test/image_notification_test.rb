@@ -1576,10 +1576,10 @@ class WorkObjectNotificationTest < Minitest::Test
     end
   end
 
-  def test_pilot_issue_shows_fields_and_actions_on_main_card_despite_hidden_default_metadata
+  def test_enabled_actions_show_fields_and_actions_on_main_card_despite_hidden_default_metadata
     @settings['slack']['metadata'] = { 'issue' => { 'status' => false, 'priority' => false,
                                                     'due_date' => false, 'assignee' => false } }
-    @settings['slack']['work_object_actions'] = { 'issue_ids' => [7] }
+    @settings['slack']['work_object_actions'] = { 'enabled' => true }
     @issue.updated_on = Time.utc(2026, 10, 4, 3, 0)
     RedmineSlackNotification.stub(:config, @settings) do
       entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
@@ -1589,7 +1589,7 @@ class WorkObjectNotificationTest < Minitest::Test
       assert_equal '2026-10-05', entity.dig('fields', 'due_date', 'value')
       assert_equal 'Alice', entity.dig('fields', 'assignee', 'user', 'text')
       assert_equal %w[redmine_edit_issue redmine_edit_assignee], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
-      @settings['slack']['work_object_actions']['issue_ids'] = [8]
+      @settings['slack']['work_object_actions']['enabled'] = false
       hidden = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
       assert_empty hidden['fields']
       refute hidden.key?('actions')
@@ -1600,7 +1600,7 @@ class WorkObjectNotificationTest < Minitest::Test
     @issue.id = 8
     @settings['slack']['metadata'] = { 'issue' => { 'status' => false, 'priority' => false,
                                                     'due_date' => false, 'assignee' => false } }
-    @settings['slack']['work_object_actions'] = { 'enabled' => true, 'issue_ids' => [7] }
+    @settings['slack']['work_object_actions'] = { 'enabled' => true }
     RedmineSlackNotification.stub(:config, @settings) do
       entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
       assert_equal 'Alice', entity.dig('fields', 'assignee', 'user', 'text')
@@ -1614,9 +1614,9 @@ class WorkObjectNotificationTest < Minitest::Test
     end
   end
 
-  def test_pilot_card_shows_unassigned_assignee
+  def test_action_card_shows_unassigned_assignee
     @issue.assigned_to = nil
-    @settings['slack']['work_object_actions'] = { 'issue_ids' => [7] }
+    @settings['slack']['work_object_actions'] = { 'enabled' => true }
     RedmineSlackNotification.stub(:config, @settings) do
       fields = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload', 'fields')
       assert_equal({ 'text' => '未割当' }, fields.dig('assignee', 'user'))
@@ -1978,8 +1978,8 @@ class WorkObjectDetailsTest < Minitest::Test
     end
   end
 
-  def test_actions_are_limited_to_configured_issue_and_viewer_permissions
-    @settings['slack']['work_object_actions'] = { 'issue_ids' => [7] }
+  def test_actions_require_enabled_setting_and_viewer_permissions
+    @settings['slack']['work_object_actions'] = { 'enabled' => true }
     @issue.status_id = 2
     @issue.priority_id = 4
     @issue.priority = OpenStruct.new(name: 'No Priority')
@@ -2001,7 +2001,7 @@ class WorkObjectDetailsTest < Minitest::Test
     metadata = capture_details.first[1]['metadata']
     assert_equal 'redmine_assign_to_me', metadata.dig('entity_payload', 'actions', 'primary_actions', 0, 'action_id')
     assert_equal 'new_comment', metadata.dig('entity_payload', 'custom_fields', 1, 'key')
-    @settings['slack']['work_object_actions']['issue_ids'] = [8]
+    @settings['slack']['work_object_actions']['enabled'] = false
     refute capture_details.first[1]['metadata'].dig('entity_payload', 'actions')
   end
 
@@ -2014,7 +2014,7 @@ class WorkObjectDetailsTest < Minitest::Test
   end
 
   def prepare_action_issue
-    @settings['slack']['work_object_actions'] = { 'issue_ids' => [7] }
+    @settings['slack']['work_object_actions'] = { 'enabled' => true }
     @issue.status_id = 2
     @issue.priority_id = 4
     @issue.priority = OpenStruct.new(name: 'No Priority')
@@ -2069,7 +2069,7 @@ class WorkObjectDetailsTest < Minitest::Test
     calls
   end
 
-  def test_assign_status_and_comment_update_only_pilot_issue
+  def test_assign_status_and_comment_update_requires_enabled_actions
     prepare_action_issue
     button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_assign_to_me' }])
     calls = capture_interaction(button)
@@ -2087,7 +2087,7 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal 'Test note', @issue.notes.last
     assert_equal 'Done', calls.first[1].dig('metadata', 'entity_payload', 'fields', 'status', 'value')
 
-    @settings['slack']['work_object_actions']['issue_ids'] = [8]
+    @settings['slack']['work_object_actions']['enabled'] = false
     assert_empty capture_interaction(button)
   end
 

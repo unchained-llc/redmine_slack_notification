@@ -252,7 +252,7 @@ Failures are logged in Redmine/Sidekiq as `Work Object details failed` or `Work 
 
 ### Work Object card and detail actions
 
-Set `slack.work_object_actions.enabled: true` to show status, assignee (including unassigned), priority, and due date plus the Edit issue and Change assignee buttons on every public Issue Work Object card with previews enabled. Alternatively, `issue_ids` limits these features to selected issues. Explicit `enabled: false` takes precedence over `issue_ids`. Edit issue opens a Slack modal for permitted status, assignee, priority, due date, and comment changes. The default is disabled. Enable **Interactivity & Shortcuts** in the Slack app and set its Request URL to `https://redmine.example.com/redmine_slack/interactions`. The same `slack.events` signing configuration authenticates the requests.
+Set `slack.work_object_actions.enabled: true` to show status, assignee (including unassigned), priority, and due date plus the Edit issue and Change assignee buttons on every public Issue Work Object card with previews enabled. Set `enabled: false` to disable these features. Edit issue opens a Slack modal for permitted status, assignee, priority, due date, and comment changes. The default is disabled. Enable **Interactivity & Shortcuts** in the Slack app and set its Request URL to `https://redmine.example.com/redmine_slack/interactions`. The same `slack.events` signing configuration authenticates the requests.
 
 ```yaml
 slack:
@@ -261,7 +261,7 @@ slack:
     enabled: true
 ```
 
-For a small pilot, use `issue_ids: [123]` instead of `enabled: true`. Fields and buttons embedded in previously posted cards do not update automatically; those messages need a new notification or an in-place update. The detail pane fetches the current issue whenever it opens.
+Fields and buttons embedded in previously posted cards do not update automatically; those messages need a new notification or an in-place update. The detail pane fetches the current issue whenever it opens.
 
 Change assignee opens a dedicated picker with assignable Redmine users and an unassigned option. The detail pane also exposes permitted assignee, status, priority, and due date edits and a blank comment input. Assign to me makes no change if the viewer already owns the issue. The modal lists assignable users and an unassigned option when the list has at most 99 users. Every submission rechecks the Slack-to-Redmine user mapping, issue visibility, edit and note permissions, status workflow, active priorities, and assignable users before writing to Redmine. After an edit, the plugin refreshes the originating card or detail pane with the latest issue state. A Slack API failure during card refresh is logged without retrying an already saved Redmine change.
 
