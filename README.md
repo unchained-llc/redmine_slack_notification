@@ -251,7 +251,7 @@ Failures are logged in Redmine/Sidekiq as `Work Object details failed` or `Work 
 
 ### Work Object card and detail actions
 
-Set `slack.work_object_actions: true` to show status, assignee (including unassigned), priority, and due date plus the Edit issue and Change assignee buttons on every public Issue Work Object card with previews enabled. Set `work_object_actions: false` to disable these features. Edit issue opens a Slack modal for permitted status, assignee, priority, due date, and comment changes. The default is disabled. Enable **Interactivity & Shortcuts** in the Slack app and set its Request URL to `https://redmine.example.com/redmine_slack/interactions`. The same `slack.events` signing configuration authenticates the requests.
+Set `slack.work_object_actions: true` to show status, assignee (including unassigned), priority, and due date plus the Add comment and Open in source service buttons on every public Issue Work Object card with previews enabled. Set `work_object_actions: false` to disable these features. Edit issue opens a Slack modal for permitted status, assignee, priority, due date, and comment changes. The default is disabled. Enable **Interactivity & Shortcuts** in the Slack app and set its Request URL to `https://redmine.example.com/redmine_slack/interactions`. The same `slack.events` signing configuration authenticates the requests.
 
 ```yaml
 slack:
@@ -261,7 +261,7 @@ slack:
 
 Fields and buttons embedded in previously posted cards do not update automatically; those messages need a new notification or an in-place update. The detail pane fetches the current issue whenever it opens.
 
-Change assignee opens a dedicated picker with assignable Redmine users and an unassigned option. The detail pane also exposes permitted assignee, status, priority, and due date edits and a blank comment input. Assign to me makes no change if the viewer already owns the issue. The modal lists assignable users and an unassigned option when the list has at most 99 users. Every submission rechecks the Slack-to-Redmine user mapping, issue visibility, edit and note permissions, status workflow, active priorities, and assignable users before writing to Redmine. After an edit, the plugin refreshes the originating card or detail pane with the latest issue state. A Slack API failure during card refresh is logged without retrying an already saved Redmine change.
+Edit issue includes a picker with assignable Redmine users and an unassigned option. The detail pane also exposes permitted assignee, status, priority, and due date edits and a blank comment input. Assign to me makes no change if the viewer already owns the issue. The modal lists assignable users and an unassigned option when the list has at most 99 users. Every submission rechecks the Slack-to-Redmine user mapping, issue visibility, edit and note permissions, status workflow, active priorities, and assignable users before writing to Redmine. After an edit, the plugin refreshes the originating card or detail pane with the latest issue state. A Slack API failure during card refresh is logged without retrying an already saved Redmine change.
 
 The Work Object's conversation view is separate from Redmine's comment history. Existing Redmine comments are not displayed there. For issues with actions enabled, a new Redmine comment can be added from the detail pane's edit form. Posting comments from notification threads is available through the following setting.
 
@@ -595,3 +595,39 @@ slack:
 `description: true` displays the issue description in the card. Blank descriptions are hidden and text beyond 1,000 characters is truncated. The detail pane description is unchanged.
 
 All built-in display text defaults to English. Override buttons, dialogs, and errors with `messages.work_objects`, editor field labels with `messages.fields`, and the unassigned label with `messages.values.unassigned`. The example YAML lists every message key. `edit_title` and `edit_failed` support `%{id}`. Slack-owned labels and menus follow Slack language settings.
+
+The card open button links to the issue URL. Configure its label with `messages.work_objects.open_issue`, which supports `%{product_name}`.
+
+The main card Add comment button opens a comment-only modal. It requires comment permission and cannot change issue attributes. Editing remains available in the detail pane. Configure the label with `messages.work_objects.add_comment`.
+
+### Work Object button selection and order
+
+Use `slack.work_object_buttons` booleans and YAML key order to select actions on cards and detail panes. When configured, omitted buttons are hidden; omitting the entire map preserves the previous button layout. Project keys precede inherited global keys.
+
+```yaml
+slack:
+  work_object_actions: true
+  work_object_buttons:
+    add_comment: false
+    open_issue: false
+    edit_issue: false
+    change_assignee: false
+    assign_to_me: false
+    start_work: true
+    complete_work: true
+    log_time: false
+    watch: false
+  work_object_start_status_id: 3
+  # Completion status ID; use the actual completed status from your workflow.
+  work_object_complete_status_id: 5
+```
+
+The example enables only Start work and Complete work, using status IDs 3 and 5. Adjust these IDs to your Redmine workflow.
+
+Supported keys: `add_comment` (comment-only modal), `open_issue` (source issue URL), `edit_issue` (edit modal), `change_assignee` (assignee-only modal), `assign_to_me`, `start_work`, `complete_work`, `log_time`, `watch` (both watch and unwatch).
+
+The first two available actions are primary buttons and the next five are overflow actions. Only seven are displayed; additional actions are omitted with a warning log. `start_work` requires `work_object_start_status_id`; `complete_work` requires `work_object_complete_status_id` and both validate the current workflow on submission. Each is hidden when its target ID is unset or already reached. When both buttons are enabled, only Start work is shown before starting; only Complete work is shown at the configured start status. Both buttons are hidden at the completion status or any Redmine closed status. Configure both status IDs. A single enabled button retains its independent behavior. Choose your actual completion status ID; no status is inferred from its name. `log_time` opens the Redmine time-entry form, where permissions and required fields are enforced. Watch actions affect only the acting user and are idempotent.
+
+Detail panes filter actions for the viewer's permissions, assignee, and watcher state. Shared cards cannot personalize buttons per viewer, so permissions and personal state are checked when invoked. Labels use the corresponding `messages.work_objects` keys.
+
+With `watch: true`, shared cards open Watch settings showing your current state and a Watch or Unwatch submit button. Detail panes show Watch or Unwatch according to your state. There is no separate `unwatch` button setting. Labels use `messages.work_objects.watch_settings`, `watching`, `not_watching`, `watch`, and `unwatch`.

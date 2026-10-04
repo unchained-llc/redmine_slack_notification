@@ -251,11 +251,11 @@ users:
 
 ### Work Object カードと詳細パネルからの操作
 
-「担当者を変更」は、割り当て可能なRedmineユーザーと「未割当」を選ぶ専用画面を開きます。詳細パネルのAssigneeも編集できます。保存時に閲覧・編集権限と割り当て可能なユーザーを再確認します。
+担当者は「課題を編集」から、割り当て可能なRedmineユーザーと「未割当」を選べます。詳細パネルのAssigneeも編集できます。保存時に閲覧・編集権限と割り当て可能なユーザーを再確認します。
 
 Work Objectが表示される通知では、上部の重複見出し、本文中の件名リンク、カードにも表示されている現在値を省きます。コメント・説明・変更前後の差分・カードにない項目は残します。通知本文の整理は新しい通知から適用されます。
 
-`slack.work_object_actions: true` を設定すると、Work Object が有効なすべての公開チケットのメインカードにステータス・担当者（未割当の場合も表示）・優先度・期日と「課題を編集」「担当者を変更」を表示します。`work_object_actions: false` で操作を無効にします。「課題を編集」はSlackのモーダルを開き、権限に応じてステータス・担当者・優先度・期日・コメントを変更できます。既定では無効です。Slack アプリの **Interactivity & Shortcuts** を有効にし、Request URL を `https://redmine.example.com/redmine_slack/interactions` に設定します。署名検証には上記の `slack.events` 設定を共用します。
+`slack.work_object_actions: true` を設定すると、Work Object が有効なすべての公開チケットのメインカードにステータス・担当者（未割当の場合も表示）・優先度・期日と「コメントを追加」「外部サービスで開く」を表示します。`work_object_actions: false` で操作を無効にします。「課題を編集」はSlackのモーダルを開き、権限に応じてステータス・担当者・優先度・期日・コメントを変更できます。既定では無効です。Slack アプリの **Interactivity & Shortcuts** を有効にし、Request URL を `https://redmine.example.com/redmine_slack/interactions` に設定します。署名検証には上記の `slack.events` 設定を共用します。
 
 ```yaml
 slack:
@@ -599,3 +599,47 @@ slack:
 `description: true` でカードに説明文を表示します。空欄は非表示、1,000文字を超える場合は省略します。右ペインの説明全文は従来どおりです。
 
 表示文言の既定値は英語です。`messages.work_objects` でボタン・編集画面・エラー文言、`messages.fields` で編集項目名、`messages.values.unassigned` で未割当表示を変更できます。全キーを設定例に掲載しています。`edit_title` と `edit_failed` は `%{id}` を使用できます。Slack自身が表示する標準項目名・メニューはSlackの言語設定に従います。
+
+カードの「外部サービスで開く」は課題URLを開きます。`messages.work_objects.open_issue: '%{product_name}で開く'` で表示名を指定できます。
+
+メインカードの「コメントを追加」はコメント専用モーダルを開きます。コメント追加権限を確認し、課題の各属性は変更しません。右ペインの編集操作は引き続き利用できます。表示名は `messages.work_objects.add_comment` で設定します。
+
+### Work Object ボタンの選択と順序
+
+`slack.work_object_buttons` の `true/false` と記載順で、カード・詳細パネルの操作を選べます。設定がある場合、省略したボタンは非表示です。設定全体を省略すると従来のボタン構成を維持します。プロジェクト別設定のキーを先に並べ、継承したキーを後に並べます。
+
+```yaml
+slack:
+  work_object_actions: true
+  work_object_buttons:
+    add_comment: false
+    open_issue: false
+    edit_issue: false
+    change_assignee: false
+    assign_to_me: false
+    start_work: true
+    complete_work: true
+    log_time: false
+    watch: false
+  work_object_start_status_id: 3
+  # Completion status ID; use the actual completed status from your workflow.
+  work_object_complete_status_id: 5
+```
+
+exampleは作業開始・作業完了だけを有効にし、開始先IDを3、完了先IDを5にしています。実際のRedmineワークフローに合わせてIDを変更してください。
+
+| キー | 操作 |
+| --- | --- |
+| `add_comment` | コメント専用モーダル |
+| `open_issue` | 外部サービスの課題URLを開く |
+| `edit_issue` | 課題編集モーダル |
+| `change_assignee` | 担当者専用モーダル |
+| `assign_to_me` | 操作したユーザーに割り当て |
+| `start_work` | `work_object_start_status_id` の状態へ遷移 |
+| `complete_work` | `work_object_complete_status_id` の完了状態へ遷移 |
+| `log_time` | Redmineの作業時間登録画面を開く。登録はその画面で行う |
+| `watch` | 本人のウォッチ登録・解除 |
+
+先頭2個は主ボタン、続く5個は「その他」メニューです。最大7個まで表示し、超過分は表示せず警告ログを出します。作業開始・作業完了は遷移先ID未設定・到達済みなら非表示です。両方を有効にすると、開始前は「作業開始」、設定した開始ステータスでは「作業完了」だけ表示します。完了先ステータスまたはRedmineの終了ステータスでは両方を非表示にします。両方のステータスIDを指定してください。片方だけ有効な場合は従来どおり独立して表示します。どちらも押下時にRedmineのワークフローと編集権限を再確認します。完了先IDは実際の完了ステータスを指定してください。右ペインでは編集権限・担当者・ウォッチ状態に応じて不要な操作を除きます。共有カードはユーザーごとに表示を変えられないため、個人の権限・状態は操作時に確認します。作業時間登録はRedmine側の権限・必須項目に従います。表示名は同名の `messages.work_objects` キーで上書きできます。
+
+`watch: true` で登録・解除の両方が有効になります。共有カードは「ウォッチ設定」で本人の現在状態と登録／解除ボタンを表示し、右ペインは状態に応じて切り替えます。独立した `unwatch` 設定は不要です。表示文言は `messages.work_objects` の `watch_settings`、`watching`、`not_watching`、`watch`、`unwatch` で指定できます。

@@ -29,7 +29,16 @@ module RedmineSlackNotification
         'product_name' => 'Redmine', 'display_type' => 'Issue',
         'edit_issue' => 'Edit issue',
         'change_assignee' => 'Change assignee',
+        'open_issue' => 'Open %{product_name}',
         'assign_to_me' => 'Assign to me',
+        'start_work' => 'Start work',
+        'complete_work' => 'Complete work',
+        'log_time' => 'Log time',
+        'watch_settings' => 'Watch settings',
+        'watching' => 'You are watching this issue.',
+        'not_watching' => 'You are not watching this issue.',
+        'watch' => 'Watch',
+        'unwatch' => 'Unwatch',
         'add_comment' => 'Add comment',
         'comment_placeholder' => 'Enter a comment',
         'edit_title' => 'Edit issue #%{id}',
@@ -506,10 +515,7 @@ module RedmineSlackNotification
       entity_payload['display_order'] = ordered_keys.uniq.map { |key| key == 'author' ? 'created_by' : key }
                                                    .select { |key| available_keys.include?(key) }
       if RedmineSlackNotification::WorkObjects.actions_enabled?(issue)
-        entity_payload['actions'] = { 'primary_actions' => [
-          { 'text' => message('work_objects', 'edit_issue'), 'action_id' => 'redmine_edit_issue' },
-          { 'text' => message('work_objects', 'change_assignee'), 'action_id' => 'redmine_edit_assignee' }
-        ] }
+        entity_payload['actions'] = RedmineSlackNotification::WorkObjects.configured_actions(issue)
       end
       result = compact_work_object_notification(result, issue, fields, custom_fields)
       result.merge(

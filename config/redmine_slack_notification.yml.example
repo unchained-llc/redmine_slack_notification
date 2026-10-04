@@ -28,6 +28,24 @@ slack:
   # Redmine user mapping and permissions are checked again on submission.
   # Set Interactivity & Shortcuts Request URL to /redmine_slack/interactions.
   work_object_actions: true
+  # Enabled buttons follow YAML order: first 2 primary, next 5 in More.
+  # At most 7 can be displayed. Unlisted buttons are hidden when this map is set.
+  work_object_buttons:
+    add_comment: false
+    open_issue: false
+    edit_issue: false
+    change_assignee: false
+    assign_to_me: false
+    # With both enabled, show Start work until started, then Complete work.
+    # Hide both after completion or when closed. Configure both status IDs below.
+    start_work: true
+    complete_work: true
+    log_time: false
+    watch: false
+  # Required for start_work: the workflow status ID, not its display name.
+  work_object_start_status_id: 3
+  # Completion status ID; use the actual completed status from your workflow.
+  work_object_complete_status_id: 5
   # Card body fields, independent of action buttons and notification metadata.
   # Unspecified fields are hidden. Per-project overrides apply.
   # Display order follows these keys. Project keys come first, then inherited keys.
@@ -295,7 +313,17 @@ messages:
     # edit_title and edit_failed support %{id}. Keep modal titles short.
     edit_issue: 'Edit issue'
     change_assignee: 'Change assignee'
+    # Supports %{product_name}; for example: 'Open in %{product_name}'
+    open_issue: 'Open %{product_name}'
     assign_to_me: 'Assign to me'
+    start_work: 'Start work'
+    complete_work: 'Complete work'
+    log_time: 'Log time'
+    watch_settings: 'Watch settings'
+    watching: 'You are watching this issue.'
+    not_watching: 'You are not watching this issue.'
+    watch: 'Watch'
+    unwatch: 'Unwatch'
     add_comment: 'Add comment'
     comment_placeholder: 'Enter a comment'
     edit_title: 'Edit issue #%{id}'

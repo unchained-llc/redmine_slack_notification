@@ -1611,7 +1611,9 @@ class WorkObjectNotificationTest < Minitest::Test
       assert_equal 'High', entity.dig('fields', 'priority', 'value')
       assert_equal '2026-10-05', entity.dig('fields', 'due_date', 'value')
       assert_equal 'Alice', entity.dig('fields', 'assignee', 'user', 'text')
-      assert_equal %w[redmine_edit_issue redmine_edit_assignee], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
+      assert_equal %w[redmine_add_comment redmine_open_issue], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
+      assert_equal 'https://redmine.example.com/issues/7', entity.dig('actions', 'primary_actions', 1, 'url')
+      assert_equal 'Open Redmine', entity.dig('actions', 'primary_actions', 1, 'text')
       @settings['slack']['work_object_actions'] = false
       hidden = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
       refute_empty hidden['fields']
@@ -1628,7 +1630,7 @@ class WorkObjectNotificationTest < Minitest::Test
       entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
       assert_equal 'Alice', entity.dig('fields', 'assignee', 'user', 'text')
       assert_equal 'In progress', entity.dig('fields', 'status', 'value')
-      assert_equal %w[redmine_edit_issue redmine_edit_assignee], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
+      assert_equal %w[redmine_add_comment redmine_open_issue], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
 
       @settings['projects'] = { 'agentic' => { 'slack' => { 'work_object_actions' => false } } }
       hidden = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
@@ -2044,7 +2046,7 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal 1, entities.length
     assert_equal @url, entities.first['app_unfurl_url']
     assert_equal 'Current title', entities.first.dig('entity_payload', 'attributes', 'title', 'text')
-    assert_equal %w[redmine_edit_issue redmine_edit_assignee], entities.first.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
+    assert_equal %w[redmine_add_comment redmine_open_issue], entities.first.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
   end
 
   def test_link_unfurl_uses_message_target_and_rejects_inaccessible_issues
@@ -2280,6 +2282,157 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal '状態', modal['blocks'].find { |block| block['block_id'] == 'status' }.dig('label', 'text')
     @settings['messages']['work_objects']['edit_title'] = '%{missing}'
     assert_equal 'Edit issue #7', capture_interaction(button).first[1].dig('view', 'title', 'text')
+  end
+
+  def test_card_comment_action_requires_only_comment_permission_and_saves_only_notes
+    prepare_action_issue
+    @issue.define_singleton_method(:attributes_editable?) { |_viewer| false }
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_add_comment' }])
+    button['container']['type'] = 'message_attachment'
+    view = capture_interaction(button).first[1]['view']
+    assert_equal 'redmine_add_comment', view['callback_id']
+    assert_equal ['new_comment'], view['blocks'].map { |block| block['block_id'] }
+    assert_equal false, view['blocks'].first['optional']
+    edit = action_payload('view_submission', 'view')
+    edit['view'] = view.merge('state' => { 'values' => {
+      'new_comment' => { 'new_comment' => { 'value' => 'Comment from card' } },
+      'status' => { 'status' => { 'selected_option' => { 'value' => '3' } } }
+    } })
+    capture_interaction(edit)
+    assert_equal ['Comment from card'], @issue.notes
+    assert_equal 2, @issue.status_id
+    @issue.define_singleton_method(:notes_addable?) { |_viewer| false }
+    assert_empty capture_interaction(button)
+    capture_interaction(edit)
+    assert_equal ['Comment from card'], @issue.notes
+  end
+
+  def test_configured_buttons_follow_order_and_use_overflow
+    prepare_action_issue
+    @settings['slack']['work_object_buttons'] = {
+      'open_issue' => true, 'add_comment' => true, 'edit_issue' => true,
+      'change_assignee' => true, 'assign_to_me' => true, 'log_time' => true, 'start_work' => true, 'watch' => false
+    }
+    @settings['slack']['work_object_start_status_id'] = 3
+    RedmineSlackNotification.stub(:config, @settings) do
+      actions = WORK.configured_actions(@issue)
+      assert_equal %w[redmine_open_issue redmine_add_comment], actions['primary_actions'].map { |a| a['action_id'] }
+      assert_equal %w[redmine_edit_issue redmine_edit_assignee redmine_assign_to_me redmine_log_time redmine_start_work], actions['overflow_actions'].map { |a| a['action_id'] }
+      assert_equal @url + '/time_entries/new', actions['overflow_actions'][3]['url']
+      @settings['projects'] = { 'agentic' => { 'slack' => { 'work_object_buttons' => { 'add_comment' => true, 'open_issue' => false } } } }
+      assert_equal 'redmine_add_comment', WORK.configured_actions(@issue)['primary_actions'].first['action_id']
+    end
+  end
+
+  def test_start_work_rechecks_status_and_disabled_buttons
+    prepare_action_issue
+    @settings['slack']['work_object_buttons'] = { 'start_work' => true }
+    @settings['slack']['work_object_start_status_id'] = 3
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_start_work' }])
+    capture_interaction(button)
+    assert_equal 3, @issue.status_id
+    refute capture_details.first[1].dig('metadata', 'entity_payload', 'actions', 'primary_actions').any?
+    previous_events = @issue.events.dup
+    capture_interaction(button)
+    assert_equal previous_events, @issue.events
+    @settings['slack']['work_object_start_status_id'] = 999
+    capture_interaction(button)
+    assert_equal 3, @issue.status_id
+    @settings['slack']['work_object_buttons']['start_work'] = false
+    assert_empty capture_interaction(button)
+  end
+
+  def test_complete_work_rechecks_status_and_disabled_buttons
+    prepare_action_issue
+    @settings['slack']['work_object_buttons'] = { 'complete_work' => true }
+    refute capture_details.first[1].dig('metadata', 'entity_payload', 'actions', 'primary_actions').any?
+    @settings['slack']['work_object_complete_status_id'] = 3
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_complete_work' }])
+    capture_interaction(button)
+    assert_equal 3, @issue.status_id
+    refute capture_details.first[1].dig('metadata', 'entity_payload', 'actions', 'primary_actions').any?
+    previous_events = @issue.events.dup
+    capture_interaction(button)
+    assert_equal previous_events, @issue.events
+    @settings['slack']['work_object_complete_status_id'] = 999
+    capture_interaction(button)
+    assert_equal 3, @issue.status_id
+    @settings['slack']['work_object_buttons']['complete_work'] = false
+    assert_empty capture_interaction(button)
+  end
+
+  def test_work_buttons_are_mutually_exclusive_when_both_enabled
+    prepare_action_issue
+    @settings['slack']['work_object_buttons'] = { 'complete_work' => true, 'start_work' => true }
+    @settings['slack']['work_object_start_status_id'] = 3
+    @settings['slack']['work_object_complete_status_id'] = 5
+    RedmineSlackNotification.stub(:config, @settings) do
+      [[1, 'redmine_start_work'], [3, 'redmine_complete_work'], [5, nil]].each do |status, expected|
+        @issue.status_id = status
+        actions = WORK.configured_actions(@issue)
+        assert_equal [expected].compact, actions.fetch('primary_actions').map { |action| action['action_id'] }
+        refute actions.key?('overflow_actions')
+      end
+      @issue.status_id = 9
+      @issue.define_singleton_method(:closed?) { true }
+      assert_empty WORK.configured_actions(@issue).fetch('primary_actions')
+      @settings['slack'].delete('work_object_start_status_id')
+      assert_empty WORK.configured_actions(@issue).fetch('primary_actions')
+    end
+  end
+
+  def test_watch_and_unwatch_are_idempotent_and_authorized
+    prepare_action_issue
+    @settings['slack']['work_object_buttons'] = { 'watch' => true }
+    @issue.define_singleton_method(:watched_by?) { |_viewer| @watching == true }
+    @issue.define_singleton_method(:valid_watcher?) { |_viewer| true }
+    @issue.define_singleton_method(:set_watcher) { |_viewer, enabled| @watching = enabled }
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_watch' }])
+    capture_interaction(button)
+    assert @issue.watched_by?(@user)
+    actions = capture_details.first[1].dig('metadata', 'entity_payload', 'actions', 'primary_actions')
+    assert_equal ['redmine_unwatch'], actions.map { |a| a['action_id'] }
+    capture_interaction(button)
+    assert @issue.watched_by?(@user)
+    button['actions'][0]['action_id'] = 'redmine_unwatch'
+    capture_interaction(button)
+    refute @issue.watched_by?(@user)
+    @issue.define_singleton_method(:valid_watcher?) { |_viewer| false }
+    button['actions'][0]['action_id'] = 'redmine_watch'
+    capture_interaction(button)
+    refute @issue.watched_by?(@user)
+    @issue.define_singleton_method(:visible?) { |_viewer| false }
+    assert_empty capture_interaction(button)
+  end
+
+  def test_shared_watch_settings_use_personal_state_and_recheck_configuration
+    prepare_action_issue
+    @settings['slack']['work_object_buttons'] = { 'watch' => true }
+    @issue.define_singleton_method(:watched_by?) { |_viewer| @watching == true }
+    @issue.define_singleton_method(:valid_watcher?) { |_viewer| true }
+    @issue.define_singleton_method(:set_watcher) { |_viewer, enabled| @watching = enabled }
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_watch' }])
+    button['container']['type'] = 'message_attachment'
+    calls = capture_interaction(button)
+    assert_equal 'views.open', calls.first[0]
+    form = calls.first[1]['view']
+    assert_equal 'Watch', form.dig('submit', 'text')
+    refute @issue.watched_by?(@user)
+    submit = action_payload('view_submission', 'view')
+    submit['view'] = form
+    capture_interaction(submit)
+    assert @issue.watched_by?(@user)
+    capture_interaction(submit)
+    assert @issue.watched_by?(@user), 'Repeated submission must not toggle the state'
+    form = capture_interaction(button).first[1]['view']
+    assert_equal 'Unwatch', form.dig('submit', 'text')
+    submit['view'] = form
+    @settings['slack']['work_object_buttons']['watch'] = false
+    assert_empty capture_interaction(submit)
+    assert @issue.watched_by?(@user)
+    @settings['slack']['work_object_buttons']['watch'] = true
+    capture_interaction(submit)
+    refute @issue.watched_by?(@user)
   end
 
   def test_detail_edit_action_opens_the_issue_modal

@@ -75,6 +75,101 @@ module RedmineSlackNotification
       RedmineSlackNotification.effective_config(issue.project).dig('slack', 'work_object_actions') == true
     end
 
+    BUTTON_IDS = {
+      'add_comment' => 'redmine_add_comment', 'edit_issue' => 'redmine_edit_issue',
+      'open_issue' => 'redmine_open_issue', 'change_assignee' => 'redmine_edit_assignee',
+      'assign_to_me' => 'redmine_assign_to_me', 'start_work' => 'redmine_start_work',
+      'complete_work' => 'redmine_complete_work',
+      'log_time' => 'redmine_log_time', 'watch' => 'redmine_watch', 'unwatch' => 'redmine_unwatch'
+    }.freeze
+
+    def button_keys(issue, detail: false)
+      settings = RedmineSlackNotification.effective_config(issue.project).dig('slack', 'work_object_buttons')
+      return detail ? %w[edit_issue assign_to_me] : %w[add_comment open_issue] unless settings.is_a?(Hash)
+
+      project = RedmineSlackNotification.project_config(issue.project).dig('slack', 'work_object_buttons')
+      keys = (project.is_a?(Hash) ? project.keys : []) + settings.keys
+      keys.uniq.select { |key| BUTTON_IDS.key?(key) && key != 'unwatch' && settings[key] == true }
+    end
+
+    def action_status_id(issue, key)
+      setting = key == 'complete_work' ? 'work_object_complete_status_id' : 'work_object_start_status_id'
+      value = RedmineSlackNotification.effective_config(issue.project).dig('slack', setting)
+      value.to_s.match?(/\A[1-9]\d*\z/) ? value.to_i : nil
+    end
+
+    def button_available?(key, issue, viewer)
+      case key
+      when 'start_work', 'complete_work'
+        return false if issue.closed? || issue.status_id == action_status_id(issue, 'complete_work')
+        target = action_status_id(issue, key)
+        return false unless target && issue.status_id != target
+        if key == 'complete_work' && button_keys(issue).include?('start_work')
+          return false unless issue.status_id == action_status_id(issue, 'start_work')
+        end
+        return true unless viewer
+        issue.attributes_editable?(viewer) && issue.safe_attribute?('status_id', viewer) &&
+          issue.new_statuses_allowed_to(viewer).any? { |status| status.id == target }
+      when 'add_comment'
+        !viewer || issue.notes_addable?(viewer)
+      when 'edit_issue'
+        !viewer || !!edit_modal(issue, viewer, {})
+      when 'change_assignee', 'assign_to_me'
+        return true unless viewer
+        issue.attributes_editable?(viewer) && issue.safe_attribute?('assigned_to_id', viewer) &&
+          (key == 'change_assignee' ? !!assignee_options(issue) :
+            issue.assigned_to_id != viewer.id && issue.assignable_users.include?(viewer))
+      when 'watch', 'unwatch'
+        return true unless viewer
+        key == 'watch' ? !issue.watched_by?(viewer) && issue.valid_watcher?(viewer) : issue.watched_by?(viewer)
+      when 'log_time'
+        !viewer || viewer.allowed_to?(:log_time, issue.project)
+      else
+        true
+      end
+    end
+
+    def configured_actions(issue, viewer: nil)
+      keys = button_keys(issue, detail: !viewer.nil?).map { |key| key == 'watch' && viewer && issue.watched_by?(viewer) ? 'unwatch' : key }
+      actions = keys.select { |key| button_available?(key, issue, viewer) }.map do |key|
+        label = work_object_message(key == 'watch' && !viewer ? 'watch_settings' : key, product_name: Formatter.message('work_objects', 'product_name'))
+        button = { 'text' => label, 'action_id' => BUTTON_IDS.fetch(key) }
+        button['url'] = Formatter.url("/issues/#{issue.id}") if key == 'open_issue'
+        button['url'] = Formatter.url("/issues/#{issue.id}/time_entries/new") if key == 'log_time'
+        button
+      end
+      Rails.logger&.warn('RedmineSlackNotification: only the first 7 Work Object buttons can be displayed') if actions.length > 7
+      result = { 'primary_actions' => actions.first(2) }
+      result['overflow_actions'] = actions.drop(2).first(5) if actions.length > 2
+      result
+    end
+
+    def watch_modal(issue, viewer, source)
+      watching = issue.watched_by?(viewer)
+      return unless watching || issue.valid_watcher?(viewer)
+      context = source.slice('entity_url', 'external_ref', 'channel_id', 'message_ts')
+      context['watching'] = !watching
+      { 'type' => 'modal', 'callback_id' => 'redmine_watch_settings',
+        'title' => { 'type' => 'plain_text', 'text' => work_object_message('watch_settings') },
+        'submit' => { 'type' => 'plain_text', 'text' => work_object_message(watching ? 'unwatch' : 'watch') },
+        'close' => { 'type' => 'plain_text', 'text' => work_object_message('cancel') },
+        'private_metadata' => JSON.generate(context),
+        'blocks' => [{ 'type' => 'section', 'text' => { 'type' => 'plain_text',
+          'text' => work_object_message(watching ? 'watching' : 'not_watching') } }] }
+    end
+
+    def update_watch(issue, viewer, watching)
+      issue.with_lock do
+        return :restricted unless actions_enabled?(issue) && issue.project.active? && !issue.is_private? && issue.visible?(viewer)
+        return :unchanged if issue.watched_by?(viewer) == watching
+        return :restricted if watching && !issue.valid_watcher?(viewer)
+        issue.set_watcher(viewer, watching)
+        issue.watched_by?(viewer) == watching ? :saved : :restricted
+      end
+    rescue ActiveRecord::RecordInvalid
+      :restricted
+    end
+
     def editable_metadata(issue, viewer)
       metadata = Formatter.issue_work_object_details(issue)
       return metadata unless actions_enabled?(issue)
@@ -131,15 +226,7 @@ module RedmineSlackNotification
                       'placeholder' => { 'type' => 'plain_text', 'text' => Formatter.message('work_objects', 'comment_placeholder') } }
         }
       end
-      primary_actions = []
-      if edit_modal(issue, viewer, {})
-        primary_actions << { 'text' => Formatter.message('work_objects', 'edit_issue'), 'action_id' => 'redmine_edit_issue' }
-      end
-      if issue.attributes_editable?(viewer) && issue.safe_attribute?('assigned_to_id', viewer) &&
-         issue.assigned_to_id != viewer.id && issue.assignable_users.include?(viewer)
-        primary_actions << { 'text' => Formatter.message('work_objects', 'assign_to_me'), 'action_id' => 'redmine_assign_to_me' }
-      end
-      metadata.fetch('entity_payload')['actions'] = { 'primary_actions' => primary_actions } unless primary_actions.empty?
+      metadata.fetch('entity_payload')['actions'] = configured_actions(issue, viewer: viewer)
       metadata
     end
 
@@ -160,19 +247,19 @@ module RedmineSlackNotification
       [{ 'value' => 'none', 'text' => { 'type' => 'plain_text', 'text' => Formatter.message('values', 'unassigned') } }] + select_options(users)
     end
 
-    def edit_modal(issue, viewer, source, assignee_only: false)
-      return unless issue.attributes_editable?(viewer)
+    def edit_modal(issue, viewer, source, assignee_only: false, comment_only: false)
+      return unless comment_only ? issue.notes_addable?(viewer) : issue.attributes_editable?(viewer)
 
       blocks = []
-      if issue.safe_attribute?('status_id', viewer)
+      if !comment_only && issue.safe_attribute?('status_id', viewer)
         statuses = issue.new_statuses_allowed_to(viewer)
         blocks << select_input('status', Formatter.field_label('status'), statuses, issue.status_id) if statuses.any? { |status| status.id == issue.status_id }
       end
-      if issue.safe_attribute?('priority_id', viewer)
+      if !comment_only && issue.safe_attribute?('priority_id', viewer)
         priorities = IssuePriority.active.to_a
         blocks << select_input('priority', Formatter.field_label('priority'), priorities, issue.priority_id) if priorities.any? { |priority| priority.id == issue.priority_id }
       end
-      if issue.safe_attribute?('assigned_to_id', viewer)
+      if !comment_only && issue.safe_attribute?('assigned_to_id', viewer)
         options = assignee_options(issue)
         if options
           blocks << { 'type' => 'input', 'block_id' => 'assignee',
@@ -182,14 +269,14 @@ module RedmineSlackNotification
                                      'initial_option' => options.find { |option| option['value'] == (issue.assigned_to_id || 'none').to_s } } }
         end
       end
-      if issue.safe_attribute?('due_date', viewer)
+      if !comment_only && issue.safe_attribute?('due_date', viewer)
         element = { 'type' => 'datepicker', 'action_id' => 'due_date' }
         element['initial_date'] = issue.due_date.iso8601 if issue.due_date
         blocks << { 'type' => 'input', 'block_id' => 'due_date', 'optional' => true,
                     'label' => { 'type' => 'plain_text', 'text' => Formatter.field_label('due_date') }, 'element' => element }
       end
       if issue.notes_addable?(viewer)
-        blocks << { 'type' => 'input', 'block_id' => 'new_comment', 'optional' => true,
+        blocks << { 'type' => 'input', 'block_id' => 'new_comment', 'optional' => !comment_only,
                     'label' => { 'type' => 'plain_text', 'text' => Formatter.message('work_objects', 'add_comment') },
                     'element' => { 'type' => 'plain_text_input', 'action_id' => 'new_comment', 'multiline' => true,
                                    'max_length' => 3000 } }
@@ -198,8 +285,8 @@ module RedmineSlackNotification
       return if blocks.empty?
 
       context = source.slice('entity_url', 'external_ref', 'channel_id', 'message_ts')
-      { 'type' => 'modal', 'callback_id' => 'redmine_edit_issue',
-        'title' => { 'type' => 'plain_text', 'text' => work_object_message('edit_title', id: issue.id) },
+      { 'type' => 'modal', 'callback_id' => comment_only ? 'redmine_add_comment' : 'redmine_edit_issue',
+        'title' => { 'type' => 'plain_text', 'text' => comment_only ? Formatter.message('work_objects', 'add_comment') : work_object_message('edit_title', id: issue.id) },
         'submit' => { 'type' => 'plain_text', 'text' => Formatter.message('work_objects', 'save') },
         'close' => { 'type' => 'plain_text', 'text' => Formatter.message('work_objects', 'cancel') },
         'private_metadata' => JSON.generate(context), 'blocks' => blocks }
@@ -332,7 +419,7 @@ module RedmineSlackNotification
       return unless payload.is_a?(Hash) && %w[block_actions view_submission].include?(payload['type'])
       source = payload['type'] == 'block_actions' ? payload['container'] : payload['view']
       return unless source.is_a?(Hash)
-      modal = source['type'] == 'modal' && source['callback_id'] == 'redmine_edit_issue'
+      modal = source['type'] == 'modal' && %w[redmine_edit_issue redmine_add_comment redmine_watch_settings].include?(source['callback_id'])
       return unless modal || source['type'] == 'entity_detail' || source['type'] == 'message_attachment'
       context = modal ? JSON.parse(source['private_metadata'].to_s) : source
       return unless context.is_a?(Hash)
@@ -351,16 +438,44 @@ module RedmineSlackNotification
           return unless actions.is_a?(Array) && actions.length == 1
           action = actions.first
           return unless action.is_a?(Hash)
-          if %w[redmine_edit_issue redmine_edit_assignee].include?(action['action_id']) && %w[message_attachment entity_detail].include?(source['type'])
-            form = edit_modal(issue, viewer, source, assignee_only: action['action_id'] == 'redmine_edit_assignee')
+          key = BUTTON_IDS.key(action['action_id'])
+          return unless key
+          configured = RedmineSlackNotification.effective_config(issue.project).dig('slack', 'work_object_buttons')
+          return if configured.is_a?(Hash) && !button_keys(issue, detail: source['type'] == 'entity_detail').include?(key == 'unwatch' ? 'watch' : key)
+          if key == 'watch' && source['type'] == 'message_attachment'
+            form = watch_modal(issue, viewer, source)
             return unless form && payload['trigger_id'].to_s != ''
             return RedmineSlackNotification.slack_api('views.open', {
               'trigger_id' => payload['trigger_id'], 'view' => form
             }, RedmineSlackNotification.bot_token(issue.project), form: true)
           end
-          return unless action['action_id'] == 'redmine_assign_to_me'
-          outcome = update_issue(issue, viewer, assigned_to_id: viewer.id)
+          if %w[redmine_edit_issue redmine_edit_assignee redmine_add_comment].include?(action['action_id']) && %w[message_attachment entity_detail].include?(source['type'])
+            form = edit_modal(issue, viewer, source, assignee_only: action['action_id'] == 'redmine_edit_assignee',
+                              comment_only: action['action_id'] == 'redmine_add_comment')
+            return unless form && payload['trigger_id'].to_s != ''
+            return RedmineSlackNotification.slack_api('views.open', {
+              'trigger_id' => payload['trigger_id'], 'view' => form
+            }, RedmineSlackNotification.bot_token(issue.project), form: true)
+          end
+          outcome = case key
+                    when 'assign_to_me'
+                      update_issue(issue, viewer, assigned_to_id: viewer.id)
+                    when 'start_work', 'complete_work'
+                      target = action_status_id(issue, key)
+                      target && button_available?(key, issue, viewer) ? update_issue(issue, viewer, status_id: target) : :restricted
+                    when 'watch', 'unwatch'
+                      update_watch(issue, viewer, key == 'watch')
+                    else
+                      return
+                    end
+        elsif modal && source['callback_id'] == 'redmine_watch_settings'
+          return unless button_keys(issue).include?('watch') && [true, false].include?(context['watching'])
+          outcome = update_watch(issue, viewer, context['watching'])
         else
+          if modal && RedmineSlackNotification.effective_config(issue.project).dig('slack', 'work_object_buttons').is_a?(Hash)
+            requested = source['callback_id'] == 'redmine_add_comment' ? ['add_comment'] : %w[edit_issue change_assignee]
+            return if (button_keys(issue, detail: true) & requested).empty?
+          end
           values = source.dig('state', 'values')
           return unless values.is_a?(Hash)
           status = values.dig('status', modal ? 'status' : 'status.input', 'selected_option', 'value')
@@ -374,6 +489,10 @@ module RedmineSlackNotification
           return unless assignee.nil? || assignee == 'none' || assignee.to_s.match?(/\A[1-9]\d*\z/)
           return unless due_date.nil? || due_date == '' || valid_date?(due_date)
           return unless comment.nil? || (comment.is_a?(String) && comment.length <= 3000)
+          if modal && source['callback_id'] == 'redmine_add_comment'
+            return if comment.to_s.strip.empty?
+            status = priority = assignee = due_date = nil
+          end
           outcome = update_issue(issue, viewer, assigned_to_id: assignee, status_id: status,
                                  priority_id: priority, due_date: due_date, comment: comment)
         end
