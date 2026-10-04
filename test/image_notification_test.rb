@@ -2091,6 +2091,21 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_empty capture_interaction(button)
   end
 
+  def test_assign_to_me_is_hidden_when_already_assigned_to_viewer
+    prepare_action_issue
+    @issue.assigned_to_id = @user.id
+    metadata = capture_details.first[1]['metadata']
+    refute metadata.dig('entity_payload', 'actions')
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_assign_to_me' }])
+    capture_interaction(button)
+    assert_empty @issue.events
+    assert_equal @user.id, @issue.assigned_to_id
+
+    @issue.assigned_to_id = nil
+    metadata = capture_details.first[1]['metadata']
+    assert_equal 'redmine_assign_to_me', metadata.dig('entity_payload', 'actions', 'primary_actions', 0, 'action_id')
+  end
+
   def test_assignee_picker_and_details_allow_unassignment_and_recheck_permissions
     prepare_action_issue
     @issue.assigned_to_id = @user.id

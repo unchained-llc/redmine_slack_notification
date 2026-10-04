@@ -132,7 +132,7 @@ module RedmineSlackNotification
         }
       end
       if issue.attributes_editable?(viewer) && issue.safe_attribute?('assigned_to_id', viewer) &&
-         issue.assignable_users.include?(viewer)
+         issue.assigned_to_id != viewer.id && issue.assignable_users.include?(viewer)
         metadata.fetch('entity_payload')['actions'] = {
           'primary_actions' => [{ 'text' => '自分に割り当てる', 'action_id' => 'redmine_assign_to_me' }]
         }
