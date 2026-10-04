@@ -1951,7 +1951,7 @@ class WorkObjectDetailsTest < Minitest::Test
         User.stub(:find_by, @user) do
           RedmineSlackNotification.stub(:slack_api, ->(method, body, token, **options) {
             calls << [method, body, token, options]
-            { 'ok' => true }
+            method == 'conversations.replies' ? { 'messages' => [{ 'ts' => '123.456', 'text' => 'Original notification' }] } : { 'ok' => true }
           }) { WORK.process_interaction('ATEST', 'TTEST', payload) }
         end
       end
@@ -2020,9 +2020,10 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal 5, @issue.priority_id
     assert_equal Date.new(2026, 10, 12), @issue.due_date
     assert_equal 'Changed from card', @issue.notes.last
-    assert_equal 'chat.update', calls.first[0]
-    assert_equal 'C123', calls.first[1]['channel']
-    assert_equal 'Important', calls.first[1].dig('metadata', 'entities', 0, 'entity_payload', 'fields', 'priority', 'value')
+    assert_equal %w[conversations.replies chat.update], calls.map(&:first)
+    assert_equal 'C123', calls.last[1]['channel']
+    assert_equal 'Original notification', calls.last[1]['text']
+    assert_equal 'Important', calls.last[1].dig('metadata', 'entities', 0, 'entity_payload', 'fields', 'priority', 'value')
   end
 
   def test_main_card_modal_can_assign_and_clear_assignee
@@ -2044,7 +2045,7 @@ class WorkObjectDetailsTest < Minitest::Test
                      } } } } }
     calls = capture_interaction(edit)
     assert_equal 3, @issue.assigned_to_id
-    assert_equal 'chat.update', calls.first[0]
+    assert_equal 'chat.update', calls.last[0]
     edit['view']['state']['values']['assignee']['assignee']['selected_option']['value'] = 'none'
     capture_interaction(edit)
     assert_nil @issue.assigned_to_id
@@ -2056,7 +2057,7 @@ class WorkObjectDetailsTest < Minitest::Test
     button['container'].merge!('type' => 'message_attachment', 'channel_id' => 'C123', 'message_ts' => '123.456')
     calls = capture_interaction(button)
     assert_equal 3, @issue.assigned_to_id
-    assert_equal ['chat.update'], calls.map(&:first)
+    assert_equal %w[conversations.replies chat.update], calls.map(&:first)
   end
 
   def test_failed_card_refresh_does_not_retry_saved_comment
@@ -2069,7 +2070,9 @@ class WorkObjectDetailsTest < Minitest::Test
     RedmineSlackNotification.stub(:config, @settings) do
       Issue.stub(:find_by, @issue) do
         User.stub(:find_by, @user) do
-          RedmineSlackNotification.stub(:slack_api, ->(*) { raise StandardError, 'refresh failed' }) do
+          RedmineSlackNotification.stub(:slack_api, ->(method, *) {
+            method == 'conversations.replies' ? { 'messages' => [{ 'ts' => '123.456', 'text' => 'Original notification' }] } : raise(StandardError, 'refresh failed')
+          }) do
             WORK.process_interaction('ATEST', 'TTEST', edit)
           end
         end

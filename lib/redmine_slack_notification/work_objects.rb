@@ -307,9 +307,16 @@ module RedmineSlackNotification
           issue.reload
           card = Formatter.issue_payload(issue, actor: viewer, action: 'updated')
           begin
-            RedmineSlackNotification.slack_api('chat.update', {
-              'channel' => context['channel_id'], 'ts' => context['message_ts'], 'metadata' => card['metadata']
-            }, RedmineSlackNotification.bot_token(issue.project), form: true)
+            token = RedmineSlackNotification.bot_token(issue.project)
+            original = RedmineSlackNotification.slack_api('conversations.replies', {
+              'channel' => context['channel_id'], 'ts' => context['message_ts'], 'limit' => 1
+            }, token, form: true).fetch('messages').first
+            raise 'Original message text unavailable' unless original && original['ts'] == context['message_ts'] &&
+                                                            original['text'].to_s != ''
+            update = { 'channel' => context['channel_id'], 'ts' => context['message_ts'],
+                       'text' => original['text'], 'metadata' => card['metadata'] }
+            update['blocks'] = original['blocks'] if original['blocks'].is_a?(Array) && original['blocks'].any?
+            RedmineSlackNotification.slack_api('chat.update', update, token, form: true)
           rescue StandardError => e
             # A failed Slack refresh must not retry a completed Redmine write.
             Rails.logger&.warn("RedmineSlackNotification: card refresh failed issue=#{issue.id} #{e.class}")
