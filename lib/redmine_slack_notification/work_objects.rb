@@ -125,19 +125,27 @@ module RedmineSlackNotification
       end
       if issue.notes_addable?(viewer)
         metadata.fetch('entity_payload').fetch('custom_fields') << {
-          'key' => 'new_comment', 'label' => 'コメントを追加', 'type' => 'string', 'value' => '',
+          'key' => 'new_comment', 'label' => Formatter.message('work_objects', 'add_comment'), 'type' => 'string', 'value' => '',
           'edit' => { 'enabled' => true, 'optional' => true,
                       'text' => { 'max_length' => 3000 },
-                      'placeholder' => { 'type' => 'plain_text', 'text' => 'コメントを入力' } }
+                      'placeholder' => { 'type' => 'plain_text', 'text' => Formatter.message('work_objects', 'comment_placeholder') } }
         }
+      end
+      primary_actions = []
+      if edit_modal(issue, viewer, {})
+        primary_actions << { 'text' => Formatter.message('work_objects', 'edit_issue'), 'action_id' => 'redmine_edit_issue' }
       end
       if issue.attributes_editable?(viewer) && issue.safe_attribute?('assigned_to_id', viewer) &&
          issue.assigned_to_id != viewer.id && issue.assignable_users.include?(viewer)
-        metadata.fetch('entity_payload')['actions'] = {
-          'primary_actions' => [{ 'text' => '自分に割り当てる', 'action_id' => 'redmine_assign_to_me' }]
-        }
+        primary_actions << { 'text' => Formatter.message('work_objects', 'assign_to_me'), 'action_id' => 'redmine_assign_to_me' }
       end
+      metadata.fetch('entity_payload')['actions'] = { 'primary_actions' => primary_actions } unless primary_actions.empty?
       metadata
+    end
+
+    def work_object_message(key, **values)
+      Formatter.interpolate(Formatter.message('work_objects', key), values,
+                            fallback: Formatter::DEFAULT_MESSAGES.dig('work_objects', key))
     end
 
     def select_options(records)
@@ -149,7 +157,7 @@ module RedmineSlackNotification
       users = issue.assignable_users.to_a
       return unless users.length <= 99 && (issue.assigned_to_id.nil? || users.any? { |user| user.id == issue.assigned_to_id })
 
-      [{ 'value' => 'none', 'text' => { 'type' => 'plain_text', 'text' => '未割当' } }] + select_options(users)
+      [{ 'value' => 'none', 'text' => { 'type' => 'plain_text', 'text' => Formatter.message('values', 'unassigned') } }] + select_options(users)
     end
 
     def edit_modal(issue, viewer, source, assignee_only: false)
@@ -158,17 +166,17 @@ module RedmineSlackNotification
       blocks = []
       if issue.safe_attribute?('status_id', viewer)
         statuses = issue.new_statuses_allowed_to(viewer)
-        blocks << select_input('status', 'ステータス', statuses, issue.status_id) if statuses.any? { |status| status.id == issue.status_id }
+        blocks << select_input('status', Formatter.field_label('status'), statuses, issue.status_id) if statuses.any? { |status| status.id == issue.status_id }
       end
       if issue.safe_attribute?('priority_id', viewer)
         priorities = IssuePriority.active.to_a
-        blocks << select_input('priority', '優先度', priorities, issue.priority_id) if priorities.any? { |priority| priority.id == issue.priority_id }
+        blocks << select_input('priority', Formatter.field_label('priority'), priorities, issue.priority_id) if priorities.any? { |priority| priority.id == issue.priority_id }
       end
       if issue.safe_attribute?('assigned_to_id', viewer)
         options = assignee_options(issue)
         if options
           blocks << { 'type' => 'input', 'block_id' => 'assignee',
-                      'label' => { 'type' => 'plain_text', 'text' => '担当者' },
+                      'label' => { 'type' => 'plain_text', 'text' => Formatter.field_label('assignee') },
                       'element' => { 'type' => 'static_select', 'action_id' => 'assignee',
                                      'options' => options,
                                      'initial_option' => options.find { |option| option['value'] == (issue.assigned_to_id || 'none').to_s } } }
@@ -178,11 +186,11 @@ module RedmineSlackNotification
         element = { 'type' => 'datepicker', 'action_id' => 'due_date' }
         element['initial_date'] = issue.due_date.iso8601 if issue.due_date
         blocks << { 'type' => 'input', 'block_id' => 'due_date', 'optional' => true,
-                    'label' => { 'type' => 'plain_text', 'text' => '期日' }, 'element' => element }
+                    'label' => { 'type' => 'plain_text', 'text' => Formatter.field_label('due_date') }, 'element' => element }
       end
       if issue.notes_addable?(viewer)
         blocks << { 'type' => 'input', 'block_id' => 'new_comment', 'optional' => true,
-                    'label' => { 'type' => 'plain_text', 'text' => 'コメントを追加' },
+                    'label' => { 'type' => 'plain_text', 'text' => Formatter.message('work_objects', 'add_comment') },
                     'element' => { 'type' => 'plain_text_input', 'action_id' => 'new_comment', 'multiline' => true,
                                    'max_length' => 3000 } }
       end
@@ -191,9 +199,9 @@ module RedmineSlackNotification
 
       context = source.slice('entity_url', 'external_ref', 'channel_id', 'message_ts')
       { 'type' => 'modal', 'callback_id' => 'redmine_edit_issue',
-        'title' => { 'type' => 'plain_text', 'text' => "課題 ##{issue.id} を編集" },
-        'submit' => { 'type' => 'plain_text', 'text' => '保存' },
-        'close' => { 'type' => 'plain_text', 'text' => 'キャンセル' },
+        'title' => { 'type' => 'plain_text', 'text' => work_object_message('edit_title', id: issue.id) },
+        'submit' => { 'type' => 'plain_text', 'text' => Formatter.message('work_objects', 'save') },
+        'close' => { 'type' => 'plain_text', 'text' => Formatter.message('work_objects', 'cancel') },
         'private_metadata' => JSON.generate(context), 'blocks' => blocks }
     end
 
@@ -343,7 +351,7 @@ module RedmineSlackNotification
           return unless actions.is_a?(Array) && actions.length == 1
           action = actions.first
           return unless action.is_a?(Hash)
-          if %w[redmine_edit_issue redmine_edit_assignee].include?(action['action_id']) && source['type'] == 'message_attachment'
+          if %w[redmine_edit_issue redmine_edit_assignee].include?(action['action_id']) && %w[message_attachment entity_detail].include?(source['type'])
             form = edit_modal(issue, viewer, source, assignee_only: action['action_id'] == 'redmine_edit_assignee')
             return unless form && payload['trigger_id'].to_s != ''
             return RedmineSlackNotification.slack_api('views.open', {
@@ -395,7 +403,7 @@ module RedmineSlackNotification
             begin
               RedmineSlackNotification.slack_api('chat.postEphemeral', {
                 'channel' => context['channel_id'], 'user' => payload.dig('user', 'id'),
-                'text' => "課題 ##{issue.id} を変更できませんでした。権限と現在の状態を確認してください。"
+                'text' => work_object_message('edit_failed', id: issue.id)
               }, RedmineSlackNotification.bot_token(issue.project))
             rescue StandardError => e
               Rails.logger&.warn("RedmineSlackNotification: edit error notice failed issue=#{issue.id} #{e.class}")
@@ -412,7 +420,7 @@ module RedmineSlackNotification
           issue.reload
           request['metadata'] = editable_metadata(issue, viewer)
         else
-          request['error'] = { 'status' => 'edit_error', 'custom_message' => 'この操作を実行できませんでした。権限と現在の状態を確認してください。' }
+          request['error'] = { 'status' => 'edit_error', 'custom_message' => Formatter.message('work_objects', 'operation_failed') }
         end
         RedmineSlackNotification.slack_api('entity.presentDetails', request, token, form: true)
       end

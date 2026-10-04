@@ -27,7 +27,27 @@ slack:
   # cards when true. Omitted or false disables actions.
   # Redmine user mapping and permissions are checked again on submission.
   # Set Interactivity & Shortcuts Request URL to /redmine_slack/interactions.
-  work_object_actions: false
+  work_object_actions: true
+  # Card body fields, independent of action buttons and notification metadata.
+  # Unspecified fields are hidden. Per-project overrides apply.
+  # Display order follows these keys. Project keys come first, then inherited keys.
+  work_object_fields:
+    assignee: true
+    priority: false
+    due_date: true
+    category: false
+    done_ratio: false
+    project: false
+    tracker: false
+    author: false
+    updater: false
+    target_version: false
+    start_date: false
+    estimated_hours: false
+    # Latest public comment: author, ISO 8601 time, and up to 1000 characters.
+    status: true
+    description: false
+    last_comment: false
   # Save text replies to Issue notification threads as Redmine notes.
   # Requires slack.events, explicit users mappings or auto_map_users_by_email,
   # message.groups + groups:history (private channels), and an app reinstall.
@@ -84,8 +104,7 @@ slack:
       attachments: false
       watchers: false
       custom_fields:
-        default: false
-        '42': false
+            '42': false
     wiki:
       project: true
       updater: true
@@ -225,6 +244,7 @@ messages:
     author: Author
     estimated_hours: Estimated hours
     done_ratio: Done ratio
+    last_comment: Last comment
     children: Child issues
     relations: Related issues
     attachments: Attachments
@@ -244,6 +264,7 @@ messages:
     unknown_user: Unknown user
     unknown: Unknown
     unset: Not set
+    unassigned: Unassigned
     none: None
     empty: "(empty)"
     added: Added
@@ -268,6 +289,20 @@ messages:
   # Projects may override any messages key under projects.<identifier>.messages.
   work_objects:
     product_name: 'Redmine'
+    # Entity label used by Slack headers and menus; independent of the tracker.
+    display_type: 'Issue'
+    # Override these labels to localize cards, detail actions, and edit dialogs.
+    # edit_title and edit_failed support %{id}. Keep modal titles short.
+    edit_issue: 'Edit issue'
+    change_assignee: 'Change assignee'
+    assign_to_me: 'Assign to me'
+    add_comment: 'Add comment'
+    comment_placeholder: 'Enter a comment'
+    edit_title: 'Edit issue #%{id}'
+    save: 'Save'
+    cancel: 'Cancel'
+    edit_failed: 'Could not update issue #%{id}. Check your permissions and the current state.'
+    operation_failed: 'Could not perform this action. Check your permissions and the current state.'
   # Headings for compact comment notifications inside Slack threads.
   # Supports %{product_name}, %{id}, %{actor}, and %{subject}.
   # References to the current Issue as #%{id} automatically become links.

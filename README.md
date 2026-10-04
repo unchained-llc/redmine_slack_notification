@@ -177,8 +177,7 @@ slack:
       target_version: true
       relations: true
       custom_fields:
-        default: false
-        '42': true
+            '42': true
 ```
 
 Issue updates also show a separate **Changes** section with the old and new values of changed fields. Changes to visible fields are always shown. By default, changes to hidden fields are shown too; set `slack.issue_changes_when_hidden: false` to omit them:
@@ -562,3 +561,37 @@ ruby -Itest test/slack_events_controller_test.rb
 ```
 
 These tests exercise notification formatting and delivery logic with stubs. Additionally, run `ruby -Itest test/thread_comments_persistence_test.rb` where ActiveRecord and sqlite3 are available to check persistence, duplicate suppression, permission denial, and notification-loop suppression using in-memory Issue/Journal fixture tables. These tests do not connect to production databases or Redis, post to Slack, or verify a live Redmine installation.
+
+### Work Object card fields
+
+Card fields follow the YAML key order in `work_object_fields`, skipping disabled and empty fields. Description and Last comment are not pinned to the end. Project-specific keys appear first in their configured order, followed by inherited fields in global configuration order.
+
+Use `slack.work_object_fields` to toggle every supported card body field with `true` or `false`. Unspecified fields are hidden. Explicit field settings override action-enabled defaults and notification `metadata.issue` settings. Empty values are omitted, except unassigned assignees and progress of `0%`. Progress is displayed as an exact percentage, without a bar.
+
+Omitting this map hides all card body fields. Override it per project under `projects.<identifier>.slack.work_object_fields`. These settings control the main card body, not the required title/issue identity, detail pane, or editing permissions.
+
+```yaml
+slack:
+  work_object_fields:
+    status: true
+    assignee: true
+    priority: true
+    due_date: true
+    category: true
+    done_ratio: true
+    project: false
+    tracker: false
+    author: false
+    updater: false
+    target_version: false
+    start_date: false
+    estimated_hours: false
+    description: false
+    last_comment: false
+```
+
+`last_comment: true` displays the latest public comment with its author and ISO 8601 timestamp. Private and empty notes are excluded; the body is limited to 1,000 characters. An identical complete comment body is omitted from the notification only when it is not truncated. Edit/delete diffs are preserved. Refreshing the card fetches the latest public comment.
+
+`description: true` displays the issue description in the card. Blank descriptions are hidden and text beyond 1,000 characters is truncated. The detail pane description is unchanged.
+
+All built-in display text defaults to English. Override buttons, dialogs, and errors with `messages.work_objects`, editor field labels with `messages.fields`, and the unassigned label with `messages.values.unassigned`. The example YAML lists every message key. `edit_title` and `edit_failed` support `%{id}`. Slack-owned labels and menus follow Slack language settings.

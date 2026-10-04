@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'time'
+
 module RedmineSlackNotification
   module Formatter
     BODY_DIFF_MAX_CHARS = 6_000
@@ -23,7 +25,19 @@ module RedmineSlackNotification
                                       estimated_hours done_ratio parent_issue children relations
                                       custom_fields attachments watchers].freeze
     DEFAULT_MESSAGES = {
-      'work_objects' => { 'product_name' => 'Redmine' },
+      'work_objects' => {
+        'product_name' => 'Redmine', 'display_type' => 'Issue',
+        'edit_issue' => 'Edit issue',
+        'change_assignee' => 'Change assignee',
+        'assign_to_me' => 'Assign to me',
+        'add_comment' => 'Add comment',
+        'comment_placeholder' => 'Enter a comment',
+        'edit_title' => 'Edit issue #%{id}',
+        'save' => 'Save',
+        'cancel' => 'Cancel',
+        'edit_failed' => 'Could not update issue #%{id}. Check your permissions and the current state.',
+        'operation_failed' => 'Could not perform this action. Check your permissions and the current state.'
+      },
       'thread_notifications' => {
         'added_header' => '%{product_name} #%{id}: New comment',
         'updated_header' => '%{product_name} #%{id}: Comment updated',
@@ -65,7 +79,7 @@ module RedmineSlackNotification
         'subject' => 'Subject', 'description' => 'Description', 'start_date' => 'Start date', 'due_date' => 'Due date',
         'attachment' => 'Attachment', 'relation' => 'Related issue (%{type})', 'location' => 'Changed location',
         'hours' => 'Hours', 'spent_on' => 'Spent on', 'author' => 'Author',
-        'estimated_hours' => 'Estimated hours', 'done_ratio' => 'Done ratio',
+        'estimated_hours' => 'Estimated hours', 'done_ratio' => 'Done ratio', 'last_comment' => 'Last comment',
         'children' => 'Child issues', 'relations' => 'Related issues',
         'attachments' => 'Attachments', 'watchers' => 'Watchers',
         'custom_fields' => 'Custom fields'
@@ -76,7 +90,7 @@ module RedmineSlackNotification
         'copied_from' => 'Copied from'
       },
       'values' => { 'unknown_user' => 'Unknown user', 'unknown' => 'Unknown', 'unset' => 'Not set',
-                    'none' => 'None', 'empty' => '(empty)', 'added' => 'Added', 'removed' => 'Removed',
+                    'unassigned' => 'Unassigned', 'none' => 'None', 'empty' => '(empty)', 'added' => 'Added', 'removed' => 'Removed',
                     'created' => 'created', 'updated' => 'updated', 'deleted' => 'deleted' },
       'diff' => { 'heading' => '%{label} diff', 'omitted' => 'Diff truncated. See the linked page for the full text.' },
       'images' => { 'preparing' => 'Preparing image', 'alt' => 'Image', 'link_label' => 'Image: %{name}' },
@@ -88,16 +102,16 @@ module RedmineSlackNotification
       },
       'due_reminders' => {
         'part_suffix' => ' (%{part}/%{total_parts})',
-        'fallback' => '期日リマインダー%{suffix}: %{count}件（期限超過%{overdue_count}件・本日期日%{today_count}件）',
-        'title' => '📋 *期日リマインダー %{count}件%{suffix}*',
-        'overdue_label' => '🚨 期限超過',
-        'today_label' => '⏰ 本日期日',
-        'upcoming_label' => '📅 期日が近い課題',
-        'group_fallback' => '%{label}: %{count}件',
-        'group_heading' => '*%{label}（%{count}件）*',
-        'group_continued' => '*%{label}（続き）*',
-        'overdue_timing' => '%{days}日超過',
-        'upcoming_timing' => '残り%{days}日',
+        'fallback' => 'Due reminders%{suffix}: %{count} total (overdue: %{overdue_count}, due today: %{today_count})',
+        'title' => '📋 *Due reminders: %{count}%{suffix}*',
+        'overdue_label' => '🚨 Overdue',
+        'today_label' => '⏰ Due today',
+        'upcoming_label' => '📅 Due soon',
+        'group_fallback' => '%{label}: %{count}',
+        'group_heading' => '*%{label} (%{count})*',
+        'group_continued' => '*%{label} (continued)*',
+        'overdue_timing' => '%{days}d overdue',
+        'upcoming_timing' => '%{days}d left',
         'timing_suffix' => ' · %{timing}',
         'issue_line' => '• <%{url}|#%{id} %{subject}> · %{project}%{timing}'
       }
@@ -405,7 +419,7 @@ module RedmineSlackNotification
     end
 
     # Work Object metadata augments the existing event card; it never contains
-    # comments or description bodies. Hidden Issue fields stay hidden here too.
+    # comments or description bodies. Card visibility can be configured separately.
     def with_issue_work_object(result, issue, actor:, action:)
       return result unless RedmineSlackNotification.effective_config.dig('slack', 'work_object_previews') == true
       return result if issue.is_private?
@@ -413,7 +427,7 @@ module RedmineSlackNotification
       attributes = {
         'title' => { 'text' => issue.subject.to_s },
         'display_id' => "##{issue.id}",
-        'display_type' => issue.tracker.name.to_s,
+        'display_type' => message('work_objects', 'display_type'),
         'product_name' => message('work_objects', 'product_name')
       }
       attributes['metadata_last_modified'] = issue.updated_on.to_i if issue.updated_on
@@ -423,8 +437,7 @@ module RedmineSlackNotification
         'priority' => ['priority', -> { issue.priority&.name }],
         'due_date' => ['due_date', -> { issue.due_date&.iso8601 }]
       }.each do |key, (setting, getter)|
-        next unless metadata_enabled?('issue', setting, action: action) ||
-                    (RedmineSlackNotification::WorkObjects.actions_enabled?(issue) && %w[status priority due_date].include?(key))
+        next unless work_object_field_enabled?(issue, setting, action: action)
 
         value = getter.call.to_s
         next if value.empty?
@@ -433,14 +446,13 @@ module RedmineSlackNotification
         fields[key]['type'] = 'slack#/types/date' if key == 'due_date'
       end
       { 'assignee' => ['assignee', :assigned_to], 'created_by' => ['author', :author] }.each do |key, (setting, accessor)|
-        next unless metadata_enabled?('issue', setting, action: action) ||
-                    (key == 'assignee' && RedmineSlackNotification::WorkObjects.actions_enabled?(issue))
+        next unless work_object_field_enabled?(issue, setting, action: action)
 
         user = issue.public_send(accessor)
         if user
           fields[key] = work_object_user_field(user)
-        elsif key == 'assignee' && RedmineSlackNotification::WorkObjects.actions_enabled?(issue)
-          fields[key] = { 'type' => 'slack#/types/user', 'user' => { 'text' => '未割当' } }
+        elsif key == 'assignee'
+          fields[key] = { 'type' => 'slack#/types/user', 'user' => { 'text' => message('values', 'unassigned') } }
         end
       end
       custom_fields = []
@@ -449,23 +461,54 @@ module RedmineSlackNotification
         'tracker' => -> { issue.tracker.name },
         'category' => -> { issue.category&.name },
         'updater' => -> { actor&.name },
-        'target_version' => -> { issue.fixed_version&.name }
+        'target_version' => -> { issue.fixed_version&.name },
+        'start_date' => -> { issue.start_date },
+        'estimated_hours' => -> { issue.estimated_hours }
       }.each do |key, getter|
-        next unless metadata_enabled?('issue', key, action: action)
+        next unless work_object_field_enabled?(issue, key, action: action)
 
         value = getter.call.to_s
         next if value.empty?
 
         custom_fields << { 'key' => key, 'label' => field_label(key), 'type' => 'string', 'value' => value }
       end
+      if !issue.done_ratio.nil? && work_object_field_enabled?(issue, 'done_ratio', action: action)
+        percent = [[issue.done_ratio.to_i, 0].max, 100].min
+        custom_fields << { 'key' => 'done_ratio', 'label' => field_label('done_ratio'), 'type' => 'string',
+                           'value' => "#{percent}%" }
+      end
+      if work_object_field_enabled?(issue, 'description', action: action)
+        description = issue.description.to_s.strip
+        unless description.empty?
+          description = description[0, 1000] + '…' if description.length > 1000
+          fields['description'] = { 'type' => 'string', 'value' => description, 'long' => true }
+        end
+      end
+      if work_object_field_enabled?(issue, 'last_comment', action: action)
+        journal = last_public_comment(issue)
+        if journal
+          body = journal.notes.to_s.strip
+          body = body[0, 1000] + '…' if body.length > 1000
+          timestamp = journal.created_on&.iso8601
+          value = [journal.user&.name || message('values', 'unknown_user'), timestamp].compact.join(' · ')
+          custom_fields << { 'key' => 'last_comment', 'label' => field_label('last_comment'),
+                             'type' => 'string', 'long' => true, 'value' => "#{value}\n#{body}" }
+        end
+      end
       issue_url = url("/issues/#{issue.id}")
       entity_payload = { 'attributes' => attributes, 'fields' => fields }
       entity_payload['custom_fields'] = custom_fields unless custom_fields.empty?
+      available_keys = fields.keys + custom_fields.map { |field| field['key'] }
+      configured_fields = RedmineSlackNotification.effective_config(issue.project).dig('slack', 'work_object_fields')
+      project_fields = RedmineSlackNotification.project_config(issue.project).dig('slack', 'work_object_fields')
+      ordered_keys = (project_fields.is_a?(Hash) ? project_fields.keys : []) +
+                     (configured_fields.is_a?(Hash) ? configured_fields.keys : [])
+      entity_payload['display_order'] = ordered_keys.uniq.map { |key| key == 'author' ? 'created_by' : key }
+                                                   .select { |key| available_keys.include?(key) }
       if RedmineSlackNotification::WorkObjects.actions_enabled?(issue)
-        entity_payload['display_order'] = %w[status assignee priority due_date].select { |key| fields.key?(key) }
         entity_payload['actions'] = { 'primary_actions' => [
-          { 'text' => '課題を編集', 'action_id' => 'redmine_edit_issue' },
-          { 'text' => '担当者を変更', 'action_id' => 'redmine_edit_assignee' }
+          { 'text' => message('work_objects', 'edit_issue'), 'action_id' => 'redmine_edit_issue' },
+          { 'text' => message('work_objects', 'change_assignee'), 'action_id' => 'redmine_edit_assignee' }
         ] }
       end
       result = compact_work_object_notification(result, issue, fields, custom_fields)
@@ -482,6 +525,16 @@ module RedmineSlackNotification
       )
     end
 
+    def work_object_field_enabled?(issue, key, action:)
+      settings = RedmineSlackNotification.effective_config(issue.project).dig('slack', 'work_object_fields')
+      settings.is_a?(Hash) && settings[key] == true
+    end
+
+    def last_public_comment(issue)
+      issue.journals.where(private_notes: false).where.not(notes: [nil, ''])
+           .order(created_on: :desc, id: :desc).detect { |journal| !journal.notes.to_s.strip.empty? }
+    end
+
     def compact_work_object_notification(result, issue, fields, custom_fields)
       keys = fields.keys.map { |key| { 'created_by' => 'author' }.fetch(key, key) } + custom_fields.map { |field| field['key'] }
       labels = keys.map { |key| "*#{text(field_label(key))}*\n" }
@@ -489,7 +542,22 @@ module RedmineSlackNotification
       metadata_heading = "*#{text(section_label('metadata'))}*"
       attachments = Array(result['attachments']).map do |attachment|
         in_metadata = false
-        blocks = Array(attachment['blocks']).map do |block|
+        source_blocks = Array(attachment['blocks']).dup
+        if custom_fields.any? { |field| field['key'] == 'last_comment' }
+          journal = last_public_comment(issue)
+          notes = journal&.notes.to_s
+          if notes.strip.length <= 1000 && !notes.strip.empty?
+            %w[added_comment comment].each do |heading|
+              candidates = [mrkdwn_sections(section_label(heading), notes)]
+              candidates << [section_text("*#{text(section_label(heading))}*\n> #{mrkdwn(notes).gsub("\n", "\n> ")}")]
+              candidates.each do |candidate|
+                index = source_blocks.each_index.find { |i| source_blocks[i, candidate.length] == candidate }
+                source_blocks.slice!(index, candidate.length) if index
+              end
+            end
+          end
+        end
+        blocks = source_blocks.map do |block|
           block_text = block['text'].is_a?(Hash) ? block['text']['text'] : block['text']
           next if block_text == title
           in_metadata = true if block_text == metadata_heading
@@ -516,8 +584,8 @@ module RedmineSlackNotification
       { 'assignee' => issue.assigned_to, 'created_by' => issue.author }.each do |key, user|
         if user
           fields[key] = work_object_user_field(user)
-        elsif key == 'assignee' && RedmineSlackNotification::WorkObjects.actions_enabled?(issue)
-          fields[key] = { 'type' => 'slack#/types/user', 'user' => { 'text' => '未割当' } }
+        elsif key == 'assignee'
+          fields[key] = { 'type' => 'slack#/types/user', 'user' => { 'text' => message('values', 'unassigned') } }
         end
       end
       fields['due_date'] = { 'type' => 'slack#/types/date', 'value' => issue.due_date.iso8601 } if issue.due_date
@@ -532,7 +600,7 @@ module RedmineSlackNotification
         'external_ref' => { 'id' => Digest::SHA256.hexdigest(issue_url), 'type' => 'redmine_issue' },
         'entity_payload' => {
           'attributes' => { 'title' => { 'text' => issue.subject.to_s }, 'display_id' => "##{issue.id}",
-                            'display_type' => issue.tracker.name.to_s, 'product_name' => message('work_objects', 'product_name'),
+                            'display_type' => message('work_objects', 'display_type'), 'product_name' => message('work_objects', 'product_name'),
                             'metadata_last_modified' => issue.updated_on&.to_i }.compact,
           'fields' => fields,
           'custom_fields' => [{ 'key' => 'project', 'label' => field_label('project'), 'type' => 'string', 'value' => issue.project.name.to_s }]

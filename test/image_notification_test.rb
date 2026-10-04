@@ -1457,7 +1457,7 @@ class WorkObjectNotificationTest < Minitest::Test
                             tracker: OpenStruct.new(name: 'Task'), status: OpenStruct.new(name: 'In progress'),
                             priority: OpenStruct.new(name: 'High'), assigned_to: OpenStruct.new(name: 'Alice'),
                             author: @actor, due_date: Date.new(2026, 10, 5), is_private?: false)
-    @settings = { 'slack' => { 'work_object_previews' => true, 'metadata' => { 'issue' => {
+    @settings = { 'slack' => { 'work_object_previews' => true, 'work_object_fields' => { 'status' => true, 'assignee' => true, 'priority' => true, 'due_date' => true, 'author' => true, 'category' => true, 'done_ratio' => true }, 'metadata' => { 'issue' => {
       'status' => true, 'assignee' => true, 'due_date' => true, 'author' => true
     } } } }
   end
@@ -1498,6 +1498,29 @@ class WorkObjectNotificationTest < Minitest::Test
       journal = formatter.journal_payload(@issue, actor: @actor, notes: 'Comment remains')
       assert_includes journal['attachments'].to_json, 'Comment remains'
       refute_includes journal['attachments'].to_json, '|#7 Fix A'
+    end
+  end
+
+  def test_example_documents_all_message_defaults
+    example = YAML.safe_load(File.read(File.expand_path('../config/redmine_slack_notification.yml.example', __dir__)))
+    RedmineSlackNotification::Formatter::DEFAULT_MESSAGES.each do |group, entries|
+      entries.each do |key, value|
+        if value.is_a?(Hash)
+          value.each_key { |nested| assert example.dig('messages', group, key).key?(nested), "#{group}.#{key}.#{nested}" }
+        else
+          assert example.dig('messages', group).key?(key), "#{group}.#{key}"
+        end
+      end
+    end
+  end
+
+  def test_work_object_type_label_is_independent_of_tracker
+    @issue.tracker.name = 'Support'
+    RedmineSlackNotification.stub(:config, @settings) do
+      assert_equal 'Issue', issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'attributes', 'display_type')
+      assert_equal 'Issue', RedmineSlackNotification::Formatter.issue_work_object_details(@issue).dig('entity_payload', 'attributes', 'display_type')
+      @settings['messages'] = { 'work_objects' => { 'display_type' => 'Ticket' } }
+      assert_equal 'Ticket', issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'attributes', 'display_type')
     end
   end
 
@@ -1591,7 +1614,7 @@ class WorkObjectNotificationTest < Minitest::Test
       assert_equal %w[redmine_edit_issue redmine_edit_assignee], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
       @settings['slack']['work_object_actions'] = false
       hidden = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
-      assert_empty hidden['fields']
+      refute_empty hidden['fields']
       refute hidden.key?('actions')
     end
   end
@@ -1609,8 +1632,156 @@ class WorkObjectNotificationTest < Minitest::Test
 
       @settings['projects'] = { 'agentic' => { 'slack' => { 'work_object_actions' => false } } }
       hidden = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
-      assert_empty hidden['fields']
+      refute_empty hidden['fields']
       refute hidden.key?('actions')
+    end
+  end
+
+  def test_action_card_shows_category_when_set_even_if_notification_metadata_is_hidden
+    @settings['slack']['work_object_actions'] = true
+    @settings['slack']['metadata'] = { 'issue' => { 'category' => false } }
+    @issue.category = OpenStruct.new(name: 'Support')
+    RedmineSlackNotification.stub(:config, @settings) do
+      entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
+      assert_equal 'Support', entity['custom_fields'].find { |field| field['key'] == 'category' }['value']
+      assert_includes entity['display_order'], 'category'
+      @issue.category = nil
+      entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
+      refute Array(entity['custom_fields']).any? { |field| field['key'] == 'category' }
+    end
+  end
+
+  def test_work_object_field_switches_override_actions_and_project_defaults
+    @settings['slack']['work_object_actions'] = true
+    @settings['slack']['work_object_fields'] = {}
+    @issue.fixed_version = OpenStruct.new(name: 'Release 1')
+    @issue.start_date = Date.new(2026, 10, 1)
+    @issue.estimated_hours = 8
+    @issue.category = OpenStruct.new(name: 'Support')
+    @issue.done_ratio = 65
+    RedmineSlackNotification.stub(:config, @settings) do
+      entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
+      assert_empty entity['fields']
+      assert_nil entity['custom_fields']
+      refute_empty entity.dig('actions', 'primary_actions')
+      %w[status priority due_date assignee author project tracker category updater target_version start_date estimated_hours done_ratio description].each do |key|
+        @settings['slack']['work_object_fields'] = { key => true }
+        entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
+        keys = entity['fields'].keys + Array(entity['custom_fields']).map { |field| field['key'] }
+        expected_key = key == 'author' ? 'created_by' : key
+        assert_equal [expected_key], keys, key
+        assert_includes entity['display_order'], expected_key
+        @settings['slack']['work_object_fields'][key] = false
+        hidden = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
+        assert_empty hidden['fields']
+        assert_nil hidden['custom_fields']
+      end
+      @settings['slack']['work_object_fields'] = { 'category' => true }
+      @settings['projects'] = { 'agentic' => { 'slack' => { 'work_object_fields' => { 'category' => false, 'done_ratio' => true } } } }
+      entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
+      assert_equal ['done_ratio'], entity['custom_fields'].map { |field| field['key'] }
+      assert_equal ['done_ratio'], entity['display_order']
+    end
+  end
+
+  def test_last_comment_excludes_private_and_empty_notes_and_compacts_only_full_duplicate
+    relation = Class.new(Array) do
+      def where(filters = nil)
+        filters ? self.class.new(select { |row| filters.all? { |key, value| row.public_send(key) == value } }) : self
+      end
+      def not(filters)
+        self.class.new(reject { |row| filters.any? { |key, values| values.include?(row.public_send(key)) } })
+      end
+      def order(**columns)
+        raise 'Unexpected order' unless columns == { created_on: :desc, id: :desc }
+        self.class.new(sort_by { |row| [row.created_on, row.id] }.reverse)
+      end
+    end
+    stamp = Time.utc(2026, 10, 4, 5)
+    public_note = OpenStruct.new(id: 1, private_notes: false, notes: 'Public update', user: @actor, created_on: stamp)
+    @issue.journals = relation.new([
+      public_note,
+      OpenStruct.new(id: 2, private_notes: true, notes: 'Secret', user: @actor, created_on: stamp + 1),
+      OpenStruct.new(id: 3, private_notes: false, notes: '  ', user: @actor, created_on: stamp + 2)
+    ])
+    @settings['slack']['work_object_fields'] = { 'last_comment' => true }
+    formatter = RedmineSlackNotification::Formatter
+    RedmineSlackNotification.stub(:config, @settings) do
+      payload = formatter.journal_payload(@issue, actor: @actor, notes: 'Public update')
+      comment = payload.dig('metadata', 'entities', 0, 'entity_payload', 'custom_fields').find { |field| field['key'] == 'last_comment' }
+      assert_equal "Alice · 2026-10-04T05:00:00Z\nPublic update", comment['value']
+      refute_includes payload.to_json, 'Secret'
+      refute_includes payload['attachments'].to_json, 'Public update'
+      payload = formatter.journal_payload(@issue, actor: @actor, notes: 'Different notification')
+      assert_includes payload['attachments'].to_json, 'Different notification'
+      public_note.notes = 'a' * 1001
+      payload = formatter.journal_payload(@issue, actor: @actor, notes: public_note.notes)
+      comment = payload.dig('metadata', 'entities', 0, 'entity_payload', 'custom_fields').find { |field| field['key'] == 'last_comment' }
+      assert comment['value'].end_with?('a' * 1000 + '…')
+      assert_includes payload['attachments'].to_json, 'a' * 1001
+      public_note.private_notes = true
+      payload = issue_payload
+      refute Array(payload.dig('metadata', 'entities', 0, 'entity_payload', 'custom_fields')).any? { |field| field['key'] == 'last_comment' }
+      @settings['slack']['work_object_fields']['last_comment'] = false
+      @issue.journals = nil
+      issue_payload
+    end
+  end
+
+  def test_card_fields_follow_yaml_order_with_or_without_actions
+    @settings['slack']['work_object_fields'] = {
+      'description' => true, 'last_comment' => true, 'category' => true, 'done_ratio' => true, 'status' => true
+    }
+    @issue.category = OpenStruct.new(name: 'Support')
+    @issue.done_ratio = 65
+    journal = OpenStruct.new(notes: 'Latest note', user: @actor, created_on: Time.utc(2026, 10, 4))
+    RedmineSlackNotification.stub(:config, @settings) do
+      RedmineSlackNotification::Formatter.stub(:last_public_comment, journal) do
+        [true, false].each do |actions|
+          @settings['slack']['work_object_actions'] = actions
+          entity = issue_payload.dig('metadata', 'entities', 0, 'entity_payload')
+          assert_equal %w[description last_comment category done_ratio status], entity['display_order']
+          @settings['slack']['work_object_fields']['description'] = false
+          entity = issue_payload.dig('metadata', 'entities', 0, 'entity_payload')
+          assert_equal %w[last_comment category done_ratio status], entity['display_order']
+          @settings['slack']['work_object_fields']['description'] = true
+        end
+      end
+    end
+  end
+
+  def test_project_card_order_precedes_inherited_fields_and_maps_author
+    @settings['slack']['work_object_fields'] = { 'status' => true, 'author' => true, 'priority' => true }
+    @settings['projects'] = { 'agentic' => { 'slack' => { 'work_object_fields' => {
+      'priority' => true, 'author' => true, 'description' => true, 'category' => false
+    } } } }
+    RedmineSlackNotification.stub(:config, @settings) do
+      entity = issue_payload.dig('metadata', 'entities', 0, 'entity_payload')
+      assert_equal %w[priority created_by description status], entity['display_order']
+    end
+  end
+
+  def test_card_description_is_optional_and_truncated
+    @settings['slack']['work_object_fields'] = { 'description' => true }
+    RedmineSlackNotification.stub(:config, @settings) do
+      @issue.description = 'x' * 1001
+      field = issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'fields', 'description')
+      assert_equal 'x' * 1000 + '…', field['value']
+      assert_equal true, field['long']
+      @issue.description = '  '
+      refute issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'fields').key?('description')
+    end
+  end
+
+  def test_work_object_progress_displays_exact_percentage
+    @settings['slack']['work_object_actions'] = true
+    RedmineSlackNotification.stub(:config, @settings) do
+      { 0 => '0%', 65 => '65%', 100 => '100%' }.each do |percent, meter|
+        @issue.done_ratio = percent
+        entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
+        assert_equal meter, entity['custom_fields'].find { |field| field['key'] == 'done_ratio' }['value']
+        assert_includes entity['display_order'], 'done_ratio'
+      end
     end
   end
 
@@ -1619,7 +1790,7 @@ class WorkObjectNotificationTest < Minitest::Test
     @settings['slack']['work_object_actions'] = true
     RedmineSlackNotification.stub(:config, @settings) do
       fields = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload', 'fields')
-      assert_equal({ 'text' => '未割当' }, fields.dig('assignee', 'user'))
+      assert_equal({ 'text' => 'Unassigned' }, fields.dig('assignee', 'user'))
     end
   end
 
@@ -1671,8 +1842,8 @@ class WorkObjectNotificationTest < Minitest::Test
     end
   end
 
-  def test_hidden_metadata_is_not_exposed_in_work_object
-    @settings['slack']['metadata']['issue'] = false
+  def test_omitted_card_fields_are_hidden_even_with_notification_metadata
+    @settings['slack'].delete('work_object_fields')
     RedmineSlackNotification.stub(:config, @settings) do
       entity = issue_payload.dig('metadata', 'entities', 0, 'entity_payload')
       assert_empty entity['fields']
@@ -1681,14 +1852,14 @@ class WorkObjectNotificationTest < Minitest::Test
   end
 
   def test_project_field_override_is_applied
-    @settings['projects'] = { 'agentic' => { 'slack' => { 'metadata' => { 'issue' => {
+    @settings['projects'] = { 'agentic' => { 'slack' => { 'work_object_fields' => {
       'status' => false, 'project' => false, 'priority' => false
-    } } } } }
+    } } } }
     RedmineSlackNotification.stub(:config, @settings) do
       entity = issue_payload.dig('metadata', 'entities', 0, 'entity_payload')
       refute entity['fields'].key?('status')
       refute entity['fields'].key?('priority')
-      refute entity['custom_fields'].any? { |field| field['key'] == 'project' }
+      refute Array(entity['custom_fields']).any? { |field| field['key'] == 'project' }
       assert entity['fields'].key?('assignee')
     end
   end
@@ -1999,7 +2170,7 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal '4', fields.dig('priority', 'edit', 'select', 'current_value')
     assert_equal true, fields.dig('due_date', 'edit', 'enabled')
     metadata = capture_details.first[1]['metadata']
-    assert_equal 'redmine_assign_to_me', metadata.dig('entity_payload', 'actions', 'primary_actions', 0, 'action_id')
+    assert_equal %w[redmine_edit_issue redmine_assign_to_me], metadata.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
     assert_equal 'new_comment', metadata.dig('entity_payload', 'custom_fields', 1, 'key')
     @settings['slack']['work_object_actions'] = false
     refute capture_details.first[1]['metadata'].dig('entity_payload', 'actions')
@@ -2091,11 +2262,42 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_empty capture_interaction(button)
   end
 
+  def test_work_object_ui_labels_can_be_overridden_in_yaml
+    prepare_action_issue
+    @settings['messages'] = {
+      'work_objects' => { 'edit_issue' => '課題を編集', 'add_comment' => 'コメント追加',
+        'edit_title' => '編集 #%{id}', 'save' => '保存', 'cancel' => '戻る', 'comment_placeholder' => '入力してください' },
+      'fields' => { 'status' => '状態', 'priority' => '優先度' },
+      'values' => { 'unassigned' => '未割当' }
+    }
+    metadata = capture_details.first[1]['metadata']
+    assert_equal '課題を編集', metadata.dig('entity_payload', 'actions', 'primary_actions', 0, 'text')
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_edit_issue' }])
+    modal = capture_interaction(button).first[1]['view']
+    assert_equal '編集 #7', modal.dig('title', 'text')
+    assert_equal '保存', modal.dig('submit', 'text')
+    assert_equal '戻る', modal.dig('close', 'text')
+    assert_equal '状態', modal['blocks'].find { |block| block['block_id'] == 'status' }.dig('label', 'text')
+    @settings['messages']['work_objects']['edit_title'] = '%{missing}'
+    assert_equal 'Edit issue #7', capture_interaction(button).first[1].dig('view', 'title', 'text')
+  end
+
+  def test_detail_edit_action_opens_the_issue_modal
+    prepare_action_issue
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_edit_issue' }])
+    calls = capture_interaction(button)
+    assert_equal 'views.open', calls.first[0]
+    assert_equal 'redmine_edit_issue', calls.first[1].dig('view', 'callback_id')
+    refute_empty calls.first[1].dig('view', 'blocks')
+    @issue.define_singleton_method(:attributes_editable?) { |_viewer| false }
+    assert_empty capture_interaction(button)
+  end
+
   def test_assign_to_me_is_hidden_when_already_assigned_to_viewer
     prepare_action_issue
     @issue.assigned_to_id = @user.id
     metadata = capture_details.first[1]['metadata']
-    refute metadata.dig('entity_payload', 'actions')
+    assert_equal ['redmine_edit_issue'], metadata.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
     button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_assign_to_me' }])
     capture_interaction(button)
     assert_empty @issue.events
@@ -2103,7 +2305,7 @@ class WorkObjectDetailsTest < Minitest::Test
 
     @issue.assigned_to_id = nil
     metadata = capture_details.first[1]['metadata']
-    assert_equal 'redmine_assign_to_me', metadata.dig('entity_payload', 'actions', 'primary_actions', 0, 'action_id')
+    assert_equal %w[redmine_edit_issue redmine_assign_to_me], metadata.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
   end
 
   def test_assignee_picker_and_details_allow_unassignment_and_recheck_permissions
@@ -2124,7 +2326,7 @@ class WorkObjectDetailsTest < Minitest::Test
     capture_interaction(edit)
     assert_nil @issue.assigned_to_id
     fields = capture_details.first[1].dig('metadata', 'entity_payload', 'fields')
-    assert_equal '未割当', fields.dig('assignee', 'value')
+    assert_equal 'Unassigned', fields.dig('assignee', 'value')
     selection = edit['view']['state']['values']['assignee']['assignee.input']['selected_option']
     selection['value'] = @user.id.to_s
     capture_interaction(edit)
@@ -2154,6 +2356,7 @@ class WorkObjectDetailsTest < Minitest::Test
   end
 
   def test_main_card_opens_modal_and_saves_priority_due_date_and_status
+    @settings['slack']['work_object_fields'] = { 'priority' => true }
     prepare_action_issue
     click = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_edit_issue' }])
     click['container'].merge!('type' => 'message_attachment', 'channel_id' => 'C123', 'message_ts' => '123.456')
@@ -2915,25 +3118,25 @@ class DueReminderTest < Minitest::Test
     ]
     RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
       digest = RedmineSlackNotification::Formatter.due_digest_payload(issues, today: Date.current)
-      assert_includes digest.dig('blocks', 0, 'text', 'text'), '期日リマインダー 3件'
+      assert_includes digest.dig('blocks', 0, 'text', 'text'), 'Due reminders: 3'
       assert_equal 3, digest['attachments'].size
       assert_equal ['#D92D20', '#F79009', RedmineSlackNotification::Formatter.attachment_color],
                    digest['attachments'].map { |attachment| attachment['color'] }
       overdue, current, upcoming = digest['attachments'].map do |attachment|
         attachment['blocks'].map { |block| block.dig('text', 'text') }.join("\n")
       end
-      assert_includes overdue, '期限超過（1件）'
+      assert_includes overdue, 'Overdue (1)'
       assert_includes overdue, 'Fix &lt;problem&gt;'
-      assert_includes overdue, '2日超過'
+      assert_includes overdue, '2d overdue'
       refute_includes overdue, '2026-09-28'
       refute_includes overdue, 'Due today'
-      assert_includes current, '本日期日（1件）'
+      assert_includes current, 'Due today (1)'
       assert_includes current, 'Due today'
       refute_includes current, '2026-09-30'
       refute_includes current, 'Fix &lt;problem&gt;'
-      assert_includes upcoming, '期日が近い課題（1件）'
+      assert_includes upcoming, 'Due soon (1)'
       assert_includes upcoming, 'Due soon'
-      assert_includes upcoming, '残り2日'
+      assert_includes upcoming, '2d left'
       refute_includes upcoming, '2026-10-02'
     end
   end
@@ -3011,7 +3214,7 @@ class DueReminderTest < Minitest::Test
     RedmineSlackNotification.stub(:config, config) do
       RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
         digest = RedmineSlackNotification::Formatter.due_digest_payload([issue], today: Date.current)
-        assert_equal '📋 *期日リマインダー 1件*', digest.dig('blocks', 0, 'text', 'text')
+        assert_equal '📋 *Due reminders: 1*', digest.dig('blocks', 0, 'text', 'text')
       end
     end
   end
@@ -3047,7 +3250,7 @@ class DueReminderTest < Minitest::Test
               assert_equal 'D123', posts.first[1]
               assert_equal 'token', posts.first[2]
               assert_equal '#F79009', posts.first[0].dig('attachments', 0, 'color')
-              assert_includes posts.first[0].dig('blocks', 0, 'text', 'text'), '期日リマインダー 11件'
+              assert_includes posts.first[0].dig('blocks', 0, 'text', 'text'), 'Due reminders: 11'
               body = posts.first[0].dig('attachments', 0, 'blocks').map { |block| block.dig('text', 'text') }.join("\n")
               assert_includes body, '#11 Issue 11'
             end

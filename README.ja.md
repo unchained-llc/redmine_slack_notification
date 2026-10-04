@@ -177,8 +177,7 @@ slack:
       target_version: true
       relations: true
       custom_fields:
-        default: false
-        '42': true
+            '42': true
 ```
 
 Issue の更新通知では、変更前後の値を示す独立した **Changes** セクションも表示します。表示対象の項目の変更は常に表示します。初期状態では非表示項目の変更も表示しますが、`slack.issue_changes_when_hidden: false` で省略できます。
@@ -566,3 +565,37 @@ ruby -Itest test/slack_events_controller_test.rb
 ```
 
 テストはスタブを使って通知の整形と配信ロジックを確認します。追加の `ruby -Itest test/thread_comments_persistence_test.rb` は ActiveRecord と sqlite3 が利用できる環境で実行し、メモリ内のテスト用チケット・コメントテーブルで保存、重複抑制、権限拒否、通知ループ抑制を確認します。本番DBやRedisへ接続せず、Slackへの投稿や稼働中のRedmine環境も検証しません。
+
+### Work Object カードの表示項目
+
+カード内の項目は `work_object_fields` のYAML記載順に表示します。`false` の項目と空の項目は飛ばします。Description／Last commentの末尾固定はありません。プロジェクト別設定がある場合は、その記載順を先に使い、引き継いだ項目を全体設定の順で後ろに追加します。
+
+`slack.work_object_fields` でカード本体の全対応項目を個別に表示・非表示にできます。`true` が表示、`false` が非表示です。省略した項目は非表示です。この設定は `work_object_actions` や通知本文の `metadata.issue` より優先します。項目が空なら表示しません（担当者は「未割当」、進捗は `0%` も表示）。進捗はバーではなく正確な％表示です。
+
+設定全体を省略した場合はカード本体の項目を表示しません。`projects.<identifier>.slack.work_object_fields` でプロジェクト別に上書きできます。対象はメインカードの項目で、必須の件名・チケット番号、右ペインの詳細・編集権限は変更しません。
+
+```yaml
+slack:
+  work_object_fields:
+    status: true
+    assignee: true
+    priority: true
+    due_date: true
+    category: true
+    done_ratio: true
+    project: false
+    tracker: false
+    author: false
+    updater: false
+    target_version: false
+    start_date: false
+    estimated_hours: false
+    description: false
+    last_comment: false
+```
+
+`last_comment: true` は最後の公開コメントの投稿者・ISO 8601日時・本文を表示します。非公開・空のコメントは除外し、本文は1,000文字で省略します。最後のコメントが通知本文と完全一致し、省略がない場合のみ本文側の重複を除きます。編集・削除差分は残します。カード再読み込み時に最新の公開コメントを取得します。
+
+`description: true` でカードに説明文を表示します。空欄は非表示、1,000文字を超える場合は省略します。右ペインの説明全文は従来どおりです。
+
+表示文言の既定値は英語です。`messages.work_objects` でボタン・編集画面・エラー文言、`messages.fields` で編集項目名、`messages.values.unassigned` で未割当表示を変更できます。全キーを設定例に掲載しています。`edit_title` と `edit_failed` は `%{id}` を使用できます。Slack自身が表示する標準項目名・メニューはSlackの言語設定に従います。
