@@ -1482,6 +1482,27 @@ class WorkObjectNotificationTest < Minitest::Test
     assert_includes enabled['attachments'].to_json, 'Issue body'
   end
 
+  def test_thread_parent_resolves_own_work_object_unfurl_without_subject
+    parent = { 'ts' => '1000.000001', 'bot_id' => 'B123', 'app_id' => 'ATEST',
+               'attachments' => [{ 'is_app_unfurl' => true, 'bot_id' => 'B123', 'app_id' => 'ATEST',
+                                   'from_url' => 'https://redmine.example.com/issues/7',
+                                   'title_link' => 'https://redmine.example.com/issues/7' }] }
+    resolver = RedmineSlackNotification::ThreadComments
+    Issue.stub(:find_by, @issue) do
+      assert_equal @issue, resolver.issue_from_parent(parent, 'ATEST', parent['ts'])
+      assert_nil resolver.issue_from_parent(parent, 'AOTHER', parent['ts'])
+      assert_nil resolver.issue_from_parent(parent, 'ATEST', '1000.999999')
+      %w[app_id bot_id from_url title_link].each do |key|
+        original = parent['attachments'][0][key]
+        parent['attachments'][0][key] = 'invalid'
+        assert_nil resolver.issue_from_parent(parent, 'ATEST', parent['ts'])
+        parent['attachments'][0][key] = original
+      end
+      parent.delete('bot_id')
+      assert_nil resolver.issue_from_parent(parent, 'ATEST', parent['ts'])
+    end
+  end
+
   def test_compaction_preserves_changes_and_nonduplicated_metadata
     formatter = RedmineSlackNotification::Formatter
     blocks = [

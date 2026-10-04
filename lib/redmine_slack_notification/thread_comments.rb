@@ -45,10 +45,18 @@ module RedmineSlackNotification
     def issue_from_parent(message, app_id, thread_ts)
       return unless message.is_a?(Hash) && message['ts'] == thread_ts && message['bot_id'] &&
                     (message['app_id'] || message.dig('bot_profile', 'app_id')) == app_id
-      # Only our formatter's subject section identifies the Issue. Never scan
-      # user comments or arbitrary links in a message for a target Issue.
+      # Accept our subject section or our own Work Object unfurl. Never scan
+      # user comments or arbitrary links for a target Issue.
       Array(message['attachments']).each do |attachment|
         next unless attachment.is_a?(Hash)
+        if attachment['is_app_unfurl'] == true && attachment['app_id'] == app_id &&
+           attachment['bot_id'] == message['bot_id']
+          url = attachment['from_url'].to_s
+          id = url.match(%r{/issues/([1-9]\d*)\z})
+          if id && url == Formatter.url("/issues/#{id[1]}") && attachment['title_link'] == url
+            return Issue.find_by(id: id[1].to_i)
+          end
+        end
         subject = attachment.dig('blocks', 1, 'text', 'text').to_s
         match = subject.match(/\A\*<([^|>]+)\|/)
         next unless match
