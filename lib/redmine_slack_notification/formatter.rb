@@ -465,11 +465,12 @@ module RedmineSlackNotification
         entity_payload['display_order'] = %w[status assignee priority due_date].select { |key| fields.key?(key) }
         entity_payload['actions'] = { 'primary_actions' => [
           { 'text' => '課題を編集', 'action_id' => 'redmine_edit_issue' },
-          { 'text' => '自分に割り当てる', 'action_id' => 'redmine_assign_to_me' }
+          { 'text' => '担当者を変更', 'action_id' => 'redmine_edit_assignee' }
         ] }
       end
+      result = compact_work_object_notification(result, issue, fields, custom_fields)
       result.merge(
-        'text' => link_issue_reference(result.dig('attachments', 0, 'fallback'), issue.id),
+        'text' => '',
         'metadata' => { 'entities' => [{
           'entity_type' => 'slack#/entities/task',
           'url' => issue_url,
@@ -479,6 +480,32 @@ module RedmineSlackNotification
           'entity_payload' => entity_payload
         }] }
       )
+    end
+
+    def compact_work_object_notification(result, issue, fields, custom_fields)
+      keys = fields.keys.map { |key| { 'created_by' => 'author' }.fetch(key, key) } + custom_fields.map { |field| field['key'] }
+      labels = keys.map { |key| "*#{text(field_label(key))}*\n" }
+      title = "*<#{url('/issues/' + issue.id.to_s)}|##{issue.id} #{text(issue.subject)}>*"
+      metadata_heading = "*#{text(section_label('metadata'))}*"
+      attachments = Array(result['attachments']).map do |attachment|
+        in_metadata = false
+        blocks = Array(attachment['blocks']).map do |block|
+          block_text = block['text'].is_a?(Hash) ? block['text']['text'] : block['text']
+          next if block_text == title
+          in_metadata = true if block_text == metadata_heading
+          if in_metadata && block['fields']
+            remaining = block['fields'].reject { |field| labels.any? { |label| field['text'].to_s.start_with?(label) } }
+            next if remaining.empty?
+            block = block.merge('fields' => remaining)
+          end
+          block
+        end
+        blocks.compact!
+        blocks = blocks.each_with_index.reject { |block, index| block['text'].is_a?(Hash) && block['text']['text'] == metadata_heading && !blocks[index + 1]&.key?('fields') }.map(&:first)
+        blocks.pop while blocks.last && blocks.last['type'] == 'divider'
+        attachment.merge('blocks' => blocks)
+      end
+      result.merge('attachments' => attachments)
     end
 
     def issue_work_object_details(issue)

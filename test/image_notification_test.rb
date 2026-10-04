@@ -1466,7 +1466,7 @@ class WorkObjectNotificationTest < Minitest::Test
     RedmineSlackNotification::Formatter.issue_payload(@issue, actor: @actor, action: action)
   end
 
-  def test_preview_is_opt_in_and_does_not_change_existing_cards
+  def test_preview_is_opt_in_and_removes_duplicate_fields_only_when_enabled
     [nil, false, 'true'].each do |value|
       RedmineSlackNotification.stub(:config, { 'slack' => { 'work_object_previews' => value } }) do
         refute issue_payload.key?('metadata')
@@ -1475,8 +1475,30 @@ class WorkObjectNotificationTest < Minitest::Test
     end
     original = RedmineSlackNotification.stub(:config, @settings.merge('slack' => @settings['slack'].merge('work_object_previews' => false))) { issue_payload }
     enabled = RedmineSlackNotification.stub(:config, @settings) { issue_payload }
-    assert_equal original['attachments'], enabled['attachments']
-    assert_equal RedmineSlackNotification::Formatter.link_issue_reference(original.dig('attachments', 0, 'fallback'), @issue.id), enabled['text']
+    assert_equal original.dig('attachments', 0, 'fallback'), enabled.dig('attachments', 0, 'fallback')
+    assert_equal '', enabled['text']
+    refute_includes enabled['attachments'].to_json, '*Status*'
+    refute_includes enabled['attachments'].to_json, '|#7 Fix A'
+    assert_includes enabled['attachments'].to_json, 'Issue body'
+  end
+
+  def test_compaction_preserves_changes_and_nonduplicated_metadata
+    formatter = RedmineSlackNotification::Formatter
+    blocks = [
+      { 'type' => 'section', 'fields' => [{ 'text' => "*Status*\nOpen → Closed" }] },
+      formatter.section_text('*Metadata*'),
+      { 'type' => 'section', 'fields' => [{ 'text' => "*Status*\nClosed" }, { 'text' => "*Start date*\n2026-10-01" }] }
+    ]
+    RedmineSlackNotification.stub(:config, @settings) do
+      result = formatter.compact_work_object_notification({ 'attachments' => [{ 'blocks' => blocks }] }, @issue, { 'status' => {} }, [])
+      output = result.to_json
+      assert_includes output, 'Open → Closed'
+      assert_includes output, '2026-10-01'
+      refute_includes output, '*Status*\\nClosed'
+      journal = formatter.journal_payload(@issue, actor: @actor, notes: 'Comment remains')
+      assert_includes journal['attachments'].to_json, 'Comment remains'
+      refute_includes journal['attachments'].to_json, '|#7 Fix A'
+    end
   end
 
   def test_product_name_is_configurable_for_previews_and_details_with_project_override
@@ -1566,7 +1588,7 @@ class WorkObjectNotificationTest < Minitest::Test
       assert_equal 'High', entity.dig('fields', 'priority', 'value')
       assert_equal '2026-10-05', entity.dig('fields', 'due_date', 'value')
       assert_equal 'Alice', entity.dig('fields', 'assignee', 'user', 'text')
-      assert_equal %w[redmine_edit_issue redmine_assign_to_me], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
+      assert_equal %w[redmine_edit_issue redmine_edit_assignee], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
       @settings['slack']['work_object_actions']['issue_ids'] = [8]
       hidden = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
       assert_empty hidden['fields']
@@ -1583,7 +1605,7 @@ class WorkObjectNotificationTest < Minitest::Test
       entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
       assert_equal 'Alice', entity.dig('fields', 'assignee', 'user', 'text')
       assert_equal 'In progress', entity.dig('fields', 'status', 'value')
-      assert_equal %w[redmine_edit_issue redmine_assign_to_me], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
+      assert_equal %w[redmine_edit_issue redmine_edit_assignee], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
 
       @settings['projects'] = { 'agentic' => { 'slack' => { 'work_object_actions' => { 'enabled' => false } } } }
       hidden = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
@@ -1851,7 +1873,7 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal 1, entities.length
     assert_equal @url, entities.first['app_unfurl_url']
     assert_equal 'Current title', entities.first.dig('entity_payload', 'attributes', 'title', 'text')
-    assert_equal %w[redmine_edit_issue redmine_assign_to_me], entities.first.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
+    assert_equal %w[redmine_edit_issue redmine_edit_assignee], entities.first.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
   end
 
   def test_link_unfurl_uses_message_target_and_rejects_inaccessible_issues
@@ -2067,6 +2089,38 @@ class WorkObjectDetailsTest < Minitest::Test
 
     @settings['slack']['work_object_actions']['issue_ids'] = [8]
     assert_empty capture_interaction(button)
+  end
+
+  def test_assignee_picker_and_details_allow_unassignment_and_recheck_permissions
+    prepare_action_issue
+    @issue.assigned_to_id = @user.id
+    fields = capture_details.first[1].dig('metadata', 'entity_payload', 'fields')
+    assert_equal 'string', fields.dig('assignee', 'type')
+    refute fields['assignee'].key?('user')
+    assert_equal @user.id.to_s, fields.dig('assignee', 'edit', 'select', 'current_value')
+    assert_equal ['none', @user.id.to_s], fields.dig('assignee', 'edit', 'select', 'static_options').map { |o| o['value'] }
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_edit_assignee' }])
+    button['container'].merge!('type' => 'message_attachment', 'channel_id' => 'C123', 'message_ts' => '123.456')
+    calls = capture_interaction(button)
+    assert_equal 'views.open', calls.first[0]
+    assert_equal ['assignee'], calls.first[1].dig('view', 'blocks').map { |b| b['block_id'] }
+    edit = action_payload('view_submission', 'view')
+    edit['view']['state'] = { 'values' => { 'assignee' => { 'assignee.input' => { 'selected_option' => { 'value' => 'none' } } } } }
+    capture_interaction(edit)
+    assert_nil @issue.assigned_to_id
+    fields = capture_details.first[1].dig('metadata', 'entity_payload', 'fields')
+    assert_equal '未割当', fields.dig('assignee', 'value')
+    selection = edit['view']['state']['values']['assignee']['assignee.input']['selected_option']
+    selection['value'] = @user.id.to_s
+    capture_interaction(edit)
+    assert_equal @user.id, @issue.assigned_to_id
+    selection['value'] = '999'
+    calls = capture_interaction(edit)
+    assert_equal @user.id, @issue.assigned_to_id
+    assert_equal 'edit_error', calls.first[1].dig('error', 'status')
+    @issue.define_singleton_method(:safe_attribute?) { |attribute, _viewer| attribute != 'assigned_to_id' }
+    assert_empty capture_interaction(button)
+    refute capture_details.first[1].dig('metadata', 'entity_payload', 'fields', 'assignee', 'edit')
   end
 
   def test_disallowed_status_and_unmapped_user_cannot_edit

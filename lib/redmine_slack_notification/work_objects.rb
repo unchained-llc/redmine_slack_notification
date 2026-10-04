@@ -86,6 +86,21 @@ module RedmineSlackNotification
       return metadata unless actions_enabled?(issue)
 
       fields = metadata.fetch('entity_payload').fetch('fields')
+      if issue.attributes_editable?(viewer) && issue.safe_attribute?('assigned_to_id', viewer)
+        options = assignee_options(issue)
+        if options
+          selected_id = (issue.assigned_to_id || 'none').to_s
+          # Slack user fields use a workspace-wide picker instead of static options.
+          fields['assignee'] = {
+            'type' => 'string',
+            'value' => options.find { |option| option['value'] == selected_id }.dig('text', 'text'),
+            'edit' => {
+              'enabled' => true,
+              'select' => { 'current_value' => selected_id, 'static_options' => options }
+            }
+          }
+        end
+      end
       if issue.attributes_editable?(viewer) && issue.safe_attribute?('status_id', viewer)
         statuses = issue.new_statuses_allowed_to(viewer)
         if statuses.any? { |status| status.id == issue.status_id }
@@ -136,7 +151,14 @@ module RedmineSlackNotification
                                 'text' => { 'type' => 'plain_text', 'text' => record.name.to_s } } }
     end
 
-    def edit_modal(issue, viewer, source)
+    def assignee_options(issue)
+      users = issue.assignable_users.to_a
+      return unless users.length <= 99 && (issue.assigned_to_id.nil? || users.any? { |user| user.id == issue.assigned_to_id })
+
+      [{ 'value' => 'none', 'text' => { 'type' => 'plain_text', 'text' => '未割当' } }] + select_options(users)
+    end
+
+    def edit_modal(issue, viewer, source, assignee_only: false)
       return unless issue.attributes_editable?(viewer)
 
       blocks = []
@@ -149,9 +171,8 @@ module RedmineSlackNotification
         blocks << select_input('priority', '優先度', priorities, issue.priority_id) if priorities.any? { |priority| priority.id == issue.priority_id }
       end
       if issue.safe_attribute?('assigned_to_id', viewer)
-        users = issue.assignable_users.to_a
-        if users.length <= 99 && (issue.assigned_to_id.nil? || users.any? { |user| user.id == issue.assigned_to_id })
-          options = [{ 'value' => 'none', 'text' => { 'type' => 'plain_text', 'text' => '未割当' } }] + select_options(users)
+        options = assignee_options(issue)
+        if options
           blocks << { 'type' => 'input', 'block_id' => 'assignee',
                       'label' => { 'type' => 'plain_text', 'text' => '担当者' },
                       'element' => { 'type' => 'static_select', 'action_id' => 'assignee',
@@ -171,6 +192,7 @@ module RedmineSlackNotification
                     'element' => { 'type' => 'plain_text_input', 'action_id' => 'new_comment', 'multiline' => true,
                                    'max_length' => 3000 } }
       end
+      blocks.select! { |block| block['block_id'] == 'assignee' } if assignee_only
       return if blocks.empty?
 
       context = source.slice('entity_url', 'external_ref', 'channel_id', 'message_ts')
@@ -327,8 +349,8 @@ module RedmineSlackNotification
           return unless actions.is_a?(Array) && actions.length == 1
           action = actions.first
           return unless action.is_a?(Hash)
-          if action['action_id'] == 'redmine_edit_issue' && source['type'] == 'message_attachment'
-            form = edit_modal(issue, viewer, source)
+          if %w[redmine_edit_issue redmine_edit_assignee].include?(action['action_id']) && source['type'] == 'message_attachment'
+            form = edit_modal(issue, viewer, source, assignee_only: action['action_id'] == 'redmine_edit_assignee')
             return unless form && payload['trigger_id'].to_s != ''
             return RedmineSlackNotification.slack_api('views.open', {
               'trigger_id' => payload['trigger_id'], 'view' => form
