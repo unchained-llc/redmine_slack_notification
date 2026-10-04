@@ -74,6 +74,14 @@ module RedmineSlackNotification
         rows = scope.order(updated_on: :desc).limit(100).to_a.select { |issue| authorized_project?(issue.project, app, team) }.first(10)
         return yield(rows.first) if rows.one? && block_given?
         rows.empty? ? [section(message('empty'))] : issue_list_payload(rows, command)
+      when 'status', 'assign'
+        id = argument.to_s.sub(/\A#/, '')
+        return [section(message('help'))] unless id.match?(/\A[1-9]\d*\z/)
+        issue = editable_issue(id, viewer, app, team, command)
+        return [section(message('denied'))] unless issue
+
+        issue_blocks(issue, actions: false) +
+          [{ 'type' => 'actions', 'elements' => [button(message(command), "#{command} #{id}")] }]
       else
         id = command.to_s.sub(/\A#/, '')
         return [section(message('help'))] unless id.match?(/\A[1-9]\d*\z/)
@@ -95,7 +103,9 @@ module RedmineSlackNotification
       text = payload['text'].to_s
       return deliver_reminders(app, team, payload) if text.strip == 'reminders'
       # Modal commands first show a button, so queued work never uses an expired trigger_id.
-      result = if text.match?(/\Acomment\s+#?[1-9]\d*\s*\z/)
+      result = if (arguments = direct_arguments(text))
+                 direct_edit(app, team, payload, *arguments)
+               elsif text.match?(/\Acomment\s+#?[1-9]\d*\s*\z/)
                  [{ 'type' => 'actions', 'elements' => [button(message('comment'), text.strip)] }]
                else
                  run(app, team, payload['user_id'], payload['channel_id'], text) { |issue| single_issue_payload(issue) }
@@ -104,6 +114,73 @@ module RedmineSlackNotification
       RedmineSlackNotification.slack_api('chat.postEphemeral', result.merge(
         'channel' => payload['channel_id'], 'user' => payload['user_id']
       ), RedmineSlackNotification.bot_token)
+    end
+
+    def direct_arguments(text)
+      text.to_s.strip.match(/\A(status|assign)\s+#?([1-9]\d*)\s+(.+)\z/m)&.captures
+    end
+
+    def direct_target(issue, viewer, kind, query)
+      query = query.strip
+      if kind == 'assign'
+        unassigned = Formatter.message('values', 'unassigned')
+        return ['none', unassigned] if %w[none 未割当].include?(query) || query.casecmp?(unassigned)
+        query = viewer.id.to_s if query.casecmp?('me')
+      end
+      candidates = kind == 'assign' ? issue.assignable_users : issue.new_statuses_allowed_to(viewer)
+      matches = candidates.select do |candidate|
+        if query.match?(/\A[1-9]\d*\z/)
+          candidate.id.to_s == query
+        else
+          candidate.name.to_s.casecmp?(query) ||
+            (kind == 'assign' && candidate.respond_to?(:login) && candidate.login.to_s.casecmp?(query))
+        end
+      end.uniq { |candidate| candidate.id }
+      return unless matches.one?
+
+      [matches.first.id.to_s, matches.first.name.to_s]
+    end
+
+    def direct_edit(app, team, payload, kind, id, query)
+      previous = User.current
+      viewer = WorkObjects.viewer_for(payload['user_id'])
+      return [section(message('denied'))] unless viewer
+      User.current = viewer
+      issue = editable_issue(id, viewer, app, team, kind)
+      request_key = payload['request_key']
+      return [section(message('denied'))] unless issue && request_key.is_a?(String) && request_key.match?(/\A[0-9a-f]{64}\z/)
+
+      key = "redmine_slack:direct:#{Digest::SHA256.hexdigest([app, team, viewer.id, request_key].join(':'))}"
+      cache = Rails.cache
+      cached = cache.read(key)
+      return cached['result'] if cached.is_a?(Hash) && cached.key?('result')
+      unless cache.write(key, 'pending', unless_exist: true, expires_in: 300)
+        return [section(message('processing'))]
+      end
+      target = direct_target(issue, viewer, kind, query)
+      unless target
+        cache.delete(key)
+        return [section(message('no_match')), { 'type' => 'actions', 'elements' => [button(message(kind), "#{kind} #{id}")] }]
+      end
+      attribute = kind == 'assign' ? :assigned_to_id : :status_id
+      outcome = WorkObjects.update_issue(issue, viewer, **{ attribute => target.first })
+      unless %i[saved unchanged].include?(outcome)
+        cache.delete(key)
+        return [section(message('denied'))]
+      end
+      issue.reload
+      card = single_issue_payload(issue)
+      result = if card['metadata']
+                 card.merge('text' => "#{message(outcome == :saved ? 'updated' : 'unchanged')}\n#{card['text']}")
+               else
+                 [section(message(outcome == :saved ? 'updated' : 'unchanged')),
+                  section("<#{Formatter.url("/issues/#{issue.id}")}|##{issue.id} #{Formatter.text(issue.subject)}>\n#{Formatter.text(Formatter.field_label(attribute_key(kind)))}: #{Formatter.text(target.last)}")]
+               end
+      # Save the result before Slack delivery: a delivery retry must not repeat the write.
+      cache.write(key, { 'result' => result }, expires_in: 86_400)
+      result
+    ensure
+      User.current = previous
     end
 
     def single_issue_payload(issue)
@@ -163,6 +240,8 @@ module RedmineSlackNotification
     end
 
     def modal(kind, id, viewer)
+      return attribute_modal(kind, id, viewer) if %w[status assign].include?(kind)
+
       blocks = if kind == 'create'
                  project = Project.find_by(id: id)
                  trackers = Issue.new(project: project, author: viewer).allowed_target_trackers(viewer).to_a
@@ -178,26 +257,73 @@ module RedmineSlackNotification
         'close' => { 'type' => 'plain_text', 'text' => message('cancel') }, 'blocks' => blocks }
     end
 
+    def attribute_key(kind)
+      kind == 'assign' ? 'assignee' : 'status'
+    end
+
+    def error_key(kind)
+      return attribute_key(kind) if %w[status assign].include?(kind)
+
+      kind == 'create' ? 'subject' : 'comment'
+    end
+
+    def editable_issue(id, viewer, app, team, kind)
+      issue = Issue.find_by(id: id)
+      attribute = kind == 'assign' ? 'assigned_to_id' : 'status_id'
+      return unless issue && authorized_project?(issue.project, app, team) &&
+                    !issue.is_private? && issue.visible?(viewer) && WorkObjects.actions_enabled?(issue) &&
+                    issue.attributes_editable?(viewer) && issue.safe_attribute?(attribute, viewer)
+
+      issue
+    end
+
+    def attribute_modal(kind, id, viewer)
+      issue = Issue.find_by(id: id)
+      return unless issue
+
+      key = attribute_key(kind)
+      options = if kind == 'assign'
+                  WorkObjects.assignee_options(issue)
+                else
+                  WorkObjects.select_options(issue.new_statuses_allowed_to(viewer))
+                end
+      return unless options && options.length.between?(1, 100)
+
+      selected = kind == 'assign' ? (issue.assigned_to_id || 'none').to_s : issue.status_id.to_s
+      element = { 'type' => 'static_select', 'options' => options }
+      initial = options.find { |option| option['value'] == selected }
+      element['initial_option'] = initial if initial
+      { 'type' => 'modal', 'callback_id' => PREFIX + kind, 'private_metadata' => id.to_s,
+        'title' => { 'type' => 'plain_text', 'text' => message(kind) },
+        'submit' => { 'type' => 'plain_text', 'text' => message('save') },
+        'close' => { 'type' => 'plain_text', 'text' => message('cancel') },
+        'blocks' => issue_blocks(issue, actions: false) + [input(key, Formatter.field_label(key), element)] }
+    end
+
     def interaction(app, team, payload)
       previous = User.current
       return {} unless enabled? && integration?(app, team)
       viewer = WorkObjects.viewer_for(payload.dig('user', 'id'))
       unless viewer
-        key = payload.dig('view', 'callback_id') == PREFIX + 'create' ? 'subject' : 'comment'
+        key = error_key(payload.dig('view', 'callback_id').to_s.delete_prefix(PREFIX))
         return payload['type'] == 'view_submission' ? { 'response_action' => 'errors', 'errors' => { key => message('denied') } } : {}
       end
       if payload['type'] == 'block_actions'
         command = Array(payload['actions']).first&.fetch('value', '').to_s
         kind, id = command.split(/\s+/, 2)
         id = id.to_s.sub(/\A#/, '')
-        if %w[create comment].include?(kind) && id.match?(/\A[1-9]\d*\z/)
+        if %w[create comment status assign].include?(kind) && id.match?(/\A[1-9]\d*\z/)
           object = kind == 'create' ? Project.find_by(id: id) : Issue.find_by(id: id)
           project = kind == 'create' ? object : object&.project
-          allowed = object && project && authorized_project?(project, app, team) &&
-                    (kind == 'create' ? viewer.allowed_to?(:add_issues, project) : object.visible?(viewer) && object.notes_addable?(viewer) && !object.is_private?)
+          allowed = if %w[status assign].include?(kind)
+                      editable_issue(id, viewer, app, team, kind)
+                    else
+                      object && project && authorized_project?(project, app, team) &&
+                        (kind == 'create' ? viewer.allowed_to?(:add_issues, project) : object.visible?(viewer) && object.notes_addable?(viewer) && !object.is_private?)
+                    end
           return {} unless allowed
           view = modal(kind, id, viewer)
-          return {} unless view
+          return {} unless view && !payload['trigger_id'].to_s.empty?
           RedmineSlackNotification.slack_api('views.open', { 'trigger_id' => payload['trigger_id'], 'view' => view }, RedmineSlackNotification.bot_token)
         else
           RedmineSlackCommandJob.perform_later(app, team, { 'user_id' => payload.dig('user', 'id'),
@@ -208,10 +334,11 @@ module RedmineSlackNotification
       return {} unless payload['type'] == 'view_submission'
       view = payload.fetch('view')
       kind = view['callback_id'].delete_prefix(PREFIX)
+      return {} unless %w[create comment status assign].include?(kind)
       id = view['private_metadata'].to_s
       return {} unless id.match?(/\A[1-9]\d*\z/)
       values = view.dig('state', 'values') || {}
-      error_key = kind == 'create' ? 'subject' : 'comment'
+      error_key = error_key(kind)
       User.current = viewer
       return { 'response_action' => 'errors', 'errors' => { error_key => message('denied') } } if view['id'].to_s.empty?
       key = "redmine_slack:submission:#{Digest::SHA256.hexdigest([app, team, viewer.id, view['id']].join(':'))}"
@@ -245,6 +372,16 @@ module RedmineSlackNotification
             return {} if issue.save
             return { 'response_action' => 'errors', 'errors' => { error_key => issue.errors.full_messages.join('; ')[0, 1500] } }
           end
+        end
+      elsif %w[status assign].include?(kind)
+        issue = editable_issue(id, viewer, app, team, kind)
+        key = attribute_key(kind)
+        value = values.dig(key, key, 'selected_option', 'value')
+        valid = value.is_a?(String) && (value.match?(/\A[1-9]\d*\z/) || (kind == 'assign' && value == 'none'))
+        if issue && valid
+          attribute = kind == 'assign' ? :assigned_to_id : :status_id
+          outcome = WorkObjects.update_issue(issue, viewer, **{ attribute => value })
+          return {} if %i[saved unchanged].include?(outcome)
         end
       elsif kind == 'comment'
         issue = Issue.find_by(id: id)

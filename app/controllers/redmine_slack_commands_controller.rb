@@ -19,7 +19,11 @@ class RedmineSlackCommandsController < ActionController::Base
     expected = RedmineSlackNotification.effective_config.dig('slack', 'slash_command')
     return head :forbidden unless expected.to_s.start_with?('/') && payload['command'] == expected
     return head :bad_request unless payload['user_id'].to_s.match?(/\A[UW][A-Z0-9]+\z/) && payload['channel_id'].to_s.match?(/\A[CDG][A-Z0-9]+\z/) && payload['text'].to_s.length <= 1000
-    RedmineSlackCommandJob.perform_later(payload['api_app_id'], payload['team_id'], payload.slice('user_id', 'channel_id', 'text'))
+    queued = payload.slice('user_id', 'channel_id', 'text')
+    if RedmineSlackNotification::SlashCommands.direct_arguments(payload['text'])
+      queued['request_key'] = Digest::SHA256.hexdigest([request.headers['X-Slack-Request-Timestamp'], body].join(':'))
+    end
+    RedmineSlackCommandJob.perform_later(payload['api_app_id'], payload['team_id'], queued)
     head :ok
   rescue ArgumentError
     head :bad_request

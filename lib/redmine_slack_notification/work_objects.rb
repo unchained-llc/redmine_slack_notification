@@ -133,7 +133,7 @@ module RedmineSlackNotification
       keys = button_keys(issue, detail: !viewer.nil?).map { |key| key == 'watch' && viewer && issue.watched_by?(viewer) ? 'unwatch' : key }
       actions = keys.select { |key| button_available?(key, issue, viewer) }.map do |key|
         label = work_object_message(key == 'watch' && !viewer ? 'watch_settings' : key, product_name: Formatter.message('work_objects', 'product_name'))
-        button = { 'text' => label, 'action_id' => BUTTON_IDS.fetch(key) }
+        button = { 'text' => label, 'action_id' => BUTTON_IDS.fetch(key), 'value' => "redmine_issue:#{issue.id}" }
         button['url'] = Formatter.url("/issues/#{issue.id}") if key == 'open_issue'
         button['url'] = Formatter.url("/issues/#{issue.id}/time_entries/new") if key == 'log_time'
         button
@@ -147,7 +147,7 @@ module RedmineSlackNotification
     def watch_modal(issue, viewer, source)
       watching = issue.watched_by?(viewer)
       return unless watching || issue.valid_watcher?(viewer)
-      context = source.slice('entity_url', 'external_ref', 'channel_id', 'message_ts')
+      context = source.slice('entity_url', 'external_ref', 'channel_id', 'message_ts', 'is_ephemeral')
       context['watching'] = !watching
       { 'type' => 'modal', 'callback_id' => 'redmine_watch_settings',
         'title' => { 'type' => 'plain_text', 'text' => work_object_message('watch_settings') },
@@ -284,7 +284,7 @@ module RedmineSlackNotification
       blocks.select! { |block| block['block_id'] == 'assignee' } if assignee_only
       return if blocks.empty?
 
-      context = source.slice('entity_url', 'external_ref', 'channel_id', 'message_ts')
+      context = source.slice('entity_url', 'external_ref', 'channel_id', 'message_ts', 'is_ephemeral')
       { 'type' => 'modal', 'callback_id' => comment_only ? 'redmine_add_comment' : 'redmine_edit_issue',
         'title' => { 'type' => 'plain_text', 'text' => comment_only ? Formatter.message('work_objects', 'add_comment') : work_object_message('edit_title', id: issue.id) },
         'submit' => { 'type' => 'plain_text', 'text' => Formatter.message('work_objects', 'save') },
@@ -421,6 +421,18 @@ module RedmineSlackNotification
       return unless source.is_a?(Hash)
       modal = source['type'] == 'modal' && %w[redmine_edit_issue redmine_add_comment redmine_watch_settings].include?(source['callback_id'])
       return unless modal || source['type'] == 'entity_detail' || source['type'] == 'message_attachment'
+      # Slack omits entity identity on ephemeral Work Object button payloads.
+      # Resolve our explicit button value, then apply the same object authorization.
+      if payload['type'] == 'block_actions' && source['type'] == 'message_attachment' && source['is_ephemeral'] == true &&
+         !source.key?('entity_url') && !source.key?('external_ref')
+        actions = payload['actions']
+        return unless actions.is_a?(Array) && actions.one? && actions.first.is_a?(Hash)
+        match = actions.first['value'].to_s.match(/\Aredmine_issue:([1-9]\d*)\z/)
+        return unless match
+        url = Formatter.url("/issues/#{match[1]}")
+        source = source.merge('entity_url' => url,
+                              'external_ref' => { 'type' => 'redmine_issue', 'id' => Digest::SHA256.hexdigest(url) })
+      end
       context = modal ? JSON.parse(source['private_metadata'].to_s) : source
       return unless context.is_a?(Hash)
       event = { 'entity_url' => context['entity_url'], 'external_ref' => context['external_ref'] }
@@ -497,7 +509,8 @@ module RedmineSlackNotification
                                  priority_id: priority, due_date: due_date, comment: comment)
         end
         Rails.logger&.info("RedmineSlackNotification: Work Object interaction issue=#{issue.id} result=#{outcome}")
-        if (outcome == :saved || outcome == :unchanged) && context['channel_id'].to_s.match?(/\A[CDG][A-Z0-9]+\z/) &&
+        if (outcome == :saved || outcome == :unchanged) && context['is_ephemeral'] != true &&
+           context['channel_id'].to_s.match?(/\A[CDG][A-Z0-9]+\z/) &&
            context['message_ts'].to_s.match?(/\A\d+\.\d+\z/)
           issue.reload
           card = Formatter.issue_payload(issue, actor: viewer, action: 'updated')

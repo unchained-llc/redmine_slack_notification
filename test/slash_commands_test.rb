@@ -42,6 +42,26 @@ class SlashCommandsTest < Minitest::Test
     assert_equal ['ATEST', 'TTEST', @payload.slice('user_id', 'channel_id', 'text')], @queued.first
   end
 
+  def test_direct_edit_uses_configured_command_and_a_server_derived_retry_key
+    @settings['slack']['slash_command'] = '/tickets'
+    @payload.merge!('command' => '/tickets', 'text' => 'status 7 終了', 'trigger_id' => 'fresh-trigger',
+                    'request_key' => 'untrusted-key')
+    timestamp = Time.now.to_i
+    assert_equal :ok, dispatch(timestamp: timestamp).status
+    queued = @queued.first.last
+    assert_equal 'status 7 終了', queued['text']
+    assert_match(/\A[0-9a-f]{64}\z/, queued['request_key'])
+    refute queued.key?('response_url')
+    refute queued.key?('token')
+    refute queued.key?('trigger_id')
+    key = queued['request_key']
+    assert_equal :ok, dispatch(timestamp: timestamp).status
+    assert_equal key, @queued.first.last['request_key']
+    @payload['trigger_id'] = 'another-trigger'
+    assert_equal :ok, dispatch(timestamp: timestamp).status
+    refute_equal key, @queued.first.last['request_key']
+  end
+
   def test_forged_expired_disabled_and_other_commands_never_queue
     assert_equal :unauthorized, dispatch(signature: 'v0=' + '0' * 64).status
     assert_empty @queued

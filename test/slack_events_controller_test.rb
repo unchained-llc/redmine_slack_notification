@@ -182,7 +182,7 @@ class SlackEventsControllerTest < Minitest::Test
              'user' => { 'id' => 'U123' }, 'trigger_id' => 'trigger',
              'container' => { 'type' => 'message_attachment', 'entity_url' => 'https://example.com/issues/7',
                               'external_ref' => { 'id' => 'issue7' }, 'channel_id' => 'C123',
-                              'message_ts' => '123.456', 'other' => 'drop' },
+                              'message_ts' => '123.456', 'is_ephemeral' => true, 'other' => 'drop' },
              'actions' => [{ 'action_id' => 'redmine_edit_issue', 'value' => 'drop' }] }
     queued = []
     RedmineSlackWorkObjectInteractionJob.stub(:perform_later, ->(*args) { queued << args }) do
@@ -190,6 +190,10 @@ class SlackEventsControllerTest < Minitest::Test
       assert_equal 'C123', queued.first[2].dig('container', 'channel_id')
       refute queued.first[2]['container'].key?('other')
       refute queued.first[2]['actions'].first.key?('value')
+      card['actions'].first['value'] = 'redmine_issue:7'
+      assert_equal :ok, dispatch(raw: URI.encode_www_form('payload' => JSON.generate(card))).status
+      assert_equal 'redmine_issue:7', queued.last[2].dig('actions', 0, 'value')
+      assert_equal true, queued.last[2].dig('container', 'is_ephemeral')
       modal = card.merge('type' => 'view_submission', 'view' => {
         'type' => 'modal', 'callback_id' => 'redmine_edit_issue', 'private_metadata' => '{}',
         'state' => { 'values' => {

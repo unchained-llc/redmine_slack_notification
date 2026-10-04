@@ -183,6 +183,8 @@ messages:
       • `%{command} 123` — Show one issue; automatically use a card when Work Object previews are configured.
       • `%{command} new [project-identifier]` — Choose a project and open the issue creation form.
       • `%{command} comment 123` — Open the comment form from the returned button. Enter the comment in the form.
+      • `%{command} status 123 [status name or ID]` — Change status directly, or omit the value to open a picker.
+      • `%{command} assign 123 [user login, name, or ID]` — Change assignee directly. Use me or none; omit the value to open a picker.
       • `%{command} help` — Show this help.
 
       Results are visible only to you. Lists use the reminder format; a single result uses a card when configured.
@@ -197,6 +199,11 @@ messages:
     reminders_empty: 'No due reminders for you with the current reminder settings.'
     new: 'New issue'
     comment: 'Add comment'
+    status: 'Change status'
+    assign: 'Change assignee'
+    updated: 'Issue updated.'
+    unchanged: 'The issue already has that value.'
+    no_match: 'No unique permitted match. Use an ID or choose from the returned button.'
     save: 'Save'
     cancel: 'Cancel'
     tracker: 'Tracker'

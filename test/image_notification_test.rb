@@ -2560,6 +2560,63 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal 'Important', calls.last[1].dig('metadata', 'entities', 0, 'entity_payload', 'fields', 'priority', 'value')
   end
 
+  def test_ephemeral_card_without_entity_identity_opens_edit_and_saves_without_history_refresh
+    prepare_action_issue
+    @issue.assigned_to_id = @user.id
+    click = action_payload('block_actions', 'container', 'actions' => [
+      { 'action_id' => 'redmine_edit_issue', 'value' => 'redmine_issue:7' }
+    ])
+    click['container'] = { 'type' => 'message_attachment', 'is_ephemeral' => true,
+                           'channel_id' => 'D123', 'message_ts' => '123.456' }
+    calls = capture_interaction(click)
+    assert_equal ['views.open'], calls.map(&:first)
+    modal = calls.first[1]['view']
+    assert_equal %w[status priority assignee due_date new_comment], modal['blocks'].map { |block| block['block_id'] }
+    context = JSON.parse(modal['private_metadata'])
+    assert_equal @url, context['entity_url']
+    assert_equal @event['external_ref'], context['external_ref']
+    assert_equal true, context['is_ephemeral']
+    edit = action_payload('view_submission', 'view')
+    edit['view'] = modal.merge('state' => { 'values' => {
+      'status' => { 'status' => { 'selected_option' => { 'value' => '3' } } },
+      'new_comment' => { 'new_comment' => { 'value' => 'Edited from private result' } }
+    } })
+    assert_empty capture_interaction(edit)
+    assert_equal 3, @issue.status_id
+    assert_equal ['Edited from private result'], @issue.notes
+  end
+
+  def test_ephemeral_button_identity_requires_valid_value_and_existing_authorization
+    prepare_action_issue
+    click = action_payload('block_actions', 'container', 'actions' => [
+      { 'action_id' => 'redmine_edit_issue', 'value' => 'redmine_issue:7' }
+    ])
+    click['container'] = { 'type' => 'message_attachment', 'is_ephemeral' => true }
+    click['actions'].first['value'] = 'redmine_issue:7 trailing'
+    assert_empty capture_interaction(click)
+    click['actions'].first['value'] = 'redmine_issue:7'
+    click['container']['is_ephemeral'] = false
+    assert_empty capture_interaction(click)
+    click['container']['is_ephemeral'] = true
+    click['user']['id'] = 'U999'
+    assert_empty capture_interaction(click)
+    click['user']['id'] = 'U123'
+    @settings['slack']['work_object_actions'] = false
+    assert_empty capture_interaction(click)
+    @settings['slack']['work_object_actions'] = true
+    @issue.define_singleton_method(:visible?) { |_| false }
+    assert_empty capture_interaction(click)
+    assert_empty @issue.notes
+  end
+
+  def test_work_object_buttons_carry_identity_for_ephemeral_interactions
+    prepare_action_issue
+    RedmineSlackNotification.stub(:config, @settings) do
+      actions = WORK.configured_actions(@issue)['primary_actions']
+      assert_equal ['redmine_issue:7'], actions.map { |action| action['value'] }.uniq
+    end
+  end
+
   def test_main_card_modal_can_assign_and_clear_assignee
     prepare_action_issue
     @issue.assigned_to_id = nil

@@ -45,10 +45,16 @@ class RedmineSlackEventsController < ActionController::Base
       return head :bad_request unless source.is_a?(Hash)
       interaction = payload.slice('type', 'trigger_id')
       interaction['user'] = { 'id' => payload.dig('user', 'id') }
-      interaction[source_key] = source.slice('type', 'entity_url', 'external_ref', 'channel_id', 'message_ts',
+      interaction[source_key] = source.slice('type', 'entity_url', 'external_ref', 'channel_id', 'message_ts', 'is_ephemeral',
                                               'callback_id', 'private_metadata')
       if source_key == 'container'
-        interaction['actions'] = Array(payload['actions']).map { |action| action.is_a?(Hash) ? action.slice('action_id') : {} }
+        interaction['actions'] = Array(payload['actions']).map do |action|
+          next {} unless action.is_a?(Hash)
+          scoped = action.slice('action_id')
+          value = action['value']
+          scoped['value'] = value if value.is_a?(String) && value.match?(/\Aredmine_issue:[1-9]\d*\z/)
+          scoped
+        end
       else
         values = source.dig('state', 'values')
         return head :bad_request unless values.is_a?(Hash)
