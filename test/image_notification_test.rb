@@ -1572,6 +1572,24 @@ class WorkObjectNotificationTest < Minitest::Test
     end
   end
 
+  def test_global_actions_apply_to_other_issues_and_allow_project_opt_out
+    @issue.id = 8
+    @settings['slack']['metadata'] = { 'issue' => { 'status' => false, 'priority' => false,
+                                                    'due_date' => false, 'assignee' => false } }
+    @settings['slack']['work_object_actions'] = { 'enabled' => true, 'issue_ids' => [7] }
+    RedmineSlackNotification.stub(:config, @settings) do
+      entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
+      assert_equal 'Alice', entity.dig('fields', 'assignee', 'user', 'text')
+      assert_equal 'In progress', entity.dig('fields', 'status', 'value')
+      assert_equal %w[redmine_edit_issue redmine_assign_to_me], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
+
+      @settings['projects'] = { 'agentic' => { 'slack' => { 'work_object_actions' => { 'enabled' => false } } } }
+      hidden = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
+      assert_empty hidden['fields']
+      refute hidden.key?('actions')
+    end
+  end
+
   def test_pilot_card_shows_unassigned_assignee
     @issue.assigned_to = nil
     @settings['slack']['work_object_actions'] = { 'issue_ids' => [7] }
@@ -1901,6 +1919,14 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal 'new_comment', metadata.dig('entity_payload', 'custom_fields', 1, 'key')
     @settings['slack']['work_object_actions']['issue_ids'] = [8]
     refute capture_details.first[1]['metadata'].dig('entity_payload', 'actions')
+  end
+
+  def test_global_actions_enable_details_for_another_issue
+    @settings['slack']['work_object_actions'] = { 'enabled' => true }
+    @issue.id = 8
+    RedmineSlackNotification.stub(:config, @settings) do
+      assert WORK.actions_enabled?(@issue)
+    end
   end
 
   def prepare_action_issue

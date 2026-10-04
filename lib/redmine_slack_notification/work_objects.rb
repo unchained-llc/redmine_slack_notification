@@ -64,7 +64,12 @@ module RedmineSlackNotification
     end
 
     def actions_enabled?(issue)
-      ids = RedmineSlackNotification.effective_config.dig('slack', 'work_object_actions', 'issue_ids')
+      settings = RedmineSlackNotification.effective_config(issue.project).dig('slack', 'work_object_actions')
+      return false unless settings.is_a?(Hash)
+      return false if settings['enabled'] == false
+      return true if settings['enabled'] == true
+
+      ids = settings['issue_ids']
       ids.is_a?(Array) && ids.any? { |id| id.to_s == issue.id.to_s }
     end
 

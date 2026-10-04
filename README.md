@@ -244,24 +244,26 @@ users:
 
 The endpoint verifies the signature, timestamp, app, and workspace before enqueueing work on the existing `slack` queue. Authorization uses explicit `users` mappings from Redmine login/email to Slack ID or enabled `auto_map_users_by_email` matching; `auto_map_users_by_name` is never used to grant access. Unmapped, locked, or unauthorized users, private Issues, inactive projects, and projects with previews disabled receive a restricted response without Issue content. Project-specific apps can override `projects.<identifier>.slack.events` and `users`.
 
-Authorized details include the current title, Issue ID, tracker, project, status, priority, assignee, author, due date, creation/update timestamps, and description (up to 10,000 characters). Detail fields are independent of notification `slack.metadata.issue` settings. Comments, Redmine custom fields, editing inside Slack, and pasted-link unfurls are not included.
+Authorized details include the current title, Issue ID, tracker, project, status, priority, assignee, author, due date, creation/update timestamps, and description (up to 10,000 characters). Detail fields are independent of notification `slack.metadata.issue` settings. Existing comments, Redmine custom fields, and pasted-link unfurls are not included. Editing can be enabled with the setting below.
 
 Check Redmine/Sidekiq logs for `Work Object details`: `shown`/`restricted` describe the response path; `failed` includes the Slack API error code. If Slack returns `missing_interactivity_url`, configure the app's **Interactivity & Shortcuts** Request URL.
 
-### Scoped Work Object actions
+### Work Object card and detail actions
 
-Set `slack.work_object_actions.issue_ids` to show status, assignee (including unassigned), priority, and due date on selected issue cards and enable the Edit issue and Assign to me buttons on those cards. Edit issue opens a Slack modal for permitted status, assignee, priority, due date, and comment changes. The default is disabled. Enable **Interactivity & Shortcuts** in the Slack app and set its Request URL to `https://redmine.example.com/redmine_slack/interactions`. The same `slack.events` signing configuration authenticates the requests.
+Set `slack.work_object_actions.enabled: true` to show status, assignee (including unassigned), priority, and due date plus the Edit issue and Assign to me buttons on every public Issue Work Object card with previews enabled. Alternatively, `issue_ids` limits these features to selected issues. Explicit `enabled: false` takes precedence over `issue_ids`. Edit issue opens a Slack modal for permitted status, assignee, priority, due date, and comment changes. The default is disabled. Enable **Interactivity & Shortcuts** in the Slack app and set its Request URL to `https://redmine.example.com/redmine_slack/interactions`. The same `slack.events` signing configuration authenticates the requests.
 
 ```yaml
 slack:
   work_object_previews: true
   work_object_actions:
-    issue_ids: [123]
+    enabled: true
 ```
+
+For a small pilot, use `issue_ids: [123]` instead of `enabled: true`. Fields and buttons embedded in previously posted cards do not update automatically; those messages need a new notification or an in-place update. The detail pane fetches the current issue whenever it opens.
 
 The detail pane also exposes permitted status, priority, and due date edits and a blank comment input. Assign to me makes no change if the viewer already owns the issue. The modal lists assignable users and an unassigned option when the list has at most 99 users. Every submission rechecks the Slack-to-Redmine user mapping, issue visibility, edit and note permissions, status workflow, active priorities, and assignable users before writing to Redmine. After an edit, the plugin refreshes the originating card or detail pane with the latest issue state. A Slack API failure during card refresh is logged without retrying an already saved Redmine change.
 
-The Work Object's conversation view is separate from Redmine's comment history. Existing Redmine comments are not displayed there. For pilot issues listed above, a new Redmine comment can be added from the detail pane's edit form. Posting comments from notification threads is available through the following setting.
+The Work Object's conversation view is separate from Redmine's comment history. Existing Redmine comments are not displayed there. For issues with actions enabled, a new Redmine comment can be added from the detail pane's edit form. Posting comments from notification threads is available through the following setting.
 
 ### Match viewers by email
 

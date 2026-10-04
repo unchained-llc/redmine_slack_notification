@@ -23,10 +23,13 @@ slack:
   # Existing event cards remain. Deleted Issues and due-date DMs are excluded.
   # Override per project with projects.<identifier>.slack.work_object_previews.
   work_object_previews: false
-  # Optional pilot for editing a Task in Slack's native detail pane. Only the
-  # listed Issue IDs expose status/comment editing and Assign to me. The
-  # interacting Redmine user and permissions are checked again on submission.
+  # Show editable Issue fields and actions on all public Issue Work Object
+  # cards with enabled: true, or limit the pilot to listed Issue IDs.
+  # Redmine user mapping and permissions are checked again on submission.
   # Set Interactivity & Shortcuts Request URL to /redmine_slack/interactions.
+  # work_object_actions:
+  #   enabled: true
+  # Or limit actions to selected Issue IDs:
   # work_object_actions:
   #   issue_ids: [123]
   # Save text replies to Issue notification threads as Redmine notes.
