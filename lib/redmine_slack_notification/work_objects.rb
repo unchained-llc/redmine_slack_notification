@@ -62,6 +62,48 @@ module RedmineSlackNotification
       Issue.find_by(id: match[1].to_i)
     end
 
+    def actions_enabled?(issue)
+      ids = RedmineSlackNotification.effective_config.dig('slack', 'work_object_actions', 'issue_ids')
+      ids.is_a?(Array) && ids.any? { |id| id.to_s == issue.id.to_s }
+    end
+
+    def editable_metadata(issue, viewer)
+      metadata = Formatter.issue_work_object_details(issue)
+      return metadata unless actions_enabled?(issue)
+
+      fields = metadata.fetch('entity_payload').fetch('fields')
+      if issue.attributes_editable?(viewer) && issue.safe_attribute?('status_id', viewer)
+        statuses = issue.new_statuses_allowed_to(viewer)
+        if statuses.any? { |status| status.id == issue.status_id }
+          fields['status']['edit'] = {
+            'enabled' => true,
+            'select' => {
+              'current_value' => issue.status_id.to_s,
+              'static_options' => statuses.map { |status| {
+                'value' => status.id.to_s,
+                'text' => { 'type' => 'plain_text', 'text' => status.name.to_s }
+              } }
+            }
+          }
+        end
+      end
+      if issue.notes_addable?(viewer)
+        metadata.fetch('entity_payload').fetch('custom_fields') << {
+          'key' => 'new_comment', 'label' => 'コメントを追加', 'type' => 'string', 'value' => '',
+          'edit' => { 'enabled' => true, 'optional' => true,
+                      'text' => { 'max_length' => 3000 },
+                      'placeholder' => { 'type' => 'plain_text', 'text' => 'コメントを入力' } }
+        }
+      end
+      if issue.attributes_editable?(viewer) && issue.safe_attribute?('assigned_to_id', viewer) &&
+         issue.assignable_users.include?(viewer)
+        metadata.fetch('entity_payload')['actions'] = {
+          'primary_actions' => [{ 'text' => '自分に割り当てる', 'action_id' => 'redmine_assign_to_me' }]
+        }
+      end
+      metadata
+    end
+
     # Explicit mappings take priority. Optional email matching never uses
     # display names to authorize access to Redmine data.
     def viewer_for(slack_id)
@@ -127,7 +169,7 @@ module RedmineSlackNotification
                   issue.project.active? && !issue.is_private? && viewer && issue.visible?(viewer)
         request = { 'trigger_id' => event['trigger_id'] }
         if allowed
-          request['metadata'] = Formatter.issue_work_object_details(issue)
+          request['metadata'] = editable_metadata(issue, viewer)
         else
           request['error'] = { 'status' => 'restricted' }
         end
@@ -135,6 +177,81 @@ module RedmineSlackNotification
         Rails.logger&.info("RedmineSlackNotification: Work Object details issue=#{issue.id} result=#{allowed ? 'shown' : 'restricted'} warnings=#{Array(result['warnings']).inspect} messages=#{Array(result.dig('response_metadata', 'messages')).inspect}")
         result
       end
+    end
+
+    def process_interaction(app_id, team_id, payload)
+      return unless payload.is_a?(Hash) && %w[block_actions view_submission].include?(payload['type'])
+      source = payload['type'] == 'block_actions' ? payload['container'] : payload['view']
+      return unless source.is_a?(Hash) && source['type'] == 'entity_detail'
+      event = { 'entity_url' => source['entity_url'], 'external_ref' => source['external_ref'] }
+      issue = issue_for(event)
+      return unless issue && integration_for(app_id, team_id, project: issue.project)
+
+      RedmineSlackNotification.with_project(issue.project) do
+        return unless RedmineSlackNotification.effective_config.dig('slack', 'work_object_previews') == true &&
+                      actions_enabled?(issue) && issue.project.active? && !issue.is_private?
+        viewer = viewer_for(payload.dig('user', 'id'))
+        return unless viewer && issue.visible?(viewer)
+
+        outcome = if payload['type'] == 'block_actions'
+          actions = payload['actions']
+          return unless actions.is_a?(Array) && actions.length == 1
+          action = actions.first
+          return unless action.is_a?(Hash) && action['action_id'] == 'redmine_assign_to_me'
+          update_issue(issue, viewer, assigned_to_id: viewer.id)
+        else
+          values = source.dig('state', 'values')
+          return unless values.is_a?(Hash)
+          status = values.dig('status', 'status.input', 'selected_option', 'value')
+          comment = values.dig('new_comment', 'new_comment.input', 'value')
+          return unless status.nil? || status.to_s.match?(/\A[1-9]\d*\z/)
+          return unless comment.nil? || (comment.is_a?(String) && comment.length <= 3000)
+          update_issue(issue, viewer, status_id: status, comment: comment)
+        end
+        Rails.logger&.info("RedmineSlackNotification: Work Object interaction issue=#{issue.id} result=#{outcome}")
+        trigger = payload['trigger_id'].to_s
+        return if trigger.empty?
+        token = RedmineSlackNotification.bot_token(issue.project)
+        return if token.to_s.empty?
+        request = { 'trigger_id' => trigger }
+        if outcome == :saved || outcome == :unchanged
+          issue.reload
+          request['metadata'] = editable_metadata(issue, viewer)
+        else
+          request['error'] = { 'status' => 'edit_error', 'custom_message' => 'この操作を実行できませんでした。権限と現在の状態を確認してください。' }
+        end
+        RedmineSlackNotification.slack_api('entity.presentDetails', request, token, form: true)
+      end
+    end
+
+    def update_issue(issue, viewer, assigned_to_id: nil, status_id: nil, comment: nil)
+      previous_user = User.current
+      User.current = viewer
+      issue.with_lock do
+        next :restricted unless issue.project.active? && !issue.is_private? && issue.visible?(viewer) &&
+                                actions_enabled?(issue)
+        attrs = {}
+        if assigned_to_id
+          next :restricted unless issue.attributes_editable?(viewer) && issue.safe_attribute?('assigned_to_id', viewer) &&
+                                  issue.assignable_users.include?(viewer)
+          attrs['assigned_to_id'] = assigned_to_id.to_s unless issue.assigned_to_id == assigned_to_id
+        end
+        if status_id
+          next :restricted unless issue.attributes_editable?(viewer) && issue.safe_attribute?('status_id', viewer) &&
+                                  issue.new_statuses_allowed_to(viewer).any? { |status| status.id.to_s == status_id.to_s }
+          attrs['status_id'] = status_id.to_s unless issue.status_id.to_s == status_id.to_s
+        end
+        note = comment.to_s.strip
+        next :restricted if !note.empty? && !issue.notes_addable?(viewer)
+        next :unchanged if attrs.empty? && note.empty?
+        issue.init_journal(viewer, note)
+        issue.send(:safe_attributes=, attrs, viewer) unless attrs.empty?
+        issue.save! ? :saved : :restricted
+      end
+    rescue ActiveRecord::RecordInvalid
+      :restricted
+    ensure
+      User.current = previous_user
     end
   end
 end

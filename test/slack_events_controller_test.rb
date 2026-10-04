@@ -26,6 +26,7 @@ end
 
 require_relative '../app/controllers/redmine_slack_events_controller'
 require_relative '../app/jobs/redmine_slack_work_object_details_job'
+require_relative '../app/jobs/redmine_slack_work_object_interaction_job'
 require_relative '../app/jobs/redmine_slack_thread_comment_job'
 
 class SlackEventsControllerTest < Minitest::Test
@@ -108,6 +109,44 @@ class SlackEventsControllerTest < Minitest::Test
       RedmineSlackWorkObjectDetailsJob.new.perform('ATEST', 'TTEST', @payload['event'])
     end
     assert_equal ['ATEST', 'TTEST', @payload['event']], arguments
+  end
+
+  def test_signed_work_object_interaction_is_queued_from_form_payload
+    interaction = { 'type' => 'block_actions', 'api_app_id' => 'ATEST',
+                    'team' => { 'id' => 'TTEST' }, 'user' => { 'id' => 'U123' },
+                    'container' => { 'type' => 'entity_detail', 'entity_url' => 'https://example.com/issues/7' },
+                    'actions' => [{ 'action_id' => 'redmine_assign_to_me' }], 'token' => 'do-not-queue' }
+    body = URI.encode_www_form('payload' => JSON.generate(interaction))
+    queued = []
+    RedmineSlackWorkObjectInteractionJob.stub(:perform_later, ->(*args) { queued << args }) do
+      assert_equal :ok, dispatch(raw: body).status
+      assert_equal 'ATEST', queued.first[0]
+      assert_equal 'TTEST', queued.first[1]
+      assert_equal 'redmine_assign_to_me', queued.first[2].dig('actions', 0, 'action_id')
+      refute queued.first[2].key?('token')
+      assert_equal :unauthorized, dispatch(raw: body, signature: 'v0=' + '0' * 64).status
+      assert_equal :bad_request, dispatch(raw: body + '&other=1').status
+      assert_equal 1, queued.length
+    end
+  end
+
+  def test_signed_detail_edit_queues_only_editable_values
+    interaction = { 'type' => 'view_submission', 'api_app_id' => 'ATEST',
+                    'team' => { 'id' => 'TTEST' }, 'user' => { 'id' => 'U123' },
+                    'view' => { 'type' => 'entity_detail', 'entity_url' => 'https://example.com/issues/7',
+                                'state' => { 'values' => {
+                                  'new_comment' => { 'new_comment.input' => { 'value' => 'Test note' } },
+                                  'unrelated' => { 'value' => 'do-not-queue' }
+                                } } }, 'token' => 'do-not-queue' }
+    body = URI.encode_www_form('payload' => JSON.generate(interaction))
+    queued = []
+    RedmineSlackWorkObjectInteractionJob.stub(:perform_later, ->(*args) { queued << args }) do
+      assert_equal :ok, dispatch(raw: body).status
+      values = queued.first[2].dig('view', 'state', 'values')
+      assert_equal 'Test note', values.dig('new_comment', 'new_comment.input', 'value')
+      refute values.key?('unrelated')
+      refute queued.first[2].key?('token')
+    end
   end
 
   def test_thread_reply_is_queued_only_when_enabled_and_for_the_configured_channel

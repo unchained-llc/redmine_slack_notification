@@ -135,7 +135,11 @@ class User
   end
 
   def self.current
-    OpenStruct.new(name: 'Alice')
+    @current ||= OpenStruct.new(name: 'Alice')
+  end
+
+  def self.current=(user)
+    @current = user
   end
 end
 
@@ -1809,6 +1813,117 @@ class WorkObjectDetailsTest < Minitest::Test
         assert_nil WORK.viewer_for('U123')
       end
     end
+  end
+
+  def test_actions_are_limited_to_configured_issue_and_viewer_permissions
+    @settings['slack']['work_object_actions'] = { 'issue_ids' => [7] }
+    @issue.status_id = 2
+    @issue.assigned_to_id = 4
+    @issue.define_singleton_method(:attributes_editable?) { |_viewer| true }
+    @issue.define_singleton_method(:safe_attribute?) { |_attribute, _viewer| true }
+    @issue.define_singleton_method(:notes_addable?) { |_viewer| true }
+    @issue.define_singleton_method(:assignable_users) { [@test_user] }
+    @issue.instance_variable_set(:@test_user, @user)
+    @issue.define_singleton_method(:new_statuses_allowed_to) do |_viewer|
+      [OpenStruct.new(id: 2, name: 'In progress'), OpenStruct.new(id: 3, name: 'Done')]
+    end
+    @issue.define_singleton_method(:status) { OpenStruct.new(name: status_id == 3 ? 'Done' : 'In progress') }
+    fields = capture_details.first[1].dig('metadata', 'entity_payload', 'fields')
+    assert_equal '2', fields.dig('status', 'edit', 'select', 'current_value')
+    assert_equal '3', fields.dig('status', 'edit', 'select', 'static_options', 1, 'value')
+    metadata = capture_details.first[1]['metadata']
+    assert_equal 'redmine_assign_to_me', metadata.dig('entity_payload', 'actions', 'primary_actions', 0, 'action_id')
+    assert_equal 'new_comment', metadata.dig('entity_payload', 'custom_fields', 1, 'key')
+    @settings['slack']['work_object_actions']['issue_ids'] = [8]
+    refute capture_details.first[1]['metadata'].dig('entity_payload', 'actions')
+  end
+
+  def prepare_action_issue
+    @settings['slack']['work_object_actions'] = { 'issue_ids' => [7] }
+    @issue.status_id = 2
+    @issue.assigned_to_id = 4
+    @issue.define_singleton_method(:attributes_editable?) { |_viewer| true }
+    @issue.define_singleton_method(:safe_attribute?) { |_attribute, _viewer| true }
+    @issue.define_singleton_method(:notes_addable?) { |_viewer| true }
+    @issue.define_singleton_method(:assignable_users) { [@test_user] }
+    @issue.instance_variable_set(:@test_user, @user)
+    @issue.define_singleton_method(:new_statuses_allowed_to) do |_viewer|
+      [OpenStruct.new(id: 2, name: 'In progress'), OpenStruct.new(id: 3, name: 'Done')]
+    end
+    @issue.define_singleton_method(:status) { OpenStruct.new(name: status_id == 3 ? 'Done' : 'In progress') }
+    @issue.define_singleton_method(:with_lock) { |&block| block.call }
+    @issue.define_singleton_method(:safe_attributes=) do |attrs, _viewer|
+      (@events ||= []) << :attributes
+      self.assigned_to_id = attrs['assigned_to_id'].to_i if attrs['assigned_to_id']
+      self.status_id = attrs['status_id'].to_i if attrs['status_id']
+    end
+    @issue.define_singleton_method(:init_journal) do |_viewer, note|
+      (@events ||= []) << :journal
+      (@notes ||= []) << note
+    end
+    @issue.define_singleton_method(:notes) { @notes || [] }
+    @issue.define_singleton_method(:events) { @events || [] }
+    @issue.define_singleton_method(:save!) { true }
+    @issue.define_singleton_method(:reload) { self }
+  end
+
+  def action_payload(type, source, extras = {})
+    { 'type' => type, 'api_app_id' => 'ATEST', 'team' => { 'id' => 'TTEST' },
+      'user' => { 'id' => 'U123' }, 'trigger_id' => 'trigger', source => {
+        'type' => 'entity_detail', 'entity_url' => @url, 'external_ref' => @event['external_ref']
+      } }.merge(extras)
+  end
+
+  def capture_interaction(payload)
+    calls = []
+    RedmineSlackNotification.stub(:config, @settings) do
+      Issue.stub(:find_by, @issue) do
+        User.stub(:find_by, @user) do
+          RedmineSlackNotification.stub(:slack_api, ->(method, body, token, **options) {
+            calls << [method, body, token, options]
+            { 'ok' => true }
+          }) { WORK.process_interaction('ATEST', 'TTEST', payload) }
+        end
+      end
+    end
+    calls
+  end
+
+  def test_assign_status_and_comment_update_only_pilot_issue
+    prepare_action_issue
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_assign_to_me' }])
+    calls = capture_interaction(button)
+    assert_equal 3, @issue.assigned_to_id
+    assert_equal [:journal, :attributes], @issue.events
+    assert_equal 'entity.presentDetails', calls.first[0]
+
+    edit = action_payload('view_submission', 'view')
+    edit['view']['state'] = { 'values' => {
+      'status' => { 'status.input' => { 'selected_option' => { 'value' => '3' } } },
+      'new_comment' => { 'new_comment.input' => { 'value' => 'Test note' } }
+    } }
+    calls = capture_interaction(edit)
+    assert_equal 3, @issue.status_id
+    assert_equal 'Test note', @issue.notes.last
+    assert_equal 'Done', calls.first[1].dig('metadata', 'entity_payload', 'fields', 'status', 'value')
+
+    @settings['slack']['work_object_actions']['issue_ids'] = [8]
+    assert_empty capture_interaction(button)
+  end
+
+  def test_disallowed_status_and_unmapped_user_cannot_edit
+    prepare_action_issue
+    edit = action_payload('view_submission', 'view')
+    edit['view']['state'] = { 'values' => {
+      'status' => { 'status.input' => { 'selected_option' => { 'value' => '999' } } },
+      'new_comment' => { 'new_comment.input' => { 'value' => 'Must not save' } }
+    } }
+    calls = capture_interaction(edit)
+    assert_equal 2, @issue.status_id
+    assert_empty @issue.notes
+    assert_equal 'edit_error', calls.first[1].dig('error', 'status')
+    edit['user']['id'] = 'U999'
+    assert_empty capture_interaction(edit)
   end
 end
 

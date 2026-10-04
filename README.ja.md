@@ -248,7 +248,20 @@ users:
 
 動かない場合は Redmine／Sidekiq ログの `Work Object details` を確認してください。`shown`／`restricted` は応答処理の結果、`failed` は Slack API のエラーコードです。`missing_interactivity_url` が返る場合は、Slack アプリの **Interactivity & Shortcuts** の Request URL を設定してください。
 
-Work Object の「会話」表示は Redmine のコメント履歴とは別です。詳細パネル内での Redmine コメント表示・投稿は未実装です。通知スレッドからのコメント追加は、次の設定で利用できます。
+### 詳細パネルからの操作（対象チケット限定）
+
+`slack.work_object_actions.issue_ids` にチケット番号を列挙すると、そのチケットの詳細パネルでステータス変更、コメント追加、「自分に割り当てる」を使えます。既定では無効です。Slack アプリの **Interactivity & Shortcuts** を有効にし、Request URL を `https://redmine.example.com/redmine_slack/interactions` に設定します。署名検証には上記の `slack.events` 設定を共用します。
+
+```yaml
+slack:
+  work_object_previews: true
+  work_object_actions:
+    issue_ids: [123]
+```
+
+詳細パネルの編集ボタンでは、許可されたステータスを選び、任意で新規コメントを入力して保存します。「自分に割り当てる」は、そのユーザーが割り当て可能なときに表示します。すでに本人が担当者なら変更しません。操作を受信した後もSlackユーザーとRedmineユーザーの対応、チケットの公開・閲覧・編集権限、遷移可能なステータス、割り当て可能なユーザーを再確認します。操作結果は最新の詳細パネルに反映します。
+
+Work Object の「会話」表示は Redmine のコメント履歴とは別で、既存コメントは表示されません。上記の対象チケットでは、詳細パネルの編集フォームから新規コメントを追加できます。通知スレッドからのコメント追加は、次の設定で利用できます。
 
 ### メールアドレスで閲覧ユーザーを自動対応付けする
 
