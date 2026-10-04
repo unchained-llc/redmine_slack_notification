@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'openssl'
+require 'date'
 
 module RedmineSlackNotification
   module WorkObjects
@@ -87,6 +88,19 @@ module RedmineSlackNotification
           }
         end
       end
+      if issue.attributes_editable?(viewer) && issue.safe_attribute?('priority_id', viewer) && fields['priority']
+        priorities = IssuePriority.active.to_a
+        if priorities.any? { |priority| priority.id == issue.priority_id }
+          fields['priority']['edit'] = {
+            'enabled' => true,
+            'select' => { 'current_value' => issue.priority_id.to_s,
+                          'static_options' => select_options(priorities) }
+          }
+        end
+      end
+      if issue.attributes_editable?(viewer) && issue.safe_attribute?('due_date', viewer) && fields['due_date']
+        fields['due_date']['edit'] = { 'enabled' => true, 'optional' => true }
+      end
       if issue.notes_addable?(viewer)
         metadata.fetch('entity_payload').fetch('custom_fields') << {
           'key' => 'new_comment', 'label' => 'コメントを追加', 'type' => 'string', 'value' => '',
@@ -102,6 +116,54 @@ module RedmineSlackNotification
         }
       end
       metadata
+    end
+
+    def select_options(records)
+      records.map { |record| { 'value' => record.id.to_s,
+                                'text' => { 'type' => 'plain_text', 'text' => record.name.to_s } } }
+    end
+
+    def edit_modal(issue, viewer, source)
+      return unless issue.attributes_editable?(viewer)
+
+      blocks = []
+      if issue.safe_attribute?('status_id', viewer)
+        statuses = issue.new_statuses_allowed_to(viewer)
+        blocks << select_input('status', 'ステータス', statuses, issue.status_id) if statuses.any? { |status| status.id == issue.status_id }
+      end
+      if issue.safe_attribute?('priority_id', viewer)
+        priorities = IssuePriority.active.to_a
+        blocks << select_input('priority', '優先度', priorities, issue.priority_id) if priorities.any? { |priority| priority.id == issue.priority_id }
+      end
+      if issue.safe_attribute?('due_date', viewer)
+        element = { 'type' => 'datepicker', 'action_id' => 'due_date' }
+        element['initial_date'] = issue.due_date.iso8601 if issue.due_date
+        blocks << { 'type' => 'input', 'block_id' => 'due_date', 'optional' => true,
+                    'label' => { 'type' => 'plain_text', 'text' => '期日' }, 'element' => element }
+      end
+      if issue.notes_addable?(viewer)
+        blocks << { 'type' => 'input', 'block_id' => 'new_comment', 'optional' => true,
+                    'label' => { 'type' => 'plain_text', 'text' => 'コメントを追加' },
+                    'element' => { 'type' => 'plain_text_input', 'action_id' => 'new_comment', 'multiline' => true,
+                                   'max_length' => 3000 } }
+      end
+      return if blocks.empty?
+
+      context = source.slice('entity_url', 'external_ref', 'channel_id', 'message_ts')
+      { 'type' => 'modal', 'callback_id' => 'redmine_edit_issue',
+        'title' => { 'type' => 'plain_text', 'text' => "課題 ##{issue.id} を編集" },
+        'submit' => { 'type' => 'plain_text', 'text' => '保存' },
+        'close' => { 'type' => 'plain_text', 'text' => 'キャンセル' },
+        'private_metadata' => JSON.generate(context), 'blocks' => blocks }
+    end
+
+    def select_input(key, label, records, selected_id)
+      options = select_options(records)
+      { 'type' => 'input', 'block_id' => key,
+        'label' => { 'type' => 'plain_text', 'text' => label },
+        'element' => { 'type' => 'static_select', 'action_id' => key,
+                       'options' => options,
+                       'initial_option' => options.find { |option| option['value'] == selected_id.to_s } } }
     end
 
     # Explicit mappings take priority. Optional email matching never uses
@@ -182,8 +244,12 @@ module RedmineSlackNotification
     def process_interaction(app_id, team_id, payload)
       return unless payload.is_a?(Hash) && %w[block_actions view_submission].include?(payload['type'])
       source = payload['type'] == 'block_actions' ? payload['container'] : payload['view']
-      return unless source.is_a?(Hash) && source['type'] == 'entity_detail'
-      event = { 'entity_url' => source['entity_url'], 'external_ref' => source['external_ref'] }
+      return unless source.is_a?(Hash)
+      modal = source['type'] == 'modal' && source['callback_id'] == 'redmine_edit_issue'
+      return unless modal || source['type'] == 'entity_detail' || source['type'] == 'message_attachment'
+      context = modal ? JSON.parse(source['private_metadata'].to_s) : source
+      return unless context.is_a?(Hash)
+      event = { 'entity_url' => context['entity_url'], 'external_ref' => context['external_ref'] }
       issue = issue_for(event)
       return unless issue && integration_for(app_id, team_id, project: issue.project)
 
@@ -193,22 +259,61 @@ module RedmineSlackNotification
         viewer = viewer_for(payload.dig('user', 'id'))
         return unless viewer && issue.visible?(viewer)
 
-        outcome = if payload['type'] == 'block_actions'
+        if payload['type'] == 'block_actions'
           actions = payload['actions']
           return unless actions.is_a?(Array) && actions.length == 1
           action = actions.first
-          return unless action.is_a?(Hash) && action['action_id'] == 'redmine_assign_to_me'
-          update_issue(issue, viewer, assigned_to_id: viewer.id)
+          return unless action.is_a?(Hash)
+          if action['action_id'] == 'redmine_edit_issue' && source['type'] == 'message_attachment'
+            form = edit_modal(issue, viewer, source)
+            return unless form && payload['trigger_id'].to_s != ''
+            return RedmineSlackNotification.slack_api('views.open', {
+              'trigger_id' => payload['trigger_id'], 'view' => form
+            }, RedmineSlackNotification.bot_token(issue.project), form: true)
+          end
+          return unless action['action_id'] == 'redmine_assign_to_me'
+          outcome = update_issue(issue, viewer, assigned_to_id: viewer.id)
         else
           values = source.dig('state', 'values')
           return unless values.is_a?(Hash)
-          status = values.dig('status', 'status.input', 'selected_option', 'value')
-          comment = values.dig('new_comment', 'new_comment.input', 'value')
+          status = values.dig('status', modal ? 'status' : 'status.input', 'selected_option', 'value')
+          priority = values.dig('priority', modal ? 'priority' : 'priority.input', 'selected_option', 'value')
+          due_date = values.dig('due_date', modal ? 'due_date' : 'due_date.input', 'selected_date')
+          due_date = '' if values.key?('due_date') && due_date.nil?
+          comment = values.dig('new_comment', modal ? 'new_comment' : 'new_comment.input', 'value')
           return unless status.nil? || status.to_s.match?(/\A[1-9]\d*\z/)
+          return unless priority.nil? || priority.to_s.match?(/\A[1-9]\d*\z/)
+          return unless due_date.nil? || due_date == '' || valid_date?(due_date)
           return unless comment.nil? || (comment.is_a?(String) && comment.length <= 3000)
-          update_issue(issue, viewer, status_id: status, comment: comment)
+          outcome = update_issue(issue, viewer, status_id: status, priority_id: priority, due_date: due_date, comment: comment)
         end
         Rails.logger&.info("RedmineSlackNotification: Work Object interaction issue=#{issue.id} result=#{outcome}")
+        if (outcome == :saved || outcome == :unchanged) && context['channel_id'].to_s.match?(/\A[CDG][A-Z0-9]+\z/) &&
+           context['message_ts'].to_s.match?(/\A\d+\.\d+\z/)
+          issue.reload
+          card = Formatter.issue_payload(issue, actor: viewer, action: 'updated')
+          begin
+            RedmineSlackNotification.slack_api('chat.update', {
+              'channel' => context['channel_id'], 'ts' => context['message_ts'], 'metadata' => card['metadata']
+            }, RedmineSlackNotification.bot_token(issue.project), form: true)
+          rescue StandardError => e
+            # A failed Slack refresh must not retry a completed Redmine write.
+            Rails.logger&.warn("RedmineSlackNotification: card refresh failed issue=#{issue.id} #{e.class}")
+          end
+        end
+        if modal || source['type'] == 'message_attachment'
+          if outcome != :saved && outcome != :unchanged && context['channel_id'].to_s.match?(/\A[CDG][A-Z0-9]+\z/)
+            begin
+              RedmineSlackNotification.slack_api('chat.postEphemeral', {
+                'channel' => context['channel_id'], 'user' => payload.dig('user', 'id'),
+                'text' => "課題 ##{issue.id} を変更できませんでした。権限と現在の状態を確認してください。"
+              }, RedmineSlackNotification.bot_token(issue.project))
+            rescue StandardError => e
+              Rails.logger&.warn("RedmineSlackNotification: edit error notice failed issue=#{issue.id} #{e.class}")
+            end
+          end
+          return
+        end
         trigger = payload['trigger_id'].to_s
         return if trigger.empty?
         token = RedmineSlackNotification.bot_token(issue.project)
@@ -222,9 +327,17 @@ module RedmineSlackNotification
         end
         RedmineSlackNotification.slack_api('entity.presentDetails', request, token, form: true)
       end
+    rescue JSON::ParserError
+      nil
     end
 
-    def update_issue(issue, viewer, assigned_to_id: nil, status_id: nil, comment: nil)
+    def valid_date?(value)
+      value.is_a?(String) && value.match?(/\A\d{4}-\d{2}-\d{2}\z/) && Date.iso8601(value).iso8601 == value
+    rescue ArgumentError
+      false
+    end
+
+    def update_issue(issue, viewer, assigned_to_id: nil, status_id: nil, priority_id: nil, due_date: nil, comment: nil)
       previous_user = User.current
       User.current = viewer
       issue.with_lock do
@@ -240,6 +353,17 @@ module RedmineSlackNotification
           next :restricted unless issue.attributes_editable?(viewer) && issue.safe_attribute?('status_id', viewer) &&
                                   issue.new_statuses_allowed_to(viewer).any? { |status| status.id.to_s == status_id.to_s }
           attrs['status_id'] = status_id.to_s unless issue.status_id.to_s == status_id.to_s
+        end
+        unless priority_id.nil?
+          next :restricted unless issue.attributes_editable?(viewer) && issue.safe_attribute?('priority_id', viewer) &&
+                                  IssuePriority.active.any? { |priority| priority.id.to_s == priority_id.to_s }
+          attrs['priority_id'] = priority_id.to_s unless issue.priority_id.to_s == priority_id.to_s
+        end
+        unless due_date.nil?
+          next :restricted unless issue.attributes_editable?(viewer) && issue.safe_attribute?('due_date', viewer) &&
+                                  (due_date == '' || valid_date?(due_date))
+          new_date = due_date == '' ? nil : Date.iso8601(due_date)
+          attrs['due_date'] = due_date unless issue.due_date == new_date
         end
         note = comment.to_s.strip
         next :restricted if !note.empty? && !issue.notes_addable?(viewer)

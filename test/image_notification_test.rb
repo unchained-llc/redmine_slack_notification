@@ -67,6 +67,16 @@ class Issue
   end
 end
 
+class IssuePriority
+  def self.active
+    [OpenStruct.new(id: 4, name: 'No Priority'), OpenStruct.new(id: 5, name: 'Important')]
+  end
+end
+
+module ActiveRecord
+  class RecordInvalid < StandardError; end
+end
+
 class CustomField
   def self.find_by(id:)
     OpenStruct.new(name: '顧客分類')
@@ -1544,6 +1554,24 @@ class WorkObjectNotificationTest < Minitest::Test
     end
   end
 
+  def test_pilot_issue_shows_fields_and_actions_on_main_card_despite_hidden_default_metadata
+    @settings['slack']['metadata'] = { 'issue' => { 'status' => false, 'priority' => false,
+                                                    'due_date' => false, 'assignee' => false } }
+    @settings['slack']['work_object_actions'] = { 'issue_ids' => [7] }
+    RedmineSlackNotification.stub(:config, @settings) do
+      entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
+      assert_equal 'In progress', entity.dig('fields', 'status', 'value')
+      assert_equal 'High', entity.dig('fields', 'priority', 'value')
+      assert_equal '2026-10-05', entity.dig('fields', 'due_date', 'value')
+      assert_equal 'Alice', entity.dig('fields', 'assignee', 'user', 'text')
+      assert_equal %w[redmine_edit_issue redmine_assign_to_me], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
+      @settings['slack']['work_object_actions']['issue_ids'] = [8]
+      hidden = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
+      assert_empty hidden['fields']
+      refute hidden.key?('actions')
+    end
+  end
+
   def test_work_object_uses_mapped_slack_user_id_for_assignee_and_creator
     user = User.new
     user.login = 'alice'
@@ -1842,6 +1870,8 @@ class WorkObjectDetailsTest < Minitest::Test
   def test_actions_are_limited_to_configured_issue_and_viewer_permissions
     @settings['slack']['work_object_actions'] = { 'issue_ids' => [7] }
     @issue.status_id = 2
+    @issue.priority_id = 4
+    @issue.priority = OpenStruct.new(name: 'No Priority')
     @issue.assigned_to_id = 4
     @issue.define_singleton_method(:attributes_editable?) { |_viewer| true }
     @issue.define_singleton_method(:safe_attribute?) { |_attribute, _viewer| true }
@@ -1855,6 +1885,8 @@ class WorkObjectDetailsTest < Minitest::Test
     fields = capture_details.first[1].dig('metadata', 'entity_payload', 'fields')
     assert_equal '2', fields.dig('status', 'edit', 'select', 'current_value')
     assert_equal '3', fields.dig('status', 'edit', 'select', 'static_options', 1, 'value')
+    assert_equal '4', fields.dig('priority', 'edit', 'select', 'current_value')
+    assert_equal true, fields.dig('due_date', 'edit', 'enabled')
     metadata = capture_details.first[1]['metadata']
     assert_equal 'redmine_assign_to_me', metadata.dig('entity_payload', 'actions', 'primary_actions', 0, 'action_id')
     assert_equal 'new_comment', metadata.dig('entity_payload', 'custom_fields', 1, 'key')
@@ -1865,6 +1897,8 @@ class WorkObjectDetailsTest < Minitest::Test
   def prepare_action_issue
     @settings['slack']['work_object_actions'] = { 'issue_ids' => [7] }
     @issue.status_id = 2
+    @issue.priority_id = 4
+    @issue.priority = OpenStruct.new(name: 'No Priority')
     @issue.assigned_to_id = 4
     @issue.define_singleton_method(:attributes_editable?) { |_viewer| true }
     @issue.define_singleton_method(:safe_attribute?) { |_attribute, _viewer| true }
@@ -1880,6 +1914,9 @@ class WorkObjectDetailsTest < Minitest::Test
       (@events ||= []) << :attributes
       self.assigned_to_id = attrs['assigned_to_id'].to_i if attrs['assigned_to_id']
       self.status_id = attrs['status_id'].to_i if attrs['status_id']
+      self.priority_id = attrs['priority_id'].to_i if attrs['priority_id']
+      self.priority = IssuePriority.active.find { |priority| priority.id == priority_id } if attrs['priority_id']
+      self.due_date = attrs['due_date'].empty? ? nil : Date.iso8601(attrs['due_date']) if attrs.key?('due_date')
     end
     @issue.define_singleton_method(:init_journal) do |_viewer, note|
       (@events ||= []) << :journal
@@ -1948,6 +1985,57 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal 'edit_error', calls.first[1].dig('error', 'status')
     edit['user']['id'] = 'U999'
     assert_empty capture_interaction(edit)
+  end
+
+  def test_main_card_opens_modal_and_saves_priority_due_date_and_status
+    prepare_action_issue
+    click = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_edit_issue' }])
+    click['container'].merge!('type' => 'message_attachment', 'channel_id' => 'C123', 'message_ts' => '123.456')
+    calls = capture_interaction(click)
+    assert_equal 'views.open', calls.first[0]
+    modal = calls.first[1]['view']
+    assert_equal 'redmine_edit_issue', modal['callback_id']
+    assert_equal '2026-10-10', modal['blocks'].find { |block| block['block_id'] == 'due_date' }.dig('element', 'initial_date')
+    assert_equal '4', modal['blocks'].find { |block| block['block_id'] == 'priority' }.dig('element', 'initial_option', 'value')
+
+    edit = action_payload('view_submission', 'view')
+    edit['view'] = { 'type' => 'modal', 'callback_id' => 'redmine_edit_issue',
+                     'private_metadata' => modal['private_metadata'], 'state' => { 'values' => {
+                       'status' => { 'status' => { 'selected_option' => { 'value' => '3' } } },
+                       'priority' => { 'priority' => { 'selected_option' => { 'value' => '5' } } },
+                       'due_date' => { 'due_date' => { 'selected_date' => '2026-10-12' } },
+                       'new_comment' => { 'new_comment' => { 'value' => 'Changed from card' } }
+                     } } }
+    calls = capture_interaction(edit)
+    assert_equal 3, @issue.status_id
+    assert_equal 5, @issue.priority_id
+    assert_equal Date.new(2026, 10, 12), @issue.due_date
+    assert_equal 'Changed from card', @issue.notes.last
+    assert_equal 'chat.update', calls.first[0]
+    assert_equal 'C123', calls.first[1]['channel']
+    assert_equal 'Important', calls.first[1].dig('metadata', 'entities', 0, 'entity_payload', 'fields', 'priority', 'value')
+  end
+
+  def test_main_card_assignment_refreshes_card_without_opening_detail_pane
+    prepare_action_issue
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_assign_to_me' }])
+    button['container'].merge!('type' => 'message_attachment', 'channel_id' => 'C123', 'message_ts' => '123.456')
+    calls = capture_interaction(button)
+    assert_equal 3, @issue.assigned_to_id
+    assert_equal ['chat.update'], calls.map(&:first)
+  end
+
+  def test_invalid_priority_and_date_do_not_write
+    prepare_action_issue
+    RedmineSlackNotification.stub(:config, @settings) do
+      assert_equal :restricted, WORK.update_issue(@issue, @user, priority_id: '999')
+      assert_equal :restricted, WORK.update_issue(@issue, @user, due_date: '2026-02-30')
+      assert_equal 4, @issue.priority_id
+      assert_equal Date.new(2026, 10, 10), @issue.due_date
+      assert_empty @issue.events
+      assert_equal :saved, WORK.update_issue(@issue, @user, due_date: '')
+      assert_nil @issue.due_date
+    end
   end
 end
 

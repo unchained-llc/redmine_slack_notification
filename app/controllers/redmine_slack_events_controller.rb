@@ -42,13 +42,14 @@ class RedmineSlackEventsController < ActionController::Base
       return head :bad_request unless source.is_a?(Hash)
       interaction = payload.slice('type', 'trigger_id')
       interaction['user'] = { 'id' => payload.dig('user', 'id') }
-      interaction[source_key] = source.slice('type', 'entity_url', 'external_ref')
+      interaction[source_key] = source.slice('type', 'entity_url', 'external_ref', 'channel_id', 'message_ts',
+                                              'callback_id', 'private_metadata')
       if source_key == 'container'
         interaction['actions'] = Array(payload['actions']).map { |action| action.is_a?(Hash) ? action.slice('action_id') : {} }
       else
         values = source.dig('state', 'values')
         return head :bad_request unless values.is_a?(Hash)
-        interaction['view']['state'] = { 'values' => values.slice('status', 'new_comment') }
+        interaction['view']['state'] = { 'values' => values.slice('status', 'priority', 'due_date', 'new_comment') }
       end
       RedmineSlackWorkObjectInteractionJob.perform_later(payload['api_app_id'], team_id, interaction)
       return head :ok

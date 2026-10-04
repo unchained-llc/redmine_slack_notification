@@ -149,6 +149,35 @@ class SlackEventsControllerTest < Minitest::Test
     end
   end
 
+  def test_signed_card_and_modal_interactions_preserve_only_scoped_context
+    card = { 'type' => 'block_actions', 'api_app_id' => 'ATEST', 'team' => { 'id' => 'TTEST' },
+             'user' => { 'id' => 'U123' }, 'trigger_id' => 'trigger',
+             'container' => { 'type' => 'message_attachment', 'entity_url' => 'https://example.com/issues/7',
+                              'external_ref' => { 'id' => 'issue7' }, 'channel_id' => 'C123',
+                              'message_ts' => '123.456', 'other' => 'drop' },
+             'actions' => [{ 'action_id' => 'redmine_edit_issue', 'value' => 'drop' }] }
+    queued = []
+    RedmineSlackWorkObjectInteractionJob.stub(:perform_later, ->(*args) { queued << args }) do
+      assert_equal :ok, dispatch(raw: URI.encode_www_form('payload' => JSON.generate(card))).status
+      assert_equal 'C123', queued.first[2].dig('container', 'channel_id')
+      refute queued.first[2]['container'].key?('other')
+      refute queued.first[2]['actions'].first.key?('value')
+      modal = card.merge('type' => 'view_submission', 'view' => {
+        'type' => 'modal', 'callback_id' => 'redmine_edit_issue', 'private_metadata' => '{}',
+        'state' => { 'values' => {
+          'priority' => { 'priority' => { 'selected_option' => { 'value' => '5' } } },
+          'due_date' => { 'due_date' => { 'selected_date' => '2026-10-12' } },
+          'unrelated' => { 'value' => 'drop' }
+        } }
+      })
+      assert_equal :ok, dispatch(raw: URI.encode_www_form('payload' => JSON.generate(modal))).status
+      values = queued.last[2].dig('view', 'state', 'values')
+      assert_equal '5', values.dig('priority', 'priority', 'selected_option', 'value')
+      assert_equal '2026-10-12', values.dig('due_date', 'due_date', 'selected_date')
+      refute values.key?('unrelated')
+    end
+  end
+
   def test_thread_reply_is_queued_only_when_enabled_and_for_the_configured_channel
     @settings['slack'].merge!('thread_comments' => true, 'default_channel_id' => 'C123')
     @payload['event'] = { 'type' => 'message', 'user' => 'U123', 'text' => 'Reply',

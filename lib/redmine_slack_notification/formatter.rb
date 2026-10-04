@@ -422,7 +422,8 @@ module RedmineSlackNotification
         'priority' => ['priority', -> { issue.priority&.name }],
         'due_date' => ['due_date', -> { issue.due_date&.iso8601 }]
       }.each do |key, (setting, getter)|
-        next unless metadata_enabled?('issue', setting, action: action)
+        next unless metadata_enabled?('issue', setting, action: action) ||
+                    (RedmineSlackNotification::WorkObjects.actions_enabled?(issue) && %w[status priority due_date].include?(key))
 
         value = getter.call.to_s
         next if value.empty?
@@ -431,7 +432,8 @@ module RedmineSlackNotification
         fields[key]['type'] = 'slack#/types/date' if key == 'due_date'
       end
       { 'assignee' => ['assignee', :assigned_to], 'created_by' => ['author', :author] }.each do |key, (setting, accessor)|
-        next unless metadata_enabled?('issue', setting, action: action)
+        next unless metadata_enabled?('issue', setting, action: action) ||
+                    (key == 'assignee' && RedmineSlackNotification::WorkObjects.actions_enabled?(issue))
 
         user = issue.public_send(accessor)
         next unless user
@@ -456,6 +458,13 @@ module RedmineSlackNotification
       issue_url = url("/issues/#{issue.id}")
       entity_payload = { 'attributes' => attributes, 'fields' => fields }
       entity_payload['custom_fields'] = custom_fields unless custom_fields.empty?
+      if RedmineSlackNotification::WorkObjects.actions_enabled?(issue)
+        entity_payload['display_order'] = %w[status assignee priority due_date].select { |key| fields.key?(key) }
+        entity_payload['actions'] = { 'primary_actions' => [
+          { 'text' => '課題を編集', 'action_id' => 'redmine_edit_issue' },
+          { 'text' => '自分に割り当てる', 'action_id' => 'redmine_assign_to_me' }
+        ] }
+      end
       result.merge(
         'text' => link_issue_reference(result.dig('attachments', 0, 'fallback'), issue.id),
         'metadata' => { 'entities' => [{
