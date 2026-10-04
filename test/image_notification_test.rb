@@ -1822,6 +1822,66 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal '2026-10-10', metadata.dig('entity_payload', 'fields', 'due_date', 'value')
   end
 
+  def test_link_refresh_unfurls_current_issue_for_authorized_viewer
+    @settings['slack']['work_object_actions'] = { 'enabled' => true }
+    event = { 'type' => 'link_shared', 'is_unfurl_refresh' => true, 'user' => 'U123',
+              'source' => 'conversations_history', 'unfurl_id' => 'refresh-id',
+              'links' => [{ 'url' => @url }, { 'url' => @url },
+                          { 'url' => 'https://other.example.com/issues/7' }] }
+    calls = []
+    RedmineSlackNotification.stub(:config, @settings) do
+      Issue.stub(:find_by, @issue) do
+        User.stub(:find_by, @user) do
+          RedmineSlackNotification.stub(:slack_api, ->(*args, **options) {
+            calls << [*args, options]
+            { 'ok' => true }
+          }) { WORK.unfurl_links('ATEST', 'TTEST', event) }
+        end
+      end
+    end
+    assert_equal 1, calls.length
+    method, body, token, options = calls.first
+    assert_equal 'chat.unfurl', method
+    assert_equal({ 'unfurl_id' => 'refresh-id', 'source' => 'conversations_history' }, body.reject { |key, _| key == 'metadata' })
+    assert_equal 'test-token', token
+    assert_equal true, options[:form]
+    entities = body.dig('metadata', 'entities')
+    assert_equal 1, entities.length
+    assert_equal @url, entities.first['app_unfurl_url']
+    assert_equal 'Current title', entities.first.dig('entity_payload', 'attributes', 'title', 'text')
+    assert_equal %w[redmine_edit_issue redmine_assign_to_me], entities.first.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
+  end
+
+  def test_link_unfurl_uses_message_target_and_rejects_inaccessible_issues
+    event = { 'type' => 'link_shared', 'user' => 'U123', 'channel' => 'C123',
+              'message_ts' => '123.456', 'links' => [{ 'url' => @url }] }
+    calls = []
+    RedmineSlackNotification.stub(:config, @settings) do
+      Issue.stub(:find_by, @issue) do
+        User.stub(:find_by, @user) do
+          RedmineSlackNotification.stub(:slack_api, ->(*args, **options) {
+            calls << [*args, options]
+            { 'ok' => true }
+          }) do
+            WORK.unfurl_links('ATEST', 'TTEST', event)
+            assert_equal({ 'channel' => 'C123', 'ts' => '123.456' }, calls.first[1].reject { |key, _| key == 'metadata' })
+            calls.clear
+            @issue.define_singleton_method(:visible?) { |_viewer| false }
+            WORK.unfurl_links('ATEST', 'TTEST', event)
+            assert_empty calls
+            @issue.define_singleton_method(:visible?) { |_viewer| true }
+            @issue.define_singleton_method(:is_private?) { true }
+            WORK.unfurl_links('ATEST', 'TTEST', event)
+            assert_empty calls
+            @issue.define_singleton_method(:is_private?) { false }
+            WORK.unfurl_links('AOTHER', 'TTEST', event)
+            assert_empty calls
+          end
+        end
+      end
+    end
+  end
+
   def test_unmapped_and_locked_users_receive_only_restricted_error
     @event['user'] = 'U999'
     body = capture_details.first[1]

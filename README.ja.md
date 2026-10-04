@@ -224,6 +224,8 @@ Slack アプリの管理画面でも **Work Object Previews → ON → Task を�
 
 通知カードは**通知を生成した時点の情報**です。カードを開いたときと詳細パネルの再読み込み時には、`entity_details_requested` を受け取り、`entity.presentDetails` で最新のチケット情報を返します。[Slack の詳細表示 API](https://docs.slack.dev/reference/methods/entity.presentDetails/)
 
+カード内の「再読み込み」とチケットURLのリンク展開には別途、Slackアプリの Bot Token Scopes に `links:read` と `links:write` を追加してアプリを再インストールし、**Subscribe to bot events** に `link_shared` を追加してください。チケットURLのドメインもアプリのリンク展開対象に登録します。Redmineは署名済み `link_shared` を受け取り、Redmineユーザーとの対応・閲覧権限を確認してから `chat.unfurl` に最新のWork Objectを渡します。[Slack の再読み込み仕様](https://docs.slack.dev/messaging/work-objects-implementation/#refreshing-unfurls)
+
 詳細表示を使う場合は、次の設定を追加してください。`signing_secret` は Slack アプリの **Basic Information → App Credentials → Signing Secret** の値です。Bot Token とは別の値です。環境変数 `SLACK_SIGNING_SECRET` でも指定できます。
 
 ```yaml

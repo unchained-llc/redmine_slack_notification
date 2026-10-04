@@ -26,6 +26,7 @@ end
 
 require_relative '../app/controllers/redmine_slack_events_controller'
 require_relative '../app/jobs/redmine_slack_work_object_details_job'
+require_relative '../app/jobs/redmine_slack_work_object_unfurl_job'
 require_relative '../app/jobs/redmine_slack_work_object_interaction_job'
 require_relative '../app/jobs/redmine_slack_thread_comment_job'
 
@@ -50,7 +51,9 @@ class SlackEventsControllerTest < Minitest::Test
                                                    'X-Slack-Signature' => signature })
     @jobs = []
     RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackWorkObjectDetailsJob.stub(:perform_later, ->(*args) { @jobs << args }) { controller.receive }
+      RedmineSlackWorkObjectDetailsJob.stub(:perform_later, ->(*args) { @jobs << args }) do
+        RedmineSlackWorkObjectUnfurlJob.stub(:perform_later, ->(*args) { @jobs << args }) { controller.receive }
+      end
     end
     controller
   end
@@ -109,6 +112,31 @@ class SlackEventsControllerTest < Minitest::Test
       RedmineSlackWorkObjectDetailsJob.new.perform('ATEST', 'TTEST', @payload['event'])
     end
     assert_equal ['ATEST', 'TTEST', @payload['event']], arguments
+  end
+
+  def test_signed_link_refresh_is_acknowledged_and_queues_only_needed_fields
+    event = { 'type' => 'link_shared', 'is_unfurl_refresh' => true, 'user' => 'U123',
+              'channel' => 'C123', 'message_ts' => '123.456', 'unfurl_id' => 'refresh-id',
+              'source' => 'conversations_history', 'links' => [{ 'url' => 'https://example.com/issues/7' }],
+              'unused_field' => 'do not queue' }
+    response = dispatch(@payload.merge('event' => event))
+    assert_equal :ok, response.status
+    assert_equal 1, @jobs.length
+    assert_equal ['ATEST', 'TTEST'], @jobs.first.first(2)
+    assert_equal true, @jobs.first[2]['is_unfurl_refresh']
+    assert_equal event['links'], @jobs.first[2]['links']
+    refute @jobs.first[2].key?('unused_field')
+    assert_equal :unauthorized, dispatch(@payload.merge('event' => event), signature: 'v0=' + '0' * 64).status
+    assert_empty @jobs
+  end
+
+  def test_unfurl_job_passes_event_to_handler
+    event = { 'type' => 'link_shared', 'user' => 'U123', 'links' => [] }
+    arguments = nil
+    RedmineSlackNotification::WorkObjects.stub(:unfurl_links, ->(*args) { arguments = args }) do
+      RedmineSlackWorkObjectUnfurlJob.new.perform('ATEST', 'TTEST', event)
+    end
+    assert_equal ['ATEST', 'TTEST', event], arguments
   end
 
   def test_signed_work_object_interaction_is_queued_from_form_payload

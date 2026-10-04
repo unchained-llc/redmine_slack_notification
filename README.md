@@ -224,6 +224,8 @@ The SHA-256 digest of the Issue URL is used as `external_ref.id` to satisfy Slac
 
 Notification cards contain a **snapshot from notification generation**. Opening a card or refreshing its detail pane sends `entity_details_requested`; the plugin returns current Issue data through `entity.presentDetails`. See [Slack's details API](https://docs.slack.dev/reference/methods/entity.presentDetails/).
 
+Refreshing the card itself or unfurling an Issue URL requires the Slack app's `links:read` and `links:write` bot scopes, an app reinstall, a `link_shared` bot event subscription, and the Issue URL's domain registered for app unfurling. The plugin handles signed `link_shared` events and verifies the mapped Redmine user's visibility before sending current Work Object metadata through `chat.unfurl`. See [Slack's refresh behavior](https://docs.slack.dev/messaging/work-objects-implementation/#refreshing-unfurls).
+
 To enable details, configure the Slack app and workspace IDs and the **Basic Information → App Credentials → Signing Secret**. This is separate from the Bot Token; `SLACK_SIGNING_SECRET` can supply it instead.
 
 ```yaml

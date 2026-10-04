@@ -63,6 +63,14 @@ module RedmineSlackNotification
       Issue.find_by(id: match[1].to_i)
     end
 
+    def issue_from_link(url)
+      value = url.to_s
+      match = value.match(%r{/issues/([1-9]\d*)\z})
+      return unless match && value == Formatter.url("/issues/#{match[1]}")
+
+      Issue.find_by(id: match[1].to_i)
+    end
+
     def actions_enabled?(issue)
       settings = RedmineSlackNotification.effective_config(issue.project).dig('slack', 'work_object_actions')
       return false unless settings.is_a?(Hash)
@@ -255,6 +263,49 @@ module RedmineSlackNotification
         Rails.logger&.info("RedmineSlackNotification: Work Object details issue=#{issue.id} result=#{allowed ? 'shown' : 'restricted'} warnings=#{Array(result['warnings']).inspect} messages=#{Array(result.dig('response_metadata', 'messages')).inspect}")
         result
       end
+    end
+
+    def unfurl_links(app_id, team_id, event)
+      return unless event.is_a?(Hash) && event['type'] == 'link_shared'
+      return unless event['links'].is_a?(Array) && event['user'].is_a?(String)
+
+      target = if %w[composer conversations_history].include?(event['source']) && event['unfurl_id'].to_s != ''
+                 { 'unfurl_id' => event['unfurl_id'], 'source' => event['source'] }
+               elsif event['channel'].to_s.match?(/\A[CDG][A-Z0-9]+\z/) &&
+                     event['message_ts'].to_s.match?(/\A\d+\.\d+\z/)
+                 { 'channel' => event['channel'], 'ts' => event['message_ts'] }
+               end
+      return unless target
+
+      entities = []
+      token = nil
+      event['links'].first(10).map { |link| link.is_a?(Hash) ? link['url'] : nil }.uniq.each do |url|
+        issue = issue_from_link(url)
+        next unless issue && issue.project.active? && !issue.is_private?
+
+        RedmineSlackNotification.with_project(issue.project) do
+          next unless integration_for(app_id, team_id, project: issue.project) &&
+                      RedmineSlackNotification.effective_config.dig('slack', 'work_object_previews') == true
+          viewer = viewer_for(event['user'])
+          next unless viewer && issue.visible?(viewer)
+
+          issue_token = RedmineSlackNotification.bot_token(issue.project)
+          next if issue_token.to_s.empty? || (token && issue_token != token)
+
+          entity = Formatter.issue_payload(issue, actor: nil, action: 'updated').dig('metadata', 'entities', 0)
+          next unless entity
+
+          entity['app_unfurl_url'] = url
+          entities << entity
+          token ||= issue_token
+        end
+      end
+      return if entities.empty?
+
+      result = RedmineSlackNotification.slack_api('chat.unfurl', target.merge('metadata' => { 'entities' => entities }),
+                                                 token, form: true)
+      Rails.logger&.info("RedmineSlackNotification: Work Object unfurl count=#{entities.length} refresh=#{event['is_unfurl_refresh'] == true}")
+      result
     end
 
     def process_interaction(app_id, team_id, payload)

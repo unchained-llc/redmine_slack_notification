@@ -44,7 +44,8 @@ slack:
   comment_notifications_in_threads: false
   # Required for clickable Work Object details. Configure the Slack app's
   # Events Request URL as https://redmine.example.com/redmine_slack/events and subscribe
-  # to entity_details_requested. The Signing Secret is NOT the Bot Token.
+  # to entity_details_requested. Card refresh also needs link_shared and the
+  # links:read / links:write bot scopes. The Signing Secret is NOT the Bot Token.
   # events:
   #   app_id: 'A0123456789'
   #   team_id: 'T0123456789'
