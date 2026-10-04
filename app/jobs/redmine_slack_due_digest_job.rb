@@ -31,8 +31,7 @@ class RedmineSlackDueDigestJob < ApplicationJob
     end
   end
 
-  private
-
+  # Shared read-only selection for scheduled and personal on-demand digests.
   def due_issues_for(user, today, filters = {})
     max_days = filters.fetch('days') { RedmineSlackNotification.due_reminder_max_days }
     issues = Issue.joins(:status).where(issue_statuses: { is_closed: false })

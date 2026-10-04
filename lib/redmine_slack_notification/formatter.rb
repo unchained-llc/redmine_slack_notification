@@ -25,6 +25,39 @@ module RedmineSlackNotification
                                       estimated_hours done_ratio parent_issue children relations
                                       custom_fields attachments watchers].freeze
     DEFAULT_MESSAGES = {
+      'commands' => {
+        'processing' => 'This submission is still processing. Check the issue before retrying.',
+        'full_form' => 'Open the full form in Redmine',
+        'help' => <<~HELP.strip,
+          *%{command} — Issue commands*
+          • `%{command} my` — Your assigned open issues (up to 10).
+          • `%{command} due` — Your overdue issues and issues due within 3 days (up to 10).
+          • `%{command} reminders` — Your personal due-reminder digest, using the configured reminder window. No day argument.
+          • `%{command} search words` — Search issue subjects (up to 10).
+          • `%{command} 123` — Show one issue; automatically use a card when Work Object previews are configured.
+          • `%{command} new [project-identifier]` — Choose a project and open the issue creation form.
+          • `%{command} comment 123` — Open the comment form from the returned button. Enter the comment in the form.
+          • `%{command} help` — Show this help.
+
+          Results are visible only to you. Lists use the reminder format; a single result uses a card when configured.
+        HELP
+        'denied' => 'Not available. Check your account mapping, permissions, and configuration.',
+        'empty' => 'No matching results.',
+        'results' => 'Issues (up to 10 results)',
+        'choose_project' => 'Choose a project (up to 20). Use new <project identifier> to narrow the list.',
+        'my' => 'My issues',
+        'search' => 'Search results',
+        'due' => 'Due soon',
+        'reminders' => 'My due reminders',
+        'reminders_empty' => 'No due reminders for you with the current reminder settings.',
+        'new' => 'New issue',
+        'comment' => 'Add comment',
+        'save' => 'Save',
+        'cancel' => 'Cancel',
+        'tracker' => 'Tracker',
+        'subject' => 'Subject',
+        'description' => 'Description',
+      },
       'work_objects' => {
         'product_name' => 'Redmine', 'display_type' => 'Issue',
         'edit_issue' => 'Edit issue',
@@ -304,7 +337,7 @@ module RedmineSlackNotification
     def due_digest_line(issue, today)
       subject = text(issue.subject.to_s.gsub(/[|\r\n]/, ' ').strip[0, 120])
       project = text(issue.project.name.to_s.gsub(/[|\r\n]/, ' ').strip[0, 60])
-      days_left = (issue.due_date - today).to_i
+      days_left = issue.due_date ? (issue.due_date - today).to_i : 0
       timing = if days_left.negative?
                  due_message('overdue_timing', days: -days_left)
                elsif days_left.positive?

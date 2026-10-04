@@ -3,6 +3,10 @@
 # Do not commit this file because it contains Slack credentials.
 
 slack:
+  # Register this command in Slack with Request URL /redmine_slack/commands.
+  # Requires the commands scope and an app reinstall. Omit to disable.
+  # Use /redmine reminders for a private, on-demand digest of your due issues.
+  slash_command: /redmine
   # SLACK_BOT_TOKEN can supply the shared token instead.
   bot_token: 'xoxb-REPLACE-ME'
   default_channel_id: 'C0123456789'
@@ -166,6 +170,38 @@ due_reminders:
 # All displayed notification wording is optional. The values below are examples;
 # edit individual keys as needed. %{...} are placeholders.
 messages:
+  commands:
+    processing: 'This submission is still processing. Check the issue before retrying.'
+    full_form: 'Open the full form in Redmine'
+    # %{command} is replaced with slack.slash_command.
+    help: |-
+      *%{command} — Issue commands*
+      • `%{command} my` — Your assigned open issues (up to 10).
+      • `%{command} due` — Your overdue issues and issues due within 3 days (up to 10).
+      • `%{command} reminders` — Your personal due-reminder digest, using the configured reminder window. No day argument.
+      • `%{command} search words` — Search issue subjects (up to 10).
+      • `%{command} 123` — Show one issue; automatically use a card when Work Object previews are configured.
+      • `%{command} new [project-identifier]` — Choose a project and open the issue creation form.
+      • `%{command} comment 123` — Open the comment form from the returned button. Enter the comment in the form.
+      • `%{command} help` — Show this help.
+
+      Results are visible only to you. Lists use the reminder format; a single result uses a card when configured.
+    denied: 'Not available. Check your account mapping, permissions, and configuration.'
+    empty: 'No matching results.'
+    results: 'Issues (up to 10 results)'
+    choose_project: 'Choose a project (up to 20). Use new <project identifier> to narrow the list.'
+    my: 'My issues'
+    search: 'Search results'
+    due: 'Due soon'
+    reminders: 'My due reminders'
+    reminders_empty: 'No due reminders for you with the current reminder settings.'
+    new: 'New issue'
+    comment: 'Add comment'
+    save: 'Save'
+    cancel: 'Cancel'
+    tracker: 'Tracker'
+    subject: 'Subject'
+    description: 'Description'
   events:
     issue:
       created: Issue created

@@ -4,7 +4,7 @@
 
 Redmine 7 の Issue、Wiki、News、作業時間、Version、Project のイベントを Slack に通知するプラグインです。Issue の期日が近づいたとき、担当者に Slack DM で毎日リマインダーを送ることもできます。通知には Redmine の対象ページへのリンクと、色付きの Block Kit attachment を使います。配信は ActiveJob を経由し、通常は Sidekiq の `slack` キューで処理します。
 
-このプラグインは通知専用です。Slack ボタン、スラッシュコマンド、プロジェクト設定タブ、Redmine のカスタムフィールドは追加しません。
+このプラグインは通知、Work Object操作、任意のスラッシュコマンドを提供します。プロジェクト設定タブやRedmineのカスタムフィールドは追加しません。
 
 ## 要件とセットアップ
 
@@ -249,6 +249,44 @@ users:
 
 失敗時は Redmine／Sidekiq ログの `Work Object details failed` または `Work Object unfurl failed` に Slack API のエラーコードを記録します。読み取り成功時の調査用ログは出力しません。`missing_interactivity_url` が返る場合は、Slack アプリの **Interactivity & Shortcuts** の Request URL を設定してください。
 
+### Work Object カードの表示項目
+
+カード内の項目は `work_object_fields` のYAML記載順に表示します。`false` の項目と空の項目は飛ばします。Description／Last commentの末尾固定はありません。プロジェクト別設定がある場合は、その記載順を先に使い、引き継いだ項目を全体設定の順で後ろに追加します。
+
+`slack.work_object_fields` でカード本体の全対応項目を個別に表示・非表示にできます。`true` が表示、`false` が非表示です。省略した項目は非表示です。この設定は `work_object_actions` や通知本文の `metadata.issue` より優先します。項目が空なら表示しません（担当者は「未割当」、進捗は `0%` も表示）。進捗はバーではなく正確な％表示です。
+
+設定全体を省略した場合はカード本体の項目を表示しません。`projects.<identifier>.slack.work_object_fields` でプロジェクト別に上書きできます。対象はメインカードの項目で、必須の件名・チケット番号、右ペインの詳細・編集権限は変更しません。
+
+```yaml
+slack:
+  work_object_fields:
+    status: true
+    assignee: true
+    priority: true
+    due_date: true
+    category: true
+    done_ratio: true
+    project: false
+    tracker: false
+    author: false
+    updater: false
+    target_version: false
+    start_date: false
+    estimated_hours: false
+    description: false
+    last_comment: false
+```
+
+`last_comment: true` は最後の公開コメントの投稿者・ISO 8601日時・本文を表示します。非公開・空のコメントは除外し、本文は1,000文字で省略します。最後のコメントが通知本文と完全一致し、省略がない場合のみ本文側の重複を除きます。編集・削除差分は残します。カード再読み込み時に最新の公開コメントを取得します。
+
+`description: true` でカードに説明文を表示します。空欄は非表示、1,000文字を超える場合は省略します。右ペインの説明全文は従来どおりです。
+
+表示文言の既定値は英語です。`messages.work_objects` でボタン・編集画面・エラー文言、`messages.fields` で編集項目名、`messages.values.unassigned` で未割当表示を変更できます。全キーを設定例に掲載しています。`edit_title` と `edit_failed` は `%{id}` を使用できます。Slack自身が表示する標準項目名・メニューはSlackの言語設定に従います。
+
+カードの「外部サービスで開く」は課題URLを開きます。`messages.work_objects.open_issue: '%{product_name}で開く'` で表示名を指定できます。
+
+メインカードの「コメントを追加」はコメント専用モーダルを開きます。コメント追加権限を確認し、課題の各属性は変更しません。右ペインの編集操作は引き続き利用できます。表示名は `messages.work_objects.add_comment` で設定します。
+
 ### Work Object カードと詳細パネルからの操作
 
 担当者は「課題を編集」から、割り当て可能なRedmineユーザーと「未割当」を選べます。詳細パネルのAssigneeも編集できます。保存時に閲覧・編集権限と割り当て可能なユーザーを再確認します。
@@ -268,6 +306,46 @@ slack:
 詳細パネルからも、許可されたステータス・優先度・期日を編集し、任意でコメントを追加できます。モーダルの担当者欄には割り当て可能なユーザーと「未割当」を表示します（候補が99人以下の場合）。「自分に割り当てる」は、すでに本人が担当者なら変更しません。操作を受信した後もSlackユーザーとRedmineユーザーの対応、チケットの公開・閲覧・編集権限、遷移可能なステータス、有効な優先度、割り当て可能なユーザーを再確認します。操作結果は元のカードまたは詳細パネルへ反映します。保存後にSlack側のカード更新が失敗しても、Redmineへの書き込みは再実行しません。
 
 Work Object の「会話」表示は Redmine のコメント履歴とは別で、既存コメントは表示されません。操作が有効なチケットでは、詳細パネルの編集フォームから新規コメントを追加できます。通知スレッドからのコメント追加は、次の設定で利用できます。
+
+### Work Object ボタンの選択と順序
+
+`slack.work_object_buttons` の `true/false` と記載順で、カード・詳細パネルの操作を選べます。設定がある場合、省略したボタンは非表示です。設定全体を省略すると従来のボタン構成を維持します。プロジェクト別設定のキーを先に並べ、継承したキーを後に並べます。
+
+```yaml
+slack:
+  work_object_actions: true
+  work_object_buttons:
+    add_comment: false
+    open_issue: false
+    edit_issue: false
+    change_assignee: false
+    assign_to_me: false
+    start_work: true
+    complete_work: true
+    log_time: false
+    watch: false
+  work_object_start_status_id: 3
+  # Completion status ID; use the actual completed status from your workflow.
+  work_object_complete_status_id: 5
+```
+
+exampleは作業開始・作業完了だけを有効にし、開始先IDを3、完了先IDを5にしています。実際のRedmineワークフローに合わせてIDを変更してください。
+
+| キー | 操作 |
+| --- | --- |
+| `add_comment` | コメント専用モーダル |
+| `open_issue` | 外部サービスの課題URLを開く |
+| `edit_issue` | 課題編集モーダル |
+| `change_assignee` | 担当者専用モーダル |
+| `assign_to_me` | 操作したユーザーに割り当て |
+| `start_work` | `work_object_start_status_id` の状態へ遷移 |
+| `complete_work` | `work_object_complete_status_id` の完了状態へ遷移 |
+| `log_time` | Redmineの作業時間登録画面を開く。登録はその画面で行う |
+| `watch` | 本人のウォッチ登録・解除 |
+
+先頭2個は主ボタン、続く5個は「その他」メニューです。最大7個まで表示し、超過分は表示せず警告ログを出します。作業開始・作業完了は遷移先ID未設定・到達済みなら非表示です。両方を有効にすると、開始前は「作業開始」、設定した開始ステータスでは「作業完了」だけ表示します。完了先ステータスまたはRedmineの終了ステータスでは両方を非表示にします。両方のステータスIDを指定してください。片方だけ有効な場合は従来どおり独立して表示します。どちらも押下時にRedmineのワークフローと編集権限を再確認します。完了先IDは実際の完了ステータスを指定してください。右ペインでは編集権限・担当者・ウォッチ状態に応じて不要な操作を除きます。共有カードはユーザーごとに表示を変えられないため、個人の権限・状態は操作時に確認します。作業時間登録はRedmine側の権限・必須項目に従います。表示名は同名の `messages.work_objects` キーで上書きできます。
+
+`watch: true` で登録・解除の両方が有効になります。共有カードは「ウォッチ設定」で本人の現在状態と登録／解除ボタンを表示し、右ペインは状態に応じて切り替えます。独立した `unwatch` 設定は不要です。表示文言は `messages.work_objects` の `watch_settings`、`watching`、`not_watching`、`watch`、`unwatch` で指定できます。
 
 ### メールアドレスで閲覧ユーザーを自動対応付けする
 
@@ -453,6 +531,29 @@ users:
 
 新しい担当者には Slack の `<@U0123456789>` メンション形式を使います。Issue の作成者、Journal の作成者、Wiki の更新者、Issue 更新見出しの操作者には、自動メンションを付けず名前を表示します。
 
+## スラッシュコマンド
+
+`slack.slash_command: /redmine` を設定し、Slackアプリに同名のコマンドを登録します。省略すると無効です。Request URLは `https://redmine.example.com/redmine_slack/commands`。`commands` スコープを追加してアプリを再インストールしてください。Interactivityは `/redmine_slack/interactions` を使用します。既存の署名シークレット、app/team ID、Bot Token、ユーザー対応付けも必要です。グローバルの連携設定・ユーザー対応付けを使用し、同じ連携に属するプロジェクトだけを対象にします。
+
+追加テーブル・DBマイグレーションは不要です。再送対策には既存の `Rails.cache` を使用し、処理中は5分、成功済みは24時間記録します。入力エラー時は記録を解除し、修正後に再送できます。例外時は保存結果が不明な可能性があるため、短時間の処理中記録を残します。DB保存とキャッシュ更新は一体ではないため、キャッシュ消失・期限切れ・プロセス内のみのキャッシュ・保存直後の異常終了では重複の可能性が残ります。複数Webプロセス間の抑止には、`unless_exist` を原子的に扱える共有キャッシュが必要です。プラグインから新しいキャッシュサービスを導入することはありません。
+
+| コマンド | 動作 |
+| --- | --- |
+| `/redmine` / `/redmine help` | 使い方と自分の課題・期限・リマインダー・新規作成ボタン |
+| `/redmine 123` / `/redmine #123` | 設定済みならWork Objectカード、未設定ならリンク・状態・コメント追加ボタン |
+| `/redmine my` | 自分に直接割り当てられた未完了課題 |
+| `/redmine due` | 自分の期限超過・3日以内が期日の課題 |
+| `/redmine reminders` | 定期リマインダーの設定で、自分の期日一覧を今すぐ取得 |
+| `/redmine search キーワード` | 題名の部分一致検索（大文字小文字を区別しない） |
+| `/redmine new [プロジェクト識別子]` | プロジェクト選択後、トラッカー・題名・説明の作成フォーム |
+| `/redmine comment 123` | コメントフォームを開くボタン |
+
+結果は実行した本人だけに表示します。番号指定、または `my`・`due`・`search` の結果が1件の場合、対象プロジェクトの `slack.work_object_previews: true` が有効でコマンドと同じBot Tokenを使用していれば、自動でWork Objectカードを表示します。項目・ボタンは既存のYAML設定に従い、新たな切替設定は不要です。未設定や非公開課題では簡易表示を使います。複数件の課題一覧はリマインダーと同じ色付き添付・件数見出し・箇条書きに統一し、チケットリンク・プロジェクト名・期日までの相対日数を表示します。期日なしでは日数を省略します。並び順は維持し、各行のボタンは表示しません。行の書式は `messages.due_reminders`、見出しは `messages.commands.my`・`.due`・`.search` を使います。コメント操作は `/redmine 123` または `/redmine comment 123` から行えます。一覧は最大100件の候補から10件、プロジェクトは最大20件を表示し、現在のチャンネルに対応するプロジェクトを優先します。プロジェクト識別子で絞り込めます。閲覧権限を確認し、保存時にも権限とRedmineの検証を再確認します。必須カスタムフィールドは簡易作成フォームでは入力できないため、フォーム内のRedmineへのリンクから登録してください。コメント追加には `work_object_actions: true` が必要で、既存の公開課題編集ポリシーに従います。保存後は通常のRedmine通知処理が動きます。チャンネルへ共有する操作は追加していません。
+
+`/redmine reminders` は定期実行と同じ抽出・表示処理を使います。自分が直接担当する未完了課題のうち、閲覧権限、`due_reminders.enabled`、全体・プロジェクト別の `due_reminders.days` を満たすものが対象です。期限超過・今日・近日の一覧を実行した会話で本人だけに返し、0件でも応答します。100件ずつに分割し、現在のapp/teamと本人のSlack対応付けに一致する課題に限定します。全員向けcronの起動やスケジュール変更は行いません。`due` の固定3日・最大10件とは異なり、設定した期間で全件を返します。表示は既存の `messages.due_reminders` と色設定を使用し、ボタン名と0件時の文言は `messages.commands` で変更できます。Slack側のコマンド追加登録・スコープ追加・DBテーブル追加は不要です。
+
+表示文言はexampleの `messages.commands` で変更できます。`messages.commands.help` は複数行のコマンド一覧で、`%{command}` を `slack.slash_command` に置換します。既存YAMLで `help` を上書きしている場合は、その値を更新するか削除すると新しい既定文を利用できます。スラッシュコマンドはスレッド内では使えません。既存のスレッド返信連携を使用してください。一覧はSlackキューで処理し、新規・コメントフォームは表示されたボタンを押して開きます。フォームを開く処理と保存は同期処理のため、Slackの3秒制限内に収まるよう、ユーザー照合とDBの応答時間に注意してください。
+
 ## 毎日の期日リマインダー DM
 
 Redmine アプリケーションのタイムゾーンに合わせて、タスクを 1 日 1 回実行します。タスクは `slack` キューにジョブを登録し、ワーカーが DM を送ります。
@@ -562,84 +663,7 @@ YAML を変更した場合は Redmine と Sidekiq の両方を再起動してく
 ```bash
 ruby -Itest test/image_notification_test.rb
 ruby -Itest test/slack_events_controller_test.rb
+ruby -Itest test/slash_commands_cache_test.rb
 ```
 
 テストはスタブを使って通知の整形と配信ロジックを確認します。追加の `ruby -Itest test/thread_comments_persistence_test.rb` は ActiveRecord と sqlite3 が利用できる環境で実行し、メモリ内のテスト用チケット・コメントテーブルで保存、重複抑制、権限拒否、通知ループ抑制を確認します。本番DBやRedisへ接続せず、Slackへの投稿や稼働中のRedmine環境も検証しません。
-
-### Work Object カードの表示項目
-
-カード内の項目は `work_object_fields` のYAML記載順に表示します。`false` の項目と空の項目は飛ばします。Description／Last commentの末尾固定はありません。プロジェクト別設定がある場合は、その記載順を先に使い、引き継いだ項目を全体設定の順で後ろに追加します。
-
-`slack.work_object_fields` でカード本体の全対応項目を個別に表示・非表示にできます。`true` が表示、`false` が非表示です。省略した項目は非表示です。この設定は `work_object_actions` や通知本文の `metadata.issue` より優先します。項目が空なら表示しません（担当者は「未割当」、進捗は `0%` も表示）。進捗はバーではなく正確な％表示です。
-
-設定全体を省略した場合はカード本体の項目を表示しません。`projects.<identifier>.slack.work_object_fields` でプロジェクト別に上書きできます。対象はメインカードの項目で、必須の件名・チケット番号、右ペインの詳細・編集権限は変更しません。
-
-```yaml
-slack:
-  work_object_fields:
-    status: true
-    assignee: true
-    priority: true
-    due_date: true
-    category: true
-    done_ratio: true
-    project: false
-    tracker: false
-    author: false
-    updater: false
-    target_version: false
-    start_date: false
-    estimated_hours: false
-    description: false
-    last_comment: false
-```
-
-`last_comment: true` は最後の公開コメントの投稿者・ISO 8601日時・本文を表示します。非公開・空のコメントは除外し、本文は1,000文字で省略します。最後のコメントが通知本文と完全一致し、省略がない場合のみ本文側の重複を除きます。編集・削除差分は残します。カード再読み込み時に最新の公開コメントを取得します。
-
-`description: true` でカードに説明文を表示します。空欄は非表示、1,000文字を超える場合は省略します。右ペインの説明全文は従来どおりです。
-
-表示文言の既定値は英語です。`messages.work_objects` でボタン・編集画面・エラー文言、`messages.fields` で編集項目名、`messages.values.unassigned` で未割当表示を変更できます。全キーを設定例に掲載しています。`edit_title` と `edit_failed` は `%{id}` を使用できます。Slack自身が表示する標準項目名・メニューはSlackの言語設定に従います。
-
-カードの「外部サービスで開く」は課題URLを開きます。`messages.work_objects.open_issue: '%{product_name}で開く'` で表示名を指定できます。
-
-メインカードの「コメントを追加」はコメント専用モーダルを開きます。コメント追加権限を確認し、課題の各属性は変更しません。右ペインの編集操作は引き続き利用できます。表示名は `messages.work_objects.add_comment` で設定します。
-
-### Work Object ボタンの選択と順序
-
-`slack.work_object_buttons` の `true/false` と記載順で、カード・詳細パネルの操作を選べます。設定がある場合、省略したボタンは非表示です。設定全体を省略すると従来のボタン構成を維持します。プロジェクト別設定のキーを先に並べ、継承したキーを後に並べます。
-
-```yaml
-slack:
-  work_object_actions: true
-  work_object_buttons:
-    add_comment: false
-    open_issue: false
-    edit_issue: false
-    change_assignee: false
-    assign_to_me: false
-    start_work: true
-    complete_work: true
-    log_time: false
-    watch: false
-  work_object_start_status_id: 3
-  # Completion status ID; use the actual completed status from your workflow.
-  work_object_complete_status_id: 5
-```
-
-exampleは作業開始・作業完了だけを有効にし、開始先IDを3、完了先IDを5にしています。実際のRedmineワークフローに合わせてIDを変更してください。
-
-| キー | 操作 |
-| --- | --- |
-| `add_comment` | コメント専用モーダル |
-| `open_issue` | 外部サービスの課題URLを開く |
-| `edit_issue` | 課題編集モーダル |
-| `change_assignee` | 担当者専用モーダル |
-| `assign_to_me` | 操作したユーザーに割り当て |
-| `start_work` | `work_object_start_status_id` の状態へ遷移 |
-| `complete_work` | `work_object_complete_status_id` の完了状態へ遷移 |
-| `log_time` | Redmineの作業時間登録画面を開く。登録はその画面で行う |
-| `watch` | 本人のウォッチ登録・解除 |
-
-先頭2個は主ボタン、続く5個は「その他」メニューです。最大7個まで表示し、超過分は表示せず警告ログを出します。作業開始・作業完了は遷移先ID未設定・到達済みなら非表示です。両方を有効にすると、開始前は「作業開始」、設定した開始ステータスでは「作業完了」だけ表示します。完了先ステータスまたはRedmineの終了ステータスでは両方を非表示にします。両方のステータスIDを指定してください。片方だけ有効な場合は従来どおり独立して表示します。どちらも押下時にRedmineのワークフローと編集権限を再確認します。完了先IDは実際の完了ステータスを指定してください。右ペインでは編集権限・担当者・ウォッチ状態に応じて不要な操作を除きます。共有カードはユーザーごとに表示を変えられないため、個人の権限・状態は操作時に確認します。作業時間登録はRedmine側の権限・必須項目に従います。表示名は同名の `messages.work_objects` キーで上書きできます。
-
-`watch: true` で登録・解除の両方が有効になります。共有カードは「ウォッチ設定」で本人の現在状態と登録／解除ボタンを表示し、右ペインは状態に応じて切り替えます。独立した `unwatch` 設定は不要です。表示文言は `messages.work_objects` の `watch_settings`、`watching`、`not_watching`、`watch`、`unwatch` で指定できます。

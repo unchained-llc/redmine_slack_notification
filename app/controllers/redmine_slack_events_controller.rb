@@ -36,6 +36,9 @@ class RedmineSlackEventsController < ActionController::Base
     return head :forbidden unless payload['api_app_id'] == integration['app_id'] && team_id == integration['team_id']
 
     if form
+      if RedmineSlackNotification::SlashCommands.handles?(payload)
+        return render json: RedmineSlackNotification::SlashCommands.interaction(payload['api_app_id'], team_id, payload)
+      end
       return head :bad_request unless %w[block_actions view_submission].include?(payload['type'])
       source_key = payload['type'] == 'block_actions' ? 'container' : 'view'
       source = payload[source_key]

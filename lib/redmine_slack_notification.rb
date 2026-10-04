@@ -532,6 +532,7 @@ require_relative 'redmine_slack_notification/wiki_content_patch'
 require_relative 'redmine_slack_notification/generic_patches'
 require_relative 'redmine_slack_notification/work_objects'
 require_relative 'redmine_slack_notification/thread_comments'
+require_relative 'redmine_slack_notification/slash_commands'
 require_relative 'redmine_slack_notification/comment_threads'
 require_relative 'redmine_slack_notification/channel_matching'
 
