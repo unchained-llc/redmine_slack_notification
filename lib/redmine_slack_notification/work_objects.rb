@@ -135,6 +135,17 @@ module RedmineSlackNotification
         priorities = IssuePriority.active.to_a
         blocks << select_input('priority', '優先度', priorities, issue.priority_id) if priorities.any? { |priority| priority.id == issue.priority_id }
       end
+      if issue.safe_attribute?('assigned_to_id', viewer)
+        users = issue.assignable_users.to_a
+        if users.length <= 99 && (issue.assigned_to_id.nil? || users.any? { |user| user.id == issue.assigned_to_id })
+          options = [{ 'value' => 'none', 'text' => { 'type' => 'plain_text', 'text' => '未割当' } }] + select_options(users)
+          blocks << { 'type' => 'input', 'block_id' => 'assignee',
+                      'label' => { 'type' => 'plain_text', 'text' => '担当者' },
+                      'element' => { 'type' => 'static_select', 'action_id' => 'assignee',
+                                     'options' => options,
+                                     'initial_option' => options.find { |option| option['value'] == (issue.assigned_to_id || 'none').to_s } } }
+        end
+      end
       if issue.safe_attribute?('due_date', viewer)
         element = { 'type' => 'datepicker', 'action_id' => 'due_date' }
         element['initial_date'] = issue.due_date.iso8601 if issue.due_date
@@ -278,14 +289,17 @@ module RedmineSlackNotification
           return unless values.is_a?(Hash)
           status = values.dig('status', modal ? 'status' : 'status.input', 'selected_option', 'value')
           priority = values.dig('priority', modal ? 'priority' : 'priority.input', 'selected_option', 'value')
+          assignee = values.dig('assignee', modal ? 'assignee' : 'assignee.input', 'selected_option', 'value')
           due_date = values.dig('due_date', modal ? 'due_date' : 'due_date.input', 'selected_date')
           due_date = '' if values.key?('due_date') && due_date.nil?
           comment = values.dig('new_comment', modal ? 'new_comment' : 'new_comment.input', 'value')
           return unless status.nil? || status.to_s.match?(/\A[1-9]\d*\z/)
           return unless priority.nil? || priority.to_s.match?(/\A[1-9]\d*\z/)
+          return unless assignee.nil? || assignee == 'none' || assignee.to_s.match?(/\A[1-9]\d*\z/)
           return unless due_date.nil? || due_date == '' || valid_date?(due_date)
           return unless comment.nil? || (comment.is_a?(String) && comment.length <= 3000)
-          outcome = update_issue(issue, viewer, status_id: status, priority_id: priority, due_date: due_date, comment: comment)
+          outcome = update_issue(issue, viewer, assigned_to_id: assignee, status_id: status,
+                                 priority_id: priority, due_date: due_date, comment: comment)
         end
         Rails.logger&.info("RedmineSlackNotification: Work Object interaction issue=#{issue.id} result=#{outcome}")
         if (outcome == :saved || outcome == :unchanged) && context['channel_id'].to_s.match?(/\A[CDG][A-Z0-9]+\z/) &&
@@ -344,10 +358,12 @@ module RedmineSlackNotification
         next :restricted unless issue.project.active? && !issue.is_private? && issue.visible?(viewer) &&
                                 actions_enabled?(issue)
         attrs = {}
-        if assigned_to_id
+        unless assigned_to_id.nil?
           next :restricted unless issue.attributes_editable?(viewer) && issue.safe_attribute?('assigned_to_id', viewer) &&
-                                  issue.assignable_users.include?(viewer)
-          attrs['assigned_to_id'] = assigned_to_id.to_s unless issue.assigned_to_id == assigned_to_id
+                                  (assigned_to_id.to_s == 'none' ||
+                                   issue.assignable_users.any? { |user| user.id.to_s == assigned_to_id.to_s })
+          new_assignee = assigned_to_id.to_s == 'none' ? nil : assigned_to_id.to_i
+          attrs['assigned_to_id'] = new_assignee&.to_s || '' unless issue.assigned_to_id == new_assignee
         end
         if status_id
           next :restricted unless issue.attributes_editable?(viewer) && issue.safe_attribute?('status_id', viewer) &&

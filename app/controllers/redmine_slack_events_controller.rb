@@ -49,7 +49,7 @@ class RedmineSlackEventsController < ActionController::Base
       else
         values = source.dig('state', 'values')
         return head :bad_request unless values.is_a?(Hash)
-        interaction['view']['state'] = { 'values' => values.slice('status', 'priority', 'due_date', 'new_comment') }
+        interaction['view']['state'] = { 'values' => values.slice('status', 'priority', 'assignee', 'due_date', 'new_comment') }
       end
       RedmineSlackWorkObjectInteractionJob.perform_later(payload['api_app_id'], team_id, interaction)
       return head :ok

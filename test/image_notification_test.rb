@@ -1572,6 +1572,15 @@ class WorkObjectNotificationTest < Minitest::Test
     end
   end
 
+  def test_pilot_card_shows_unassigned_assignee
+    @issue.assigned_to = nil
+    @settings['slack']['work_object_actions'] = { 'issue_ids' => [7] }
+    RedmineSlackNotification.stub(:config, @settings) do
+      fields = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload', 'fields')
+      assert_equal({ 'text' => '未割当' }, fields.dig('assignee', 'user'))
+    end
+  end
+
   def test_work_object_uses_mapped_slack_user_id_for_assignee_and_creator
     user = User.new
     user.login = 'alice'
@@ -1912,7 +1921,7 @@ class WorkObjectDetailsTest < Minitest::Test
     @issue.define_singleton_method(:with_lock) { |&block| block.call }
     @issue.define_singleton_method(:safe_attributes=) do |attrs, _viewer|
       (@events ||= []) << :attributes
-      self.assigned_to_id = attrs['assigned_to_id'].to_i if attrs['assigned_to_id']
+      self.assigned_to_id = attrs['assigned_to_id'].empty? ? nil : attrs['assigned_to_id'].to_i if attrs.key?('assigned_to_id')
       self.status_id = attrs['status_id'].to_i if attrs['status_id']
       self.priority_id = attrs['priority_id'].to_i if attrs['priority_id']
       self.priority = IssuePriority.active.find { |priority| priority.id == priority_id } if attrs['priority_id']
@@ -2014,6 +2023,31 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal 'chat.update', calls.first[0]
     assert_equal 'C123', calls.first[1]['channel']
     assert_equal 'Important', calls.first[1].dig('metadata', 'entities', 0, 'entity_payload', 'fields', 'priority', 'value')
+  end
+
+  def test_main_card_modal_can_assign_and_clear_assignee
+    prepare_action_issue
+    @issue.assigned_to_id = nil
+    @issue.assigned_to = nil
+    click = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_edit_issue' }])
+    click['container'].merge!('type' => 'message_attachment', 'channel_id' => 'C123', 'message_ts' => '123.456')
+    modal = capture_interaction(click).first[1]['view']
+    assignee = modal['blocks'].find { |block| block['block_id'] == 'assignee' }
+    assert_equal %w[none 3], assignee.dig('element', 'options').map { |option| option['value'] }
+    assert_equal 'none', assignee.dig('element', 'initial_option', 'value')
+
+    edit = action_payload('view_submission', 'view')
+    edit['view'] = { 'type' => 'modal', 'callback_id' => 'redmine_edit_issue',
+                     'private_metadata' => modal['private_metadata'],
+                     'state' => { 'values' => { 'assignee' => { 'assignee' => {
+                       'selected_option' => { 'value' => '3' }
+                     } } } } }
+    calls = capture_interaction(edit)
+    assert_equal 3, @issue.assigned_to_id
+    assert_equal 'chat.update', calls.first[0]
+    edit['view']['state']['values']['assignee']['assignee']['selected_option']['value'] = 'none'
+    capture_interaction(edit)
+    assert_nil @issue.assigned_to_id
   end
 
   def test_main_card_assignment_refreshes_card_without_opening_detail_pane

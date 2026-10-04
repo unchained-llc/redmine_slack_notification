@@ -166,6 +166,7 @@ class SlackEventsControllerTest < Minitest::Test
         'type' => 'modal', 'callback_id' => 'redmine_edit_issue', 'private_metadata' => '{}',
         'state' => { 'values' => {
           'priority' => { 'priority' => { 'selected_option' => { 'value' => '5' } } },
+          'assignee' => { 'assignee' => { 'selected_option' => { 'value' => '3' } } },
           'due_date' => { 'due_date' => { 'selected_date' => '2026-10-12' } },
           'unrelated' => { 'value' => 'drop' }
         } }
@@ -173,6 +174,7 @@ class SlackEventsControllerTest < Minitest::Test
       assert_equal :ok, dispatch(raw: URI.encode_www_form('payload' => JSON.generate(modal))).status
       values = queued.last[2].dig('view', 'state', 'values')
       assert_equal '5', values.dig('priority', 'priority', 'selected_option', 'value')
+      assert_equal '3', values.dig('assignee', 'assignee', 'selected_option', 'value')
       assert_equal '2026-10-12', values.dig('due_date', 'due_date', 'selected_date')
       refute values.key?('unrelated')
     end

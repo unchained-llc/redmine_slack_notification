@@ -436,9 +436,11 @@ module RedmineSlackNotification
                     (key == 'assignee' && RedmineSlackNotification::WorkObjects.actions_enabled?(issue))
 
         user = issue.public_send(accessor)
-        next unless user
-
-        fields[key] = work_object_user_field(user)
+        if user
+          fields[key] = work_object_user_field(user)
+        elsif key == 'assignee' && RedmineSlackNotification::WorkObjects.actions_enabled?(issue)
+          fields[key] = { 'type' => 'slack#/types/user', 'user' => { 'text' => '未割当' } }
+        end
       end
       custom_fields = []
       {
@@ -484,7 +486,11 @@ module RedmineSlackNotification
         fields[key] = { 'value' => value.to_s } unless value.to_s.empty?
       end
       { 'assignee' => issue.assigned_to, 'created_by' => issue.author }.each do |key, user|
-        fields[key] = work_object_user_field(user) if user
+        if user
+          fields[key] = work_object_user_field(user)
+        elsif key == 'assignee' && RedmineSlackNotification::WorkObjects.actions_enabled?(issue)
+          fields[key] = { 'type' => 'slack#/types/user', 'user' => { 'text' => '未割当' } }
+        end
       end
       fields['due_date'] = { 'type' => 'slack#/types/date', 'value' => issue.due_date.iso8601 } if issue.due_date
       { 'date_created' => issue.created_on, 'date_updated' => issue.updated_on }.each do |key, value|
