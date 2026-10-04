@@ -2025,6 +2025,25 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal ['chat.update'], calls.map(&:first)
   end
 
+  def test_failed_card_refresh_does_not_retry_saved_comment
+    prepare_action_issue
+    edit = action_payload('view_submission', 'view')
+    edit['view'] = { 'type' => 'modal', 'callback_id' => 'redmine_edit_issue',
+                     'private_metadata' => JSON.generate(@event.slice('entity_url', 'external_ref').merge(
+                       'channel_id' => 'C123', 'message_ts' => '123.456')),
+                     'state' => { 'values' => { 'new_comment' => { 'new_comment' => { 'value' => 'Once' } } } } }
+    RedmineSlackNotification.stub(:config, @settings) do
+      Issue.stub(:find_by, @issue) do
+        User.stub(:find_by, @user) do
+          RedmineSlackNotification.stub(:slack_api, ->(*) { raise StandardError, 'refresh failed' }) do
+            WORK.process_interaction('ATEST', 'TTEST', edit)
+          end
+        end
+      end
+    end
+    assert_equal ['Once'], @issue.notes
+  end
+
   def test_invalid_priority_and_date_do_not_write
     prepare_action_issue
     RedmineSlackNotification.stub(:config, @settings) do
