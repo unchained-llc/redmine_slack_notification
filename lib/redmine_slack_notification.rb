@@ -154,11 +154,22 @@ module RedmineSlackNotification
   def channel_id(project)
     return '' unless project
 
-    settings = project_config(project)
-    project_slack = settings['slack']
-    project_channel = project_slack['default_channel_id'].to_s.strip.presence if project_slack.is_a?(Hash)
-    project_channel ||= settings['channel_id'].to_s.strip.presence
-    (project_channel.presence || ChannelMatching.channel_for(project) || config.dig('slack', 'default_channel_id')).to_s.strip
+    current = project
+    seen = {}
+    automatic = effective_config(project).dig('slack', 'auto_map_channels_by_name') == true
+    while current && !seen[current.identifier]
+      seen[current.identifier] = true
+      settings = project_config(current)
+      project_slack = settings['slack']
+      project_channel = project_slack['default_channel_id'].to_s.strip.presence if project_slack.is_a?(Hash)
+      project_channel ||= settings['channel_id'].to_s.strip.presence
+      return project_channel if project_channel
+      channel = ChannelMatching.channel_for(current) if automatic
+      return channel if channel
+
+      current = current.respond_to?(:parent) ? current.parent : nil
+    end
+    config.dig('slack', 'default_channel_id').to_s.strip
   end
 
   def user_mapping

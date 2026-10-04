@@ -3801,6 +3801,74 @@ class AutomaticChannelMatchingTest < Minitest::Test
     assert_equal 'CDEFAULT', resolve(->(*) { flunk 'Directory should be cached' })
   end
 
+  def test_unconfigured_child_inherits_nearest_explicit_ancestor_channel
+    root = OpenStruct.new(identifier: 'root', parent: nil)
+    parent = OpenStruct.new(identifier: 'parent', parent: root)
+    @project.parent = parent
+    @settings['projects'] = { 'root' => { 'channel_id' => 'CROOT' },
+                             'parent' => { 'slack' => { 'default_channel_id' => 'CPARENT' } } }
+    assert_equal 'CPARENT', resolve(->(*) { { 'channels' => [] } })
+    @settings['projects']['parent']['slack']['default_channel_id'] = '  '
+    assert_equal 'CROOT', resolve(->(*) { flunk 'Skip blank ancestor setting' })
+    @settings['projects']['parent']['channel_id'] = 'CLEGACY'
+    assert_equal 'CLEGACY', resolve(->(*) { flunk 'Use ancestor legacy setting' })
+    @settings['projects']['support'] = { 'channel_id' => 'CCHILD' }
+    assert_equal 'CCHILD', resolve(->(*) { flunk 'Child setting takes priority' })
+  end
+
+  def test_parent_channel_does_not_inherit_other_project_settings
+    @project.parent = OpenStruct.new(identifier: 'parent', parent: nil)
+    @settings['projects'] = { 'parent' => { 'channel_id' => 'CPARENT',
+      'slack' => { 'bot_token' => 'parent-token', 'work_object_actions' => true },
+      'events' => { 'issue' => { 'created' => false } } } }
+    @settings['slack']['auto_map_channels_by_name'] = false
+    RedmineSlackNotification.stub(:config, @settings) do
+      assert_equal 'CPARENT', RedmineSlackNotification.channel_id(@project)
+      assert_equal 'channel-test-token', RedmineSlackNotification.bot_token(@project)
+      refute RedmineSlackNotification.effective_config(@project).dig('slack', 'work_object_actions')
+      refute RedmineSlackNotification.effective_config(@project).key?('events')
+    end
+  end
+
+  def test_unconfigured_ancestors_keep_child_name_match_and_global_fallback
+    @project.parent = OpenStruct.new(identifier: 'parent', name: 'Different name', parent: nil)
+    assert_equal 'CMATCH', resolve(->(*) { { 'channels' => [channel] } })
+    MATCHING.instance_variable_set(:@cache, {})
+    assert_equal 'CDEFAULT', resolve(->(*) { { 'channels' => [] } })
+  end
+
+  def test_child_without_matching_channel_uses_existing_parent_named_channel
+    @project.parent = OpenStruct.new(identifier: 'parent', name: 'Parent Project', parent: nil)
+    calls = 0
+    api = ->(*) { calls += 1; { 'channels' => [channel('CPARENT', 'parent-project')] } }
+    assert_equal 'CPARENT', resolve(api)
+    assert_equal 1, calls
+    @project.parent.parent = OpenStruct.new(identifier: 'root', name: 'Root Project', parent: nil)
+    MATCHING.instance_variable_set(:@cache, {})
+    assert_equal 'CROOT', resolve(->(*) { { 'channels' => [channel('CROOT', 'root-project')] } })
+  end
+
+  def test_child_name_match_wins_over_parent_name_match
+    @project.parent = OpenStruct.new(identifier: 'parent', name: 'Parent Project', parent: nil)
+    assert_equal 'CMATCH', resolve(->(*) { { 'channels' => [channel, channel('CPARENT', 'parent-project')] } })
+  end
+
+  def test_child_name_match_wins_over_explicit_parent_and_nearest_parent_match_wins_over_root
+    root = OpenStruct.new(identifier: 'root', name: 'Root Project', parent: nil)
+    @project.parent = OpenStruct.new(identifier: 'parent', name: 'Parent Project', parent: root)
+    @settings['projects'] = { 'parent' => { 'channel_id' => 'CPARENT' }, 'root' => { 'channel_id' => 'CROOT' } }
+    assert_equal 'CMATCH', resolve(->(*) { { 'channels' => [channel] } })
+    MATCHING.instance_variable_set(:@cache, {})
+    @settings['projects'].delete('parent')
+    assert_equal 'CPARENT', resolve(->(*) { { 'channels' => [channel('CPARENT', 'parent-project')] } })
+  end
+
+  def test_child_can_disable_ancestor_name_matching
+    @project.parent = OpenStruct.new(identifier: 'parent', name: 'Parent Project', parent: nil)
+    @settings['projects'] = { 'support' => { 'slack' => { 'auto_map_channels_by_name' => false } } }
+    assert_equal 'CDEFAULT', resolve(->(*) { flunk 'Disabled child must not look up ancestor channels' })
+  end
+
   def test_explicit_project_channel_ids_take_priority_and_do_not_fetch
     @settings['projects'] = { 'support' => { 'slack' => { 'default_channel_id' => 'CEXPLICIT' }, 'channel_id' => 'CLEGACY' } }
     assert_equal 'CEXPLICIT', resolve(->(*) { flunk 'Explicit channel lookup' })

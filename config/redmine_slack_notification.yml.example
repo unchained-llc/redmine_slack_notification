@@ -459,6 +459,9 @@ events:
   project:
     updated: true
 
+# Resolve each level child-to-root: explicit channel, then automatic name match.
+# Use the global default only when no project in the hierarchy resolves a channel.
+# Only channel routing follows the Redmine hierarchy; other settings do not.
 projects:
   agentic:
     # The same slack, events, messages, and users trees can be overridden here.

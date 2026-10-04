@@ -40,7 +40,7 @@ projects:
 1. `<Redmine root>/config/redmine_slack_notification.yml`
 2. `plugins/redmine_slack_notification/config/redmine_slack_notification.yml`
 
-最上位の設定グループ `slack`、`events`、`messages`、`users`、`due_reminders` は、`projects.<identifier>` 以下で上書きできます。ネストしたマップはキーごとにマージされ、省略したプロジェクト設定は全体設定を引き継ぎます。`false` を明示すると、全体設定の `true` を上書きします。Bot Token の優先順位は、`projects.<identifier>.slack.bot_token`、`SLACK_BOT_TOKEN`、全体の `slack.bot_token` の順です。チャンネルは、`projects.<identifier>.slack.default_channel_id`、従来の `projects.<identifier>.channel_id`、全体の `slack.default_channel_id` の順です。プロジェクトのキーには表示名ではなく Redmine の**識別子**を使います。Token またはチャンネルがない場合、通知は送られずログに記録されます。チャンネル ID は通常、公開チャンネルが `C`、非公開チャンネルが `G` で始まります。プロジェクト固有の Token も Git に含めず、YAML の変更後は Redmine と Sidekiq を再起動してください。
+最上位の設定グループ `slack`、`events`、`messages`、`users`、`due_reminders` は、`projects.<identifier>` 以下で上書きできます。ネストしたマップはキーごとにマージされ、省略したプロジェクト設定は全体設定を引き継ぎます。`false` を明示すると、全体設定の `true` を上書きします。Bot Token の優先順位は、`projects.<identifier>.slack.bot_token`、`SLACK_BOT_TOKEN`、全体の `slack.bot_token` の順です。チャンネルは、`projects.<identifier>.slack.default_channel_id`、従来の `projects.<identifier>.channel_id`、子自身の名前による自動照合の順に確認します。見つからなければ近い親から同じ順序で確認し、最後に全体の `slack.default_channel_id` を使います。プロジェクトのキーには表示名ではなく Redmine の**識別子**を使います。Token またはチャンネルがない場合、通知は送られずログに記録されます。チャンネル ID は通常、公開チャンネルが `C`、非公開チャンネルが `G` で始まります。プロジェクト固有の Token も Git に含めず、YAML の変更後は Redmine と Sidekiq を再起動してください。
 
 次の例では、プロジェクト固有の Token とチャンネルを使い、コメント通知と Issue のプロジェクト情報を非表示にし、カードの色・見出し・Slack ユーザーの対応付けを変更します。その他の設定は全体設定を引き継ぎます。
 
@@ -360,6 +360,19 @@ Bot Tokenに `users:read` と `users:read.email` の両方を追加し、アプ�
 
 名前による `auto_map_users_by_name` は送信時のメンションと期日リマインダーの対応付け用です。メール一致は受信側の詳細閲覧・コメント権限確認用であり、送信時のメンションやDMを自動的に有効化するものではありません。
 
+### 親プロジェクトのチャンネルを継承する
+
+各階層で `slack.default_channel_id` または従来の `channel_id`、次にプロジェクト表示名と同名の既存Slackチャンネルを確認します。子自身から始め、見つからなければRedmineの実際の親階層を近い順にたどります。どこにもなければ全体のデフォルトチャンネルを使います。子に同名チャンネルがなく、親に対応する既存チャンネルがある場合、子のチャンネルIDをYAMLへ繰り返し記入する必要はありません。子自身の名前一致は祖先の明示設定より優先します。
+
+継承するのは送信先チャンネルだけです。Bot Token・イベント・文言・ユーザー対応付け・リマインダーは従来の全体／個別設定の規則を維持します。子で使うBotが選択先のチャンネルに参加している必要があります。親階層を変更すると継承先も変わります。名前検索には子の `slack.auto_map_channels_by_name: true` が必要で、各祖先の自動照合にもそのプロジェクトの設定を使います。子で `false` にすると祖先を含めた名前検索を無効化しますが、祖先の明示的なチャンネル指定は引き続き参照します。
+
+```yaml
+projects:
+  parent-project:
+    channel_id: 'C0123456789'
+  # チャンネルを個別指定しない子は、この親のチャンネルを使います。
+```
+
 ### プロジェクト名とチャンネル名の自動マッチング
 
 `slack.auto_map_channels_by_name: true` で、Redmineプロジェクトの**表示名**とSlackチャンネル名を自動照合できます。前後の空白と大文字・小文字の違いを無視し、空白はハイフンに変換します（`Customer Support` → `customer-support`）。プロジェクト識別子は照合に使いません。曖昧な部分一致、チャンネル作成、自動参加は行いません。
@@ -375,7 +388,7 @@ projects:
       default_channel_id: 'C0234567890'
 ```
 
-通知先の優先順は、プロジェクトの `slack.default_channel_id`、旧形式のプロジェクト `channel_id`、一意な名前一致、共通の `slack.default_channel_id` です。一致なし・複数候補・APIエラー時は共通の通知先に戻り、共通設定もなければ通知をスキップしてログに記録します。スイッチはプロジェクト別に上書きできます。
+各プロジェクトで `slack.default_channel_id`、旧形式の `channel_id`、一意な名前一致の順に確認します。子自身、近い親から順に祖先を確認し、最初に見つかったチャンネルを使います。どの階層にもなければ共通の `slack.default_channel_id` を使います。一致なし・複数候補・APIエラー時は共通の通知先に戻り、共通設定もなければ通知をスキップしてログに記録します。スイッチはプロジェクト別に上書きできます。
 
 `users.conversations` でBotが参加しているチャンネルだけを取得します。公開チャンネルには `channels:read`、非公開チャンネルには `groups:read` を追加し、アプリを再インストールしてください。スレッド通知に使う `*:history` とは別のスコープです。アーカイブ済みチャンネルとDMは除外します。一覧はBot Token別にプロセスのメモリへ10分間キャッシュし、DB・Redis・ファイル・Railsキャッシュには保存しません。名前・参加状態の変更が反映されるまで最大10分かかり、ワーカーの再起動でキャッシュは消えます。取得は200件ずつ最大10ページに制限し、不完全な一覧や取得失敗時は自動照合に使いません。キャッシュはワーカーごとに独立します。
 

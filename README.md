@@ -40,7 +40,7 @@ The plugin reads the first configuration file it finds:
 1. `<Redmine root>/config/redmine_slack_notification.yml`
 2. `plugins/redmine_slack_notification/config/redmine_slack_notification.yml`
 
-Every top-level configuration group can be overridden under `projects.<identifier>`: `slack`, `events`, `messages`, `users`, and `due_reminders`. Nested maps merge by key, so omitted project keys inherit the global value. Explicit `false` values override `true`. For Bot Tokens, the priority is `projects.<identifier>.slack.bot_token`, then `SLACK_BOT_TOKEN`, then global `slack.bot_token`. For channels, `projects.<identifier>.slack.default_channel_id` takes priority over the older `projects.<identifier>.channel_id`, then a unique automatic name match when enabled, then global `slack.default_channel_id`. Project keys are Redmine **identifiers**, not display names. A missing token or channel prevents delivery and is logged. Channel IDs typically begin with `C` for public channels or `G` for private channels. Keep every project token out of Git and restart Redmine and Sidekiq after changing the YAML.
+Every top-level configuration group can be overridden under `projects.<identifier>`: `slack`, `events`, `messages`, `users`, and `due_reminders`. Nested maps merge by key, so omitted project keys inherit the global value. Explicit `false` values override `true`. For Bot Tokens, the priority is `projects.<identifier>.slack.bot_token`, then `SLACK_BOT_TOKEN`, then global `slack.bot_token`. For channels, `projects.<identifier>.slack.default_channel_id` takes priority over the older `projects.<identifier>.channel_id`, then a unique automatic name match for that project when enabled. If neither resolves a channel, the same checks are applied to each ancestor from nearest to farthest, then global `slack.default_channel_id` is used. Project keys are Redmine **identifiers**, not display names. A missing token or channel prevents delivery and is logged. Channel IDs typically begin with `C` for public channels or `G` for private channels. Keep every project token out of Git and restart Redmine and Sidekiq after changing the YAML.
 
 For example, this project uses its own token and channel, disables comment notifications, hides Issue project metadata, changes the card color and heading, and overrides one Slack user mapping. Other settings retain their global values:
 
@@ -348,6 +348,19 @@ Add both `users:read` and `users:read.email` Bot Token scopes, then reinstall th
 
 This is distinct from `auto_map_users_by_name`, which only resolves outgoing mentions and due-reminder recipients. Email matching is for incoming viewer/comment authorization and does not automatically enable outgoing mentions or DMs.
 
+### Inherit a parent project channel
+
+For each level, the plugin first checks explicit `slack.default_channel_id` or legacy `channel_id`, then a unique match between the Redmine display name and an existing Slack channel when automatic matching is enabled. It starts with the issue's own project, then follows the actual Redmine parent hierarchy from nearest to farthest. The global default is used only if no project in the hierarchy resolves a channel. Thus a child with no matching channel can use its parent's existing channel without repeating channel IDs in YAML. A child's own name match takes priority over any ancestor setting.
+
+This applies only to destination channels; bot tokens, events, messages, users, and reminder settings keep their existing global/project rules. The bot used by the child must have access to the selected channel. Moving a project changes its inherited destination. `slack.auto_map_channels_by_name: true` must be enabled for the child to search names throughout the hierarchy; each ancestor also uses its own effective automatic-matching setting. Setting it to `false` on the child disables all name lookup, while explicit ancestor channels remain available.
+
+```yaml
+projects:
+  parent-project:
+    channel_id: 'C0123456789'
+  # Children with no channel override use the parent-project channel.
+```
+
 ### Match projects to channels by name
 
 Enable `slack.auto_map_channels_by_name: true` to match Redmine project **display names** to Slack channel names. Names are trimmed and compared case-insensitively; whitespace becomes a hyphen (`Customer Support` → `customer-support`). Project identifiers are not used for matching. No fuzzy matching, channel creation, or automatic joining is performed.
@@ -363,7 +376,7 @@ projects:
       default_channel_id: 'C0234567890'
 ```
 
-Routing priority is explicit project `slack.default_channel_id`, legacy project `channel_id`, a unique name match, then global `slack.default_channel_id`. A missing match, ambiguous match, or API failure uses the global fallback; without a fallback, delivery is skipped and logged. The switch can be overridden per project.
+Routing checks each project from child to root: explicit `slack.default_channel_id`, legacy `channel_id`, then a unique automatic name match. The first resolved channel wins; global `slack.default_channel_id` is used only after exhausting the hierarchy. A missing match, ambiguous match, or API failure uses the global fallback; without a fallback, delivery is skipped and logged. The switch can be overridden per project.
 
 The plugin uses `users.conversations` to list only channels the Bot belongs to. Add `channels:read` for public channels and `groups:read` for private channels, then reinstall the app. These are separate from the `*:history` scopes used for threaded notifications. Archived channels and DMs are excluded. Listings are cached by Bot Token in process memory for ten minutes; no DB, Redis, file storage, or Rails cache is used. Rename/membership changes can take up to ten minutes to be reflected; restarting workers clears their caches. Listing is bounded to ten pages of 200 channels; incomplete or failed listings are not used for matching. Each worker has its own cache.
 
