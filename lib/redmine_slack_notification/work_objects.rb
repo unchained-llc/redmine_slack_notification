@@ -72,8 +72,7 @@ module RedmineSlackNotification
     end
 
     def actions_enabled?(issue)
-      settings = RedmineSlackNotification.effective_config(issue.project).dig('slack', 'work_object_actions')
-      settings.is_a?(Hash) && settings['enabled'] == true
+      RedmineSlackNotification.effective_config(issue.project).dig('slack', 'work_object_actions') == true
     end
 
     def editable_metadata(issue, viewer)

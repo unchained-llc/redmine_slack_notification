@@ -256,13 +256,12 @@ users:
 
 Work Objectが表示される通知では、上部の重複見出し、本文中の件名リンク、カードにも表示されている現在値を省きます。コメント・説明・変更前後の差分・カードにない項目は残します。通知本文の整理は新しい通知から適用されます。
 
-`slack.work_object_actions.enabled: true` を設定すると、Work Object が有効なすべての公開チケットのメインカードにステータス・担当者（未割当の場合も表示）・優先度・期日と「課題を編集」「担当者を変更」を表示します。`enabled: false` で操作を無効にします。「課題を編集」はSlackのモーダルを開き、権限に応じてステータス・担当者・優先度・期日・コメントを変更できます。既定では無効です。Slack アプリの **Interactivity & Shortcuts** を有効にし、Request URL を `https://redmine.example.com/redmine_slack/interactions` に設定します。署名検証には上記の `slack.events` 設定を共用します。
+`slack.work_object_actions: true` を設定すると、Work Object が有効なすべての公開チケットのメインカードにステータス・担当者（未割当の場合も表示）・優先度・期日と「課題を編集」「担当者を変更」を表示します。`work_object_actions: false` で操作を無効にします。「課題を編集」はSlackのモーダルを開き、権限に応じてステータス・担当者・優先度・期日・コメントを変更できます。既定では無効です。Slack アプリの **Interactivity & Shortcuts** を有効にし、Request URL を `https://redmine.example.com/redmine_slack/interactions` に設定します。署名検証には上記の `slack.events` 設定を共用します。
 
 ```yaml
 slack:
   work_object_previews: true
-  work_object_actions:
-    enabled: true
+  work_object_actions: true
 ```
 
 公開済みのカードに埋め込まれた項目・ボタンは自動更新されないため、そのカードは再通知または元のメッセージの更新が必要です。詳細パネルの情報は開くたびに最新のチケットを取得します。

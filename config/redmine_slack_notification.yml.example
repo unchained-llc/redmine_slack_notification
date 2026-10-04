@@ -24,11 +24,10 @@ slack:
   # Override per project with projects.<identifier>.slack.work_object_previews.
   work_object_previews: false
   # Show editable Issue fields and actions on all public Issue Work Object
-  # cards with enabled: true. Omitted or false disables actions.
+  # cards when true. Omitted or false disables actions.
   # Redmine user mapping and permissions are checked again on submission.
   # Set Interactivity & Shortcuts Request URL to /redmine_slack/interactions.
-  # work_object_actions:
-  #   enabled: true
+  work_object_actions: false
   # Save text replies to Issue notification threads as Redmine notes.
   # Requires slack.events, explicit users mappings or auto_map_users_by_email,
   # message.groups + groups:history (private channels), and an app reinstall.

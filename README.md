@@ -252,13 +252,12 @@ Failures are logged in Redmine/Sidekiq as `Work Object details failed` or `Work 
 
 ### Work Object card and detail actions
 
-Set `slack.work_object_actions.enabled: true` to show status, assignee (including unassigned), priority, and due date plus the Edit issue and Change assignee buttons on every public Issue Work Object card with previews enabled. Set `enabled: false` to disable these features. Edit issue opens a Slack modal for permitted status, assignee, priority, due date, and comment changes. The default is disabled. Enable **Interactivity & Shortcuts** in the Slack app and set its Request URL to `https://redmine.example.com/redmine_slack/interactions`. The same `slack.events` signing configuration authenticates the requests.
+Set `slack.work_object_actions: true` to show status, assignee (including unassigned), priority, and due date plus the Edit issue and Change assignee buttons on every public Issue Work Object card with previews enabled. Set `work_object_actions: false` to disable these features. Edit issue opens a Slack modal for permitted status, assignee, priority, due date, and comment changes. The default is disabled. Enable **Interactivity & Shortcuts** in the Slack app and set its Request URL to `https://redmine.example.com/redmine_slack/interactions`. The same `slack.events` signing configuration authenticates the requests.
 
 ```yaml
 slack:
   work_object_previews: true
-  work_object_actions:
-    enabled: true
+  work_object_actions: true
 ```
 
 Fields and buttons embedded in previously posted cards do not update automatically; those messages need a new notification or an in-place update. The detail pane fetches the current issue whenever it opens.
