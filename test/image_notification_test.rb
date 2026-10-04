@@ -1503,6 +1503,88 @@ class WorkObjectNotificationTest < Minitest::Test
     end
   end
 
+  def reduced_history_parent
+    { 'ts' => '1000.000001', 'bot_id' => 'B123', 'app_id' => 'ATEST',
+      'attachments' => [
+        { 'blocks' => [{ 'type' => 'section', 'text' => { 'type' => 'mrkdwn', 'text' => 'Comment body' } }],
+          'fallback' => '[Example] Example User Comment added Task #7: Example issue' },
+        { 'from_url' => 'https://redmine.example.com/issues/7', 'id' => 2 }
+      ] }
+  end
+
+  def test_thread_parent_resolves_reduced_history_card
+    parent = reduced_history_parent
+    Issue.stub(:find_by, ->(id:) { id == 7 ? @issue : nil }) do
+      assert_equal @issue, RedmineSlackNotification::ThreadComments.issue_from_parent(parent, 'ATEST', parent['ts'])
+      parent.delete('app_id')
+      parent['bot_profile'] = { 'app_id' => 'ATEST' }
+      assert_equal @issue, RedmineSlackNotification::ThreadComments.issue_from_parent(parent, 'ATEST', parent['ts'])
+    end
+  end
+
+  def test_reduced_history_card_rejects_untrusted_parent_and_wrong_url
+    resolver = RedmineSlackNotification::ThreadComments
+    parent = reduced_history_parent
+    Issue.stub(:find_by, ->(**) { flunk 'Untrusted parent must not resolve an Issue' }) do
+      assert_nil resolver.issue_from_parent(parent, 'AOTHER', parent['ts'])
+      assert_nil resolver.issue_from_parent(parent, 'ATEST', '1001.000001')
+      parent.delete('bot_id')
+      assert_nil resolver.issue_from_parent(parent, 'ATEST', parent['ts'])
+      parent = reduced_history_parent
+      parent['attachments'][1]['from_url'] = 'https://other.example.com/issues/7'
+      assert_nil resolver.issue_from_parent(parent, 'ATEST', parent['ts'])
+    end
+  end
+
+  def test_reduced_history_card_rejects_ambiguous_or_conflicting_references
+    resolver = RedmineSlackNotification::ThreadComments
+    Issue.stub(:find_by, ->(**) { flunk 'Ambiguous parent must not resolve an Issue' }) do
+      parent = reduced_history_parent
+      parent['attachments'] << { 'from_url' => 'https://redmine.example.com/issues/8', 'id' => 3 }
+      assert_nil resolver.issue_from_parent(parent, 'ATEST', parent['ts'])
+      parent = reduced_history_parent
+      parent['attachments'][0]['fallback'] = '[Example] Comment added Task #8: mentions #7: in subject'
+      assert_nil resolver.issue_from_parent(parent, 'ATEST', parent['ts'])
+      parent = reduced_history_parent
+      parent['attachments'][0].delete('fallback')
+      parent['attachments'][0]['blocks'][0]['text']['text'] = 'Comment mentions #7: an issue'
+      assert_nil resolver.issue_from_parent(parent, 'ATEST', parent['ts'])
+    end
+  end
+
+  def test_reduced_history_reply_saves_then_posts_feedback_in_same_thread
+    resolver = RedmineSlackNotification::ThreadComments
+    parent = reduced_history_parent
+    event = { 'type' => 'message', 'user' => 'U123', 'channel' => 'C123',
+              'thread_ts' => parent['ts'], 'ts' => '1001.000002', 'text' => 'Example reply' }
+    calls = []
+    saved = []
+    Issue.stub(:find_by, @issue) do
+      resolver.stub(:contexts, [nil]) do
+        resolver.stub(:enabled?, true) do
+          resolver.stub(:persist_reply, ->(issue, reply, team) { saved << [issue, reply, team]; :saved }) do
+            RedmineSlackNotification.stub(:bot_token, 'test-token') do
+              RedmineSlackNotification.stub(:channel_id, 'C123') do
+                RedmineSlackNotification::WorkObjects.stub(:integration_for, true) do
+                  RedmineSlackNotification.stub(:slack_api, ->(method, body, _token, **_options) {
+                    calls << [method, body]
+                    method == 'conversations.history' ? { 'messages' => [parent] } : { 'ok' => true }
+                  }) { resolver.process('ATEST', 'T123', event) }
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+    assert_equal [[@issue, event, 'T123']], saved
+    assert_equal %w[conversations.history chat.postMessage], calls.map(&:first)
+    feedback = calls.last[1]
+    assert_equal event['channel'], feedback['channel']
+    assert_equal event['thread_ts'], feedback['thread_ts']
+    assert_includes feedback['text'], '/issues/7'
+  end
+
   def test_compaction_preserves_changes_and_nonduplicated_metadata
     formatter = RedmineSlackNotification::Formatter
     blocks = [

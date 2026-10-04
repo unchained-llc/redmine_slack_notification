@@ -50,6 +50,7 @@ ActiveRecord::Schema.define do
     t.integer :user_id
     t.text :notes
     t.datetime :created_on, precision: 6
+    t.datetime :updated_on, precision: 6
   end
 end
 
@@ -185,7 +186,12 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     @event['ts'] = '1791028111.695359'
     assert_equal :saved, persist
     assert_equal Time.at(1791028111, 695359, :microsecond).utc, Journal.first.created_on
-    Journal.first.update_columns(notes: 'Edited text')
+    assert_equal Journal.first.created_on, Journal.first.updated_on
+    journal = Journal.first
+    # Exercise ActiveRecord's edit timestamps without formatting an unrelated
+    # outbound Slack notification in this minimal database fixture.
+    journal.stub(:notify_slack_journal_comment_changed, nil) { journal.update!(notes: 'Edited text') }
+    refute_equal Journal.first.created_on, Journal.first.updated_on
     assert_equal :duplicate, persist
     assert_equal 1, Journal.count
   end

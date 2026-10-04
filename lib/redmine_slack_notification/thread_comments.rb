@@ -65,7 +65,23 @@ module RedmineSlackNotification
         next unless id && url == Formatter.url("/issues/#{id[1]}")
         return Issue.find_by(id: id[1].to_i)
       end
-      nil
+      issue_from_history_unfurl(message)
+    end
+
+    def issue_from_history_unfurl(message)
+      # conversations.history may reduce an entity unfurl to from_url/id.
+      # The parent app/bot was authenticated above. Bind this reduced URL to
+      # the first Issue reference in our notification fallback, never notes.
+      attachments = Array(message['attachments']).select { |item| item.is_a?(Hash) }
+      notification = attachments.find { |item| item['blocks'].is_a?(Array) && item['fallback'].is_a?(String) }
+      reference = notification && notification['fallback'].match(/(?:\A|\s)#([1-9]\d*):/)
+      return unless reference
+
+      urls = attachments.select { |item| (item.keys - %w[from_url id]).empty? }
+                        .map { |item| item['from_url'] }.compact.uniq
+      return unless urls == [Formatter.url("/issues/#{reference[1]}")]
+
+      Issue.find_by(id: reference[1].to_i)
     end
 
     def process(app_id, team_id, event)
@@ -148,6 +164,9 @@ module RedmineSlackNotification
         User.current = viewer
         journal = issue.init_journal(viewer, event['text'])
         journal.created_on = timestamp
+        # A new imported note is not an edit. Redmine displays "edited" when
+        # updated_on differs from created_on; later edits keep normal timestamps.
+        journal.updated_on = timestamp
         issue.save!
         raise 'Slack reply Journal was not persisted' unless journal.persisted?
         :saved

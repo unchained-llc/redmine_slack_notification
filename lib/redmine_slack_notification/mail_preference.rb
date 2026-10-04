@@ -36,15 +36,12 @@ module RedmineSlackNotification
       return false unless events.all? { |event| RedmineSlackNotification.event_enabled?(project, event) }
 
       RedmineSlackNotification.with_project(project) do
-        # Names alone are insufficient evidence that the recipient owns this
-        # Slack account. Require an explicit login/email mapping.
-        mapping = RedmineSlackNotification.user_mapping
-        slack_id = (mapping[user.login.to_s] || mapping[user.mail.to_s]).to_s.strip
-        return false unless slack_id.to_s.match?(/\A[UW][A-Z0-9]+\z/)
-
         token = RedmineSlackNotification.bot_token(project)
         channel = RedmineSlackNotification.channel_id(project)
         return false if token.to_s.empty? || !channel.to_s.match?(/\A[CG][A-Z0-9]+\z/)
+
+        slack_id = recipient_id(user, token)
+        return false unless slack_id
 
         member?(channel, slack_id, token)
       end
@@ -52,6 +49,36 @@ module RedmineSlackNotification
       # Never include tokens, identities, API response bodies, or content here.
       Rails.logger&.warn("[redmine_slack_notification] Mail retained: #{error.class}")
       false
+    end
+
+    def recipient_id(user, token)
+      mapping = RedmineSlackNotification.user_mapping
+      key = [user.login.to_s, user.mail.to_s].find { |candidate| mapping.key?(candidate) }
+      if key
+        id = mapping[key].to_s.strip
+        return id if id.match?(/\A[UW][A-Z0-9]+\z/)
+
+        return nil
+      end
+
+      # Reuse outgoing name matching, then verify ownership against a fresh
+      # Slack profile before suppressing mail. Do not cache identity evidence.
+      id = RedmineSlackNotification.slack_user_id_for_name(user.login)
+      return unless id.to_s.match?(/\A[UW][A-Z0-9]+\z/)
+
+      response = RedmineSlackNotification.slack_api('users.info', { 'user' => id }, token,
+                                                   form: true, open_timeout: 2, read_timeout: 3)
+      member = response['user']
+      return unless member.is_a?(Hash) && member['id'] == id
+      return if member['deleted'] || member['is_bot'] || member['is_app_user'] || member['is_stranger']
+
+      team = RedmineSlackNotification.effective_config.dig('slack', 'events', 'team_id').to_s
+      return if !team.empty? && (member['team_id'] || member['team']) != team
+
+      email = member.dig('profile', 'email').to_s.strip.downcase
+      return if email.empty? || email != user.mail.to_s.strip.downcase
+
+      id
     end
 
     def notification(action, object, user)
@@ -103,6 +130,7 @@ module RedmineSlackNotification
 
   if defined?(Redmine::Hook::ViewListener)
     class MailPreferenceHook < Redmine::Hook::ViewListener
+      render_on :view_layouts_base_html_head, partial: 'redmine_slack_notification/mail_preference_assets'
       render_on :view_my_account_preferences, partial: 'redmine_slack_notification/mail_preference'
     end
   end

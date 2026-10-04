@@ -70,11 +70,88 @@ class MailPreferenceTest < Minitest::Test
     assert_empty @calls
   end
 
-  def test_missing_mapping_retains_mail_even_with_name_matching
+  def test_missing_or_ambiguous_name_match_retains_mail
     @settings['users'] = {}
     @settings['slack']['auto_map_users_by_name'] = true
-    refute suppress
+    RedmineSlackNotification.stub(:slack_user_id_for_name, nil) { refute suppress }
     assert_empty @calls
+  end
+
+  def automatic_identity
+    @settings['users'] = {}
+    @settings['slack']['auto_map_users_by_name'] = true
+    { 'user' => { 'id' => 'U123', 'profile' => { 'email' => 'EXAMPLE@example.com' } } }
+  end
+
+  def with_name_match
+    RedmineSlackNotification.stub(:slack_user_id_for_name, 'U123') { yield }
+  end
+
+  def test_automatic_name_match_with_verified_email_suppresses_mail
+    @responses.unshift(automatic_identity)
+    with_name_match { assert suppress }
+    assert_equal ['users.info', 'conversations.members'], @calls.map(&:first)
+  end
+
+  def test_automatic_identity_with_missing_or_different_email_retains_mail
+    ['', 'other@example.com'].each do |email|
+      response = automatic_identity
+      response['user']['profile']['email'] = email
+      @responses = [response]
+      with_name_match { refute suppress }
+    end
+    refute @calls.any? { |call| call.first == 'conversations.members' }
+  end
+
+  def test_inactive_bot_app_and_foreign_users_do_not_suppress_mail
+    %w[deleted is_bot is_app_user is_stranger].each do |flag|
+      response = automatic_identity
+      response['user'][flag] = true
+      @responses = [response]
+      with_name_match { refute suppress }
+    end
+  end
+
+  def test_automatic_identity_must_match_id_and_configured_workspace
+    response = automatic_identity
+    response['user']['id'] = 'U999'
+    @responses = [response]
+    with_name_match { refute suppress }
+    response = automatic_identity
+    @settings['slack']['events'] = { 'team_id' => 'T123' }
+    response['user']['team_id'] = 'T999'
+    @responses = [response]
+    with_name_match { refute suppress }
+    response['user']['team_id'] = 'T123'
+    @responses = [response, { 'members' => ['U123'] }]
+    with_name_match { assert suppress }
+  end
+
+  def test_missing_email_scope_keeps_mail
+    automatic_identity
+    @responses = [IOError.new('missing_scope')]
+    with_name_match { refute suppress }
+  end
+
+  def test_manual_mapping_blocks_automatic_fallback_when_invalid
+    automatic_identity
+    @settings['users'][@user.login] = false
+    RedmineSlackNotification.stub(:slack_user_id_for_name, ->(*) { flunk 'Manual mapping must win' }) do
+      refute suppress
+    end
+    assert_empty @calls
+  end
+
+  def test_automatic_identity_is_reverified_for_next_mail
+    response = automatic_identity
+    changed = Marshal.load(Marshal.dump(response))
+    changed['user']['profile']['email'] = 'other@example.com'
+    @responses = [response, { 'members' => ['U123'] }, changed]
+    with_name_match do
+      assert suppress
+      refute suppress
+    end
+    assert_equal 2, @calls.count { |call| call.first == 'users.info' }
   end
 
   def test_email_mapping_is_supported
