@@ -109,7 +109,7 @@ module RedmineSlackNotification
       elsif card['reply_count'].to_i > 0
         context << %(<span class="redmine-slack-thread-label">#{card['reply_count'].to_i} thread replies</span>)
       end
-      %(<span class="redmine-slack-link-card" style="--slack-card-color: #{color(project)}">#{context}#{header(card, time_formatter)}<span class="redmine-slack-link-card-text">#{text}</span>#{SlackMarkup.link(url, 'Slack ↗')}</span>)
+      %(<span class="redmine-slack-link-card" style="--slack-card-color: #{color(project)}">#{context}#{header(card, time_formatter)}<span class="redmine-slack-link-card-text">#{text}</span>#{SlackMarkup.link(url, 'Slack')}</span>)
     end
 
     def render_links(html, issue, viewer, journal_id, state, time_formatter: nil, quoted_urls: [])

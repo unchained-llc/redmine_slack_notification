@@ -2614,6 +2614,35 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal true, field.dig('edit', 'enabled')
   end
 
+  def test_description_edit_preserves_body_when_expected_input_value_is_missing
+    prepare_action_issue
+    @issue.description = 'Original description'
+    native = action_payload('view_submission', 'view')
+    modal = action_payload('view_submission', 'view')
+    modal['view'] = WORK.edit_modal(@issue, @user, native['view'])
+    [[native, 'description.input'], [modal, 'description']].each do |submission, action_id|
+      [{}, { 'unexpected.input' => { 'value' => 'Other input' } }, { action_id => {} }].each do |block|
+        submission['view']['state'] = { 'values' => { 'description' => block } }
+        capture_interaction(submission)
+        assert_equal 'Original description', @issue.description
+        assert_empty @issue.events
+      end
+      submission['view']['state']['values']['description'] = { action_id => { 'value' => nil } }
+      capture_interaction(submission)
+      assert_equal '', @issue.description
+      @issue.description = 'Original description'
+      @issue.instance_variable_set(:@events, [])
+    end
+    native['view']['state'] = { 'values' => {
+      'description' => {},
+      'status' => { 'status.input' => { 'selected_option' => { 'value' => '3' } } }
+    } }
+    capture_interaction(native)
+    assert_equal 3, @issue.status_id
+    assert_equal 'Original description', @issue.description
+    assert_equal [:journal, :attributes], @issue.events
+  end
+
   def test_description_edit_rechecks_permission_and_never_saves_a_truncated_long_body
     prepare_action_issue
     @issue.description = 'Original'

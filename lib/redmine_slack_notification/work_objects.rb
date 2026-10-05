@@ -513,8 +513,12 @@ module RedmineSlackNotification
           due_date = values.dig('due_date', modal ? 'due_date' : 'due_date.input', 'selected_date')
           due_date = '' if values.key?('due_date') && due_date.nil?
           comment = values.dig('new_comment', modal ? 'new_comment' : 'new_comment.input', 'value')
-          description = values.dig('description', modal ? 'description' : 'description.input', 'value')
-          description = '' if values.key?('description') && description.nil?
+          description_input = values.dig('description', modal ? 'description' : 'description.input')
+          # Only an explicitly submitted value may clear the description.
+          # A block without the expected input is not a request to erase it.
+          description = if description_input.is_a?(Hash) && description_input.key?('value')
+                          description_input['value'].nil? ? '' : description_input['value']
+                        end
           return unless status.nil? || status.to_s.match?(/\A[1-9]\d*\z/)
           return unless priority.nil? || priority.to_s.match?(/\A[1-9]\d*\z/)
           return unless assignee.nil? || assignee == 'none' || assignee.to_s.match?(/\A[1-9]\d*\z/)

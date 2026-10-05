@@ -13,3 +13,6 @@
 .redmine-slack-thread-label { display: block; font-size: .85em; opacity: .75; margin-bottom: 8px; }
 .redmine-slack-thread-parent { display: block; padding: 10px 12px; margin-bottom: 12px; border-left: 2px solid var(--border-color, #d5d9df); background: rgba(128,128,128,.06); font-size: .9em; }
 .redmine-slack-thread-parent .redmine-slack-link-card-text { max-height: 100px; }
+
+/* Official Slack mark: https://slack.com/media-kit */
+.redmine-slack-link-card > a:last-child::before { content: ""; display: inline-block; width: 1em; height: 1em; margin-right: .35em; vertical-align: -.15em; background: url("../images/slack-mark.svg") center / contain no-repeat; }
