@@ -2491,18 +2491,16 @@ class WorkObjectDetailsTest < Minitest::Test
     @issue.define_singleton_method(:valid_watcher?) { |_viewer| true }
     @issue.define_singleton_method(:set_watcher) { |_viewer, enabled| @watching = enabled }
     button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_watch' }])
-    capture_interaction(button)
+    RedmineSlackNotification.stub(:config, @settings) { assert_equal :saved, WORK.update_watch(@issue, @user, true) }
     assert @issue.watched_by?(@user)
     actions = capture_details.first[1].dig('metadata', 'entity_payload', 'actions', 'primary_actions')
     assert_equal ['redmine_unwatch'], actions.map { |a| a['action_id'] }
-    capture_interaction(button)
+    RedmineSlackNotification.stub(:config, @settings) { assert_equal :unchanged, WORK.update_watch(@issue, @user, true) }
     assert @issue.watched_by?(@user)
-    button['actions'][0]['action_id'] = 'redmine_unwatch'
-    capture_interaction(button)
+    RedmineSlackNotification.stub(:config, @settings) { assert_equal :saved, WORK.update_watch(@issue, @user, false) }
     refute @issue.watched_by?(@user)
     @issue.define_singleton_method(:valid_watcher?) { |_viewer| false }
-    button['actions'][0]['action_id'] = 'redmine_watch'
-    capture_interaction(button)
+    RedmineSlackNotification.stub(:config, @settings) { assert_equal :restricted, WORK.update_watch(@issue, @user, true) }
     refute @issue.watched_by?(@user)
     @issue.define_singleton_method(:visible?) { |_viewer| false }
     assert_empty capture_interaction(button)
@@ -2536,6 +2534,29 @@ class WorkObjectDetailsTest < Minitest::Test
     @settings['slack']['work_object_buttons']['watch'] = true
     capture_interaction(submit)
     refute @issue.watched_by?(@user)
+  end
+
+  def test_stale_detail_watch_buttons_open_current_personal_settings_without_writing
+    prepare_action_issue
+    @settings['slack']['work_object_buttons'] = { 'watch' => true }
+    @issue.define_singleton_method(:watched_by?) { |_viewer| @watching == true }
+    @issue.define_singleton_method(:valid_watcher?) { |_viewer| true }
+    @issue.define_singleton_method(:set_watcher) { |_viewer, enabled| @watching = enabled }
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_watch' }])
+    @issue.instance_variable_set(:@watching, true)
+    form = capture_interaction(button).first[1]['view']
+    assert_equal 'Unwatch', form.dig('submit', 'text')
+    assert @issue.watched_by?(@user)
+    submit = action_payload('view_submission', 'view')
+    submit['view'] = form
+    capture_interaction(submit)
+    refute @issue.watched_by?(@user)
+    button['actions'][0]['action_id'] = 'redmine_unwatch'
+    form = capture_interaction(button).first[1]['view']
+    assert_equal 'Watch', form.dig('submit', 'text')
+    refute @issue.watched_by?(@user)
+    @issue.define_singleton_method(:valid_watcher?) { |_viewer| false }
+    assert_empty capture_interaction(button)
   end
 
   def test_detail_edit_action_opens_the_issue_modal

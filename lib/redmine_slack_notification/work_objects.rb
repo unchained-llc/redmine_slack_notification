@@ -454,7 +454,9 @@ module RedmineSlackNotification
           return unless key
           configured = RedmineSlackNotification.effective_config(issue.project).dig('slack', 'work_object_buttons')
           return if configured.is_a?(Hash) && !button_keys(issue, detail: source['type'] == 'entity_detail').include?(key == 'unwatch' ? 'watch' : key)
-          if key == 'watch' && source['type'] == 'message_attachment'
+          # Detail panels can retain stale watch/unwatch buttons after a save.
+          # Always resolve the current personal state before choosing an action.
+          if %w[watch unwatch].include?(key) && %w[message_attachment entity_detail].include?(source['type'])
             form = watch_modal(issue, viewer, source)
             return unless form && payload['trigger_id'].to_s != ''
             return RedmineSlackNotification.slack_api('views.open', {

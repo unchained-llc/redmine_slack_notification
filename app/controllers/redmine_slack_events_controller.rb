@@ -66,10 +66,19 @@ class RedmineSlackEventsController < ActionController::Base
         end
       else
         values = source.dig('state', 'values')
+        # The watch confirmation has no input blocks; Slack may omit state.
+        values = {} if values.nil? && source['type'] == 'modal' && source['callback_id'] == 'redmine_watch_settings'
         return head :bad_request unless values.is_a?(Hash)
         interaction['view']['state'] = { 'values' => values.slice('status', 'priority', 'assignee', 'due_date', 'new_comment') }
       end
-      RedmineSlackWorkObjectInteractionJob.perform_later(payload['api_app_id'], team_id, interaction)
+      watch_action = source_key == 'container' && Array(interaction['actions']).one? &&
+                     %w[redmine_watch redmine_unwatch].include?(interaction['actions'].first['action_id'])
+      if watch_action
+        # Modal trigger IDs expire in three seconds; do not wait for a worker.
+        RedmineSlackNotification::WorkObjects.process_interaction(app_id, team_id, interaction)
+      else
+        RedmineSlackWorkObjectInteractionJob.perform_later(app_id, team_id, interaction)
+      end
       return head :ok
     end
 

@@ -353,7 +353,7 @@ The first two available actions are primary buttons and the next five are overfl
 
 Detail panes filter actions for the viewer's permissions, assignee, and watcher state. Shared cards cannot personalize buttons per viewer, so permissions and personal state are checked when invoked. Labels use the corresponding `messages.work_objects` keys.
 
-With `watch: true`, shared cards open Watch settings showing your current state and a Watch or Unwatch submit button. Detail panes show Watch or Unwatch according to your state. There is no separate `unwatch` button setting. Labels use `messages.work_objects.watch_settings`, `watching`, `not_watching`, `watch`, and `unwatch`.
+With `watch: true`, both shared cards and detail panes open Watch settings showing your current state and a Watch or Unwatch submit button. The current state is checked on click, so a stale Watch/Unwatch label cannot prevent switching the setting. Opening the form does not change the watch state. Watch forms open synchronously to avoid queue delays expiring Slack modal triggers; confirmation saves on the Slack queue. Input-free confirmation payloads are accepted. There is no separate `unwatch` button setting. Labels use `messages.work_objects.watch_settings`, `watching`, `not_watching`, `watch`, and `unwatch`.
 
 ### Match viewers by email
 

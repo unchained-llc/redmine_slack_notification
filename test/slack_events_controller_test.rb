@@ -31,6 +31,31 @@ require_relative '../app/jobs/redmine_slack_work_object_interaction_job'
 require_relative '../app/jobs/redmine_slack_thread_comment_job'
 
 class SlackEventsControllerTest < Minitest::Test
+  def test_watch_button_opens_synchronously_and_confirmation_without_inputs_queues
+    interaction = { 'type' => 'block_actions', 'api_app_id' => 'ATEST',
+      'team' => { 'id' => 'TTEST' }, 'user' => { 'id' => 'U123' }, 'trigger_id' => 'fresh-trigger',
+      'container' => { 'type' => 'entity_detail', 'entity_url' => 'https://example.com/issues/7' },
+      'actions' => [{ 'action_id' => 'redmine_watch' }] }
+    opened = []
+    queued = []
+    RedmineSlackNotification::WorkObjects.stub(:process_interaction, ->(*args) { opened << args }) do
+      RedmineSlackWorkObjectInteractionJob.stub(:perform_later, ->(*args) { queued << args }) do
+        assert_equal :ok, dispatch(raw: URI.encode_www_form('payload' => JSON.generate(interaction))).status
+        assert_equal 1, opened.length
+        assert_empty queued
+        assert_equal 'fresh-trigger', opened.first.last['trigger_id']
+        assert_equal :unauthorized, dispatch(raw: URI.encode_www_form('payload' => JSON.generate(interaction)), signature: 'v0=' + '0' * 64).status
+        assert_equal 1, opened.length
+        interaction['type'] = 'view_submission'
+        interaction['view'] = { 'type' => 'modal', 'callback_id' => 'redmine_watch_settings', 'private_metadata' => '{}' }
+        assert_equal :ok, dispatch(raw: URI.encode_www_form('payload' => JSON.generate(interaction))).status
+        assert_equal({}, queued.first.last.dig('view', 'state', 'values'))
+        interaction['view']['callback_id'] = 'redmine_edit_issue'
+        assert_equal :bad_request, dispatch(raw: URI.encode_www_form('payload' => JSON.generate(interaction))).status
+      end
+    end
+  end
+
   def setup
     @settings = { 'slack' => { 'events' => {
       'app_id' => 'ATEST', 'team_id' => 'TTEST', 'signing_secret' => 'test-secret'
