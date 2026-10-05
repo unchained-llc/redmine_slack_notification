@@ -118,6 +118,10 @@ module RedmineSlackNotification
         break if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
         card = LinkCards.fetch_for_project(issue.project, url, api_cache: cache, deadline: deadline)
         next unless card
+        # Notification replies already have their parent comment in Redmine.
+        if Thread.current[:redmine_slack_thread_comment]
+          card = card.reject { |key, _| %w[thread_reply parent parent_url].include?(key) }
+        end
         quote = encode(card, url)
         next if blocks(quote).empty?
         quotes << quote

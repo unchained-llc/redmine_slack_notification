@@ -92,11 +92,11 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     @issue = Issue.create!(subject: 'Thread target')
     @issue.project = @project
     @issue.can_view = @issue.can_comment = true
-    @viewer = OpenStruct.new(id: 3)
+    @viewer = OpenStruct.new(id: 3, logged?: true)
     @previous_user = OpenStruct.new(id: 99)
     User.current = @previous_user
     @event = { 'type' => 'message', 'user' => 'U123', 'channel' => 'C123', 'text' => 'Reply from Slack',
-               'thread_ts' => '1000.000001', 'ts' => '1000.000002' }
+               'thread_ts' => '1791001000.000001', 'ts' => '1791001000.000002' }
     @settings = { 'slack' => { 'thread_comments' => true, 'bot_token' => 'test-token',
                               'default_channel_id' => 'C123', 'events' => {
                                 'app_id' => 'ATEST', 'team_id' => 'TTEST', 'signing_secret' => 'test-secret' } } }
@@ -106,11 +106,23 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     ] }
   end
 
+  def reply_url(timestamp)
+    "https://example.slack.com/archives/C123/p#{timestamp.delete('.')}"
+  end
+
   def persist
     RedmineSlackNotification::WorkObjects.stub(:viewer_for, @viewer) do
       RedmineSlackNotification.stub(:config, @settings) do
         RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'Comment notification loop' }) do
-          COMMENTS.persist_reply(@issue, @event, 'TTEST')
+          RedmineSlackNotification.stub(:slack_api, ->(method, body, *_args, **_options) {
+            raise "Unexpected API: #{method}" unless method == 'chat.getPermalink'
+            { 'permalink' => reply_url(body['message_ts']) }
+          }) do
+            # Card acquisition is tested separately from persistence.
+            RedmineSlackNotification::LinkQuotes.stub(:import, ->(text, *) { text }) do
+              COMMENTS.persist_reply(@issue, @event, 'TTEST')
+            end
+          end
         end
       end
     end
@@ -120,12 +132,12 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     assert_equal :saved, persist
     assert_equal 1, Journal.count
     assert_equal 3, Journal.first.user_id
-    assert_equal "Reply from Slack", Journal.first.notes
+    assert_equal reply_url(@event['ts']) + '?thread_ts=' + @event['thread_ts'], Journal.first.notes
     assert_equal :duplicate, persist
     assert_equal 1, Journal.count
     assert_same @previous_user, User.current
     assert_nil Thread.current[:redmine_slack_thread_comment]
-    @event['ts'] = '1000.000003'
+    @event['ts'] = '1791001000.000003'
     assert_equal :saved, persist
     assert_equal 2, Journal.count
   end
@@ -157,7 +169,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
   def test_parent_identity_exact_timestamp_host_and_subject_position_are_required
     assert_equal @issue, COMMENTS.issue_from_parent(@parent, 'ATEST', @event['thread_ts'])
     assert_nil COMMENTS.issue_from_parent(@parent, 'AOTHER', @event['thread_ts'])
-    assert_nil COMMENTS.issue_from_parent(@parent, 'ATEST', '1000.999999')
+    assert_nil COMMENTS.issue_from_parent(@parent, 'ATEST', '1791001000.999999')
     @parent.delete('bot_id')
     assert_nil COMMENTS.issue_from_parent(@parent, 'ATEST', @event['thread_ts'])
     @parent['bot_id'] = 'B123'
@@ -209,7 +221,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
   end
 
   def test_invalid_timestamp_does_not_save
-    ['broken', '1000.0000001', '1000', '-1000.000001'].each do |timestamp|
+    ['broken', '1791001000.0000001', '1000', '-1791001000.000001'].each do |timestamp|
       @event['ts'] = timestamp
       refute COMMENTS.reply_event?(@event)
       assert_equal :restricted, persist
@@ -321,13 +333,19 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     calls = []
     api = ->(method, body, token, **_options) do
       calls << [method, body, token]
-      method == 'conversations.history' ? { 'messages' => [@parent] } : { 'ts' => '1000.000004' }
+      case method
+      when 'conversations.history' then { 'messages' => [@parent] }
+      when 'chat.getPermalink' then { 'permalink' => reply_url(body['message_ts']) }
+      else { 'ts' => '1791001000.000004' }
+      end
     end
     RedmineSlackNotification.stub(:config, @settings) do
       Issue.stub(:find_by, @issue) do
         RedmineSlackNotification::WorkObjects.stub(:viewer_for, @viewer) do
           RedmineSlackNotification.stub(:slack_api, api) do
-            2.times { COMMENTS.process('ATEST', 'TTEST', @event) }
+            RedmineSlackNotification::LinkQuotes.stub(:import, ->(text, *) { text }) do
+              2.times { COMMENTS.process('ATEST', 'TTEST', @event) }
+            end
           end
         end
       end

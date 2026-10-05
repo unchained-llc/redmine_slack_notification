@@ -161,8 +161,21 @@ module RedmineSlackNotification
         # retry, even after the comment text has been edited in Redmine.
         next :duplicate if issue.journals.exists?(user_id: viewer.id, created_on: timestamp)
 
+        response = RedmineSlackNotification.slack_api('chat.getPermalink',
+          { 'channel' => event['channel'], 'message_ts' => event['ts'] },
+          RedmineSlackNotification.bot_token(issue.project), form: true)
+        url = response['permalink'].to_s
+        target = LinkCards.parse(url)
+        next :restricted unless target && target['channel'] == event['channel'] &&
+                                posted_at(target['ts']) == timestamp
+
+        # History omits thread replies; preserve the parent timestamp so the
+        # existing quote importer can retrieve this reply through replies API.
+        uri = URI.parse(url)
+        uri.query = URI.encode_www_form(URI.decode_www_form(uri.query.to_s).reject { |key, _| key == 'thread_ts' } +
+                                       [['thread_ts', event['thread_ts']]])
         User.current = viewer
-        journal = issue.init_journal(viewer, event['text'])
+        journal = issue.init_journal(viewer, uri.to_s)
         journal.created_on = timestamp
         # A new imported note is not an edit. Redmine displays "edited" when
         # updated_on differs from created_on; later edits keep normal timestamps.

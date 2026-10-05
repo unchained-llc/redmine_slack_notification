@@ -77,6 +77,36 @@ class LinkQuotesTest < Minitest::Test
     assert_empty Nokogiri::HTML.fragment(html).css('script')
   end
 
+  def test_imported_notification_reply_omits_parent_but_manual_url_keeps_it
+    @card['thread_reply'] = true
+    @card['parent_url'] = URL
+    @card['parent'] = @card.reject { |key, _| %w[parent parent_url thread_reply].include?(key) }
+                           .merge('text' => 'Parent notification')
+    source = "<a href=\"#{URL}\">reply</a>"
+    previous = Thread.current[:redmine_slack_thread_comment]
+    Thread.current[:redmine_slack_thread_comment] = true
+    saved = import(source)
+    decoded = Q.blocks(saved).first.last
+    assert_equal URL, decoded['url']
+    assert_equal 'Unique searchable wording <@U123|Display Name>', decoded['text']
+    refute decoded.key?('parent')
+    refute decoded.key?('thread_reply')
+    refute_includes saved, 'Parent notification'
+    html = RedmineSlackNotification::LinkCards.render_card(decoded, URL, @issue.project)
+    refute_includes html, 'Thread reply'
+    refute_includes html, 'Open parent message'
+    assert_includes html, 'Example User'
+    assert_equal URL, Nokogiri::HTML.fragment(html).at_css('a')['href']
+
+    Thread.current[:redmine_slack_thread_comment] = nil
+    manual = Q.blocks(import(source)).first.last
+    assert_equal 'Parent notification', manual['parent']['text']
+    assert_equal true, manual['thread_reply']
+    assert @card.key?('parent')
+  ensure
+    Thread.current[:redmine_slack_thread_comment] = previous
+  end
+
   def test_permissions_failures_code_and_duplicate_targets
     source = "<a href=\"#{URL}\">one</a><a href=\"#{URL}?cid=C123\">two</a><pre><a href=\"#{URL.sub('C123', 'C456')}\">code</a></pre>"
     saved = import(source)
