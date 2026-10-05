@@ -147,6 +147,15 @@ slack:
       project: true
       updater: true
       location: true
+    document:
+      project: true
+      updater: true
+    file:
+      project: true
+      updater: true
+    message:
+      project: true
+      updater: true
     news:
       project: true
       updater: true

@@ -26,6 +26,28 @@ class StandardNotificationsTest < Minitest::Test
     object
   end
 
+  def test_all_formatter_nouns_have_customizable_labels_icons_and_example_metadata
+    example = YAML.safe_load(File.read(File.expand_path('../config/slackmine.yml.example', __dir__)))
+    Slackmine::Formatter::EVENT_NOUN_KEYS.each do |noun, key|
+      next if key == 'comment' # Issue comments share Issue metadata.
+      assert example.dig('slack', 'metadata', key).is_a?(Hash), key
+      Slackmine::Formatter::DEFAULT_MESSAGES.fetch('events').fetch(key).each_key do |action|
+        assert example.dig('messages', 'events', key, action), "#{key}.#{action} label"
+        assert example.dig('messages', 'icons', key, action), "#{key}.#{action} icon"
+        settings = { 'projects' => { 'example' => { 'messages' => {
+          'events' => { key => { action => 'Custom event' } },
+          'icons' => { key => { action => 'ICON' } }
+        } } } }
+        Slackmine.stub(:config, settings) do
+          Slackmine.with_project(@project) do
+            assert_equal 'Custom event', Slackmine::Formatter.event_label(noun, action)
+            assert_equal 'ICON', Slackmine::Formatter.event_icon(action, noun: noun)
+          end
+        end
+      end
+    end
+  end
+
   def test_file_routes_and_mail_policy_agree
     %w[Project Version Document].each do |kind|
       parent = container(kind)
