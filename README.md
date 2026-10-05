@@ -2,9 +2,11 @@
 
 # Slackmine
 
+Version **1.0.0**.
+
 The plugin was renamed from **Redmine Event Notifications for Slack** (`redmine_slack_notification`) to **Slackmine** as it grew from notifications into a broader Slack–Redmine integration. Internal names, plugin ID, configuration filename and endpoints now use `slackmine`; the former names are no longer supported.
 
-A Redmine 7 plugin that sends Issue, Wiki, News, time entry, Version, and Project events to Slack. It can also send daily Issue due-date reminders to assignees by Slack DM. Notifications use a colored Block Kit attachment with a link to the Redmine record. Delivery runs through ActiveJob, normally on Sidekiq's `slack` queue.
+A Redmine 7 plugin that sends Issue, Wiki, News, Document, file, forum, time entry, Version, and Project events to Slack. It can also send daily Issue due-date reminders to assignees by Slack DM. Notifications use a colored Block Kit attachment with a link to the Redmine record. Delivery runs through ActiveJob, normally on Sidekiq's `slack` queue.
 
 The plugin provides notifications, Work Object actions, and optional slash commands. It does not add project settings tabs or Redmine custom fields.
 
@@ -160,6 +162,62 @@ projects:
 A project override takes precedence over the global value for the same leaf. To override a globally disabled `issue.updated.enabled`, enable that parent for the project as well. Existing flat keys such as `status_changed`, `comment_added`, and `issue_updated` remain supported at either level. At the same level, a nested leaf wins over its flat equivalent. For legacy flat configuration, `issue_updated` controls both the parent switch and `other_changed`. The [example YAML](config/slackmine.yml.example) contains the full nested tree.
 
 Deletion of Wiki pages, News, time entries, and Versions defaults to off because those notifications were added after the original events. Deletion links point to a containing project view because the deleted record's own page is gone.
+
+Documents, files, and forum topics/replies support all of their standard
+creation, editing, and deletion operations:
+
+| Object | Notification switches |
+| --- | --- |
+| Document | `events.document.created`, `.updated`, `.deleted` |
+| Document attachment | `events.document.file.added`, `.updated`, `.deleted` |
+| Project/version file | `events.file.added`, `.updated`, `.deleted` |
+| Forum topic/reply | `events.message.posted`, `.updated`, `.deleted` |
+
+Creation and editing default to enabled; deletion defaults to disabled. All
+switches support per-project overrides. Document edits include title,
+description, and category; file edits include filename, description, type,
+and digest; forum edits include subject, content, sticky, and locked state.
+Internal timestamps, download counts, and reply counters do not generate edit
+notifications. Notifications run after commit; rolled-back changes do not post.
+Deletion links open the containing Documents, files, or board page.
+
+Headings and icons can be customized globally or per project:
+
+```yaml
+messages:
+  events:
+    document:
+      created: Document created
+      updated: Document updated
+      deleted: Document deleted
+    file:
+      added: File added
+      updated: File updated
+      deleted: File deleted
+    message:
+      posted: Forum message posted
+      updated: Forum message updated
+      deleted: Forum message deleted
+  icons:
+    document:
+      created: '📄'
+      updated: '✏️'
+      deleted: '🗑️'
+    file:
+      added: '📎'
+      updated: '✏️'
+      deleted: '🗑️'
+    message:
+      posted: '💬'
+      updated: '✏️'
+      deleted: '🗑️'
+```
+
+Document attachments share `messages.events.file` and `messages.icons.file`
+with project/version files. Issue attachments continue to use the Issue change
+notification, without a second file notification. Redmine has no standard
+Document/file/forum edit or deletion emails; these operations add only Slack
+notifications. Due-reminder email remains outside mail suppression.
 
 ## Notification content
 
@@ -714,7 +772,7 @@ The same keys can be overridden under `projects.<identifier>.messages.due_remind
 
 In **My account → Email notifications**, below **I don't want to be notified of changes that I make myself**, each user can enable **Skip email for notifications covered by Slack** (off by default). This uses the existing Redmine user preference storage; no database migration is required.
 
-The option applies to new Issues, Issue changes/comments, Wiki creation/updates, and News creation/comments. Email is skipped only when all visible parts of the notification have Slack events enabled, a Bot Token and destination channel resolve for that project, and the recipient resolves to a Slack member currently in that channel. An explicit `users` login/email mapping takes priority. Without one, `slack.auto_map_users_by_name: true` can resolve a unique name match; a fresh Slack profile must also have an email address matching the recipient's primary Redmine email (case-insensitive). Existing project/ancestor/default channel routing is used. Invalid explicit mappings do not fall back to automatic matching. Private Issues and private notes, unsupported notification types, and account/security emails retain their normal Redmine email behavior.
+The option applies to new Issues, Issue changes/comments, Wiki creation/updates, News creation/comments, Documents, project/version/Document files, and forum topics/replies. For Issue updates, only triggers enabled in Redmine’s email notification settings participate in suppression. With general Issue updates disabled and comment mail enabled, an unrelated relation, date, or attachment change does not prevent suppressing the comment email. If general Issue updates are enabled, all visible changes participate. Email is skipped only when all applicable mail triggers have Slack events enabled, a Bot Token and destination channel resolve for that project, and the recipient resolves to a Slack member currently in that channel. An explicit `users` login/email mapping takes priority. Without one, `slack.auto_map_users_by_name: true` can resolve a unique name match; a fresh Slack profile must also have an email address matching the recipient's primary Redmine email (case-insensitive). Existing project/ancestor/default channel routing is used. Invalid explicit mappings do not fall back to automatic matching. Private Issues and private notes, unsupported notification types, and account/security emails retain their normal Redmine email behavior.
 
 Membership is checked synchronously using `conversations.members`, without caching positive results. The app needs `channels:read` for public channels or `groups:read` for private channels. Automatic name matching additionally needs `users:read` and `users:read.email`; missing or mismatched email, inactive/bot/foreign identities, ambiguous names, and lookup failures retain email. Identity verification is performed for each email without caching profile email data. Reinstall after adding scopes. Missing configuration/mapping, nonmembership, API failures, malformed responses, and incomplete pagination retain email. Lookups are limited to ten pages of 200 members, with two-second connection and three-second read timeouts per request.
 

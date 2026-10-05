@@ -26,11 +26,11 @@ module Slackmine
 
     # Returning without calling mail lets ActionMailer use its normal NullMail.
     # Account and security mail actions deliberately do not participate.
-    %i[issue_add issue_edit news_added news_comment_added wiki_content_added wiki_content_updated].each do |action|
-      define_method(action) do |user, object|
+    %i[issue_add issue_edit news_added news_comment_added wiki_content_added wiki_content_updated document_added attachments_added message_posted].each do |action|
+      define_method(action) do |user, object, *args|
         return if MailPreference.suppress?(user, action, object)
 
-        super(user, object)
+        super(user, object, *args)
       end
     end
   end
@@ -104,9 +104,25 @@ module Slackmine
         return unless issue.is_a?(Issue)
         return if issue.is_private? || object.private_notes?
 
-        events = object.visible_details(user).map { |detail| object.send(:slack_event_for_detail, detail) }
-        events << 'comment_added' unless object.notes.to_s.strip.empty?
+        events = issue_mail_events(object, user)
         [issue.project, events.uniq]
+      when :document_added
+        [object.project, ['document_created']]
+      when :message_posted
+        [object.project, ['message_posted']]
+      when :attachments_added
+        files = Array(object)
+        return if files.empty?
+        container = files.first.container
+        return unless files.all? { |file| file.container == container }
+        case container.class.name
+        when 'Project'
+          [container, ['file_added']]
+        when 'Version'
+          [container.project, ['file_added']]
+        when 'Document'
+          [container.project, ['document_file_added']]
+        end
       when :news_added
         [object.project, ['news_created']]
       when :news_comment_added
@@ -117,6 +133,38 @@ module Slackmine
       when :wiki_content_added, :wiki_content_updated
         [object.page.wiki.project, [action == :wiki_content_added ? 'wiki_created' : 'wiki_updated']]
       end
+    end
+
+    # Mirror Journal#send_notification: disabled mail triggers must not
+    # prevent suppression of another enabled trigger in the same update.
+    def issue_mail_events(journal, user)
+      enabled = Setting.notified_events
+      details = journal.visible_details(user)
+      if enabled.include?('issue_updated')
+        events = details.map { |detail| journal.send(:slack_event_for_detail, detail) }
+        events << 'comment_added' unless journal.notes.to_s.empty?
+        return events.uniq
+      end
+
+      events = []
+      events << 'comment_added' if enabled.include?('issue_note_added') && !journal.notes.to_s.empty?
+      triggers = {
+        'status_id' => ['issue_status_updated', 'status_changed'],
+        'assigned_to_id' => ['issue_assigned_to_updated', 'assignee_changed'],
+        'priority_id' => ['issue_priority_updated', 'priority_changed'],
+        'fixed_version_id' => ['issue_fixed_version_updated', 'version_changed']
+      }
+      details.each do |detail|
+        if detail.property == 'attachment'
+          events << 'attachment_added' if enabled.include?('issue_attachment_added') && detail.value
+        elsif detail.property == 'attr'
+          trigger, event = triggers[detail.prop_key.to_s]
+          next unless trigger && enabled.include?(trigger)
+          next if %w[status_id priority_id].include?(detail.prop_key.to_s) && detail.value.to_s.empty?
+          events << event
+        end
+      end
+      events.uniq
     end
 
     def member?(channel, slack_id, token)

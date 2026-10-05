@@ -241,6 +241,18 @@ messages:
     subject: 'Subject'
     description: 'Description'
   events:
+    document:
+      created: Document created
+      updated: Document updated
+      deleted: Document deleted
+    file:
+      added: File added
+      updated: File updated
+      deleted: File deleted
+    message:
+      posted: Message posted
+      updated: Message updated
+      deleted: Message deleted
     issue:
       created: Issue created
       updated: Issue updated
@@ -272,6 +284,18 @@ messages:
     project:
       updated: Project updated
   icons:
+    document:
+      created: '📄'
+      updated: '✏️'
+      deleted: '🗑️'
+    file:
+      added: '📎'
+      updated: '✏️'
+      deleted: '🗑️'
+    message:
+      posted: '💬'
+      updated: '✏️'
+      deleted: '🗑️'
     issue:
       created: '🆕'
       updated: '🔄'
@@ -487,6 +511,23 @@ events:
     created: true
     updated: true
     deleted: false
+  document:
+    created: true
+    updated: true
+    deleted: false
+    file:
+      added: true
+      updated: true
+      deleted: false
+  file:
+    added: true
+    updated: true
+    deleted: false
+  message:
+    posted: true
+    updated: true
+    deleted: false
+
   project:
     updated: true
 

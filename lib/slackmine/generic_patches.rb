@@ -154,6 +154,135 @@ module Slackmine
     end
   end
 
+  module DocumentPatch
+    def self.included(base)
+      base.after_create_commit :notify_slack_document_created
+      base.after_update_commit :notify_slack_document_updated
+      base.after_destroy_commit :notify_slack_document_deleted
+    end
+
+    private
+
+    def notify_slack_document_created
+      notify_slack_document('created')
+    end
+
+    def notify_slack_document_updated
+      return unless (previous_changes.keys & %w[title description category_id]).any?
+      notify_slack_document('updated')
+    end
+
+    def notify_slack_document_deleted
+      notify_slack_document('deleted')
+    end
+
+    def notify_slack_document(action)
+      path = action == 'deleted' ? "/projects/#{project.identifier}/documents" : "/documents/#{id}"
+      Slackmine.enqueue(
+        Slackmine::Formatter.generic_payload(
+          noun: 'Document', action: action, subject: title,
+          url: Slackmine::Formatter.url(path), project: project,
+          actor: User.current, summary: description,
+          body_diff: action == 'updated' && previous_changes['description']
+        ), project: project, event: "document_#{action}"
+      )
+    end
+  end
+
+  module AttachmentPatch
+    def self.included(base)
+      base.after_save_commit :notify_slack_file_added
+      base.after_update_commit :notify_slack_file_updated
+      base.after_destroy_commit :notify_slack_file_deleted
+    end
+
+    private
+
+    def notify_slack_file_added
+      # Redmine uploads first, then assigns a container in a later save.
+      return unless saved_change_to_container_id? && container_id_before_last_save.nil?
+
+      notify_slack_file('added')
+    end
+
+    def notify_slack_file_updated
+      # Container assignment is an addition, not a file edit.
+      return if saved_change_to_container_id? || container_id.nil?
+      return unless (previous_changes.keys & %w[filename description content_type digest]).any?
+      notify_slack_file('updated')
+    end
+
+    def notify_slack_file_deleted
+      notify_slack_file('deleted')
+    end
+
+    def notify_slack_file(action)
+      case container&.class&.name
+      when 'Project'
+        destination = container
+        event = "file_#{action}"
+      when 'Version'
+        destination = container.project
+        event = "file_#{action}"
+      when 'Document'
+        destination = container.project
+        event = "document_file_#{action}"
+      else
+        return
+      end
+      path = if action != 'deleted'
+               "/attachments/#{id}"
+             elsif container.class.name == 'Document'
+               "/documents/#{container.id}"
+             else
+               "/projects/#{destination.identifier}/files"
+             end
+      Slackmine.enqueue(
+        Slackmine::Formatter.generic_payload(
+          noun: 'File', action: action, subject: filename,
+          url: Slackmine::Formatter.url(path), project: destination,
+          actor: action == 'added' ? author : User.current, summary: description
+        ), project: destination, event: event
+      )
+    end
+  end
+
+  module MessagePatch
+    def self.included(base)
+      base.after_create_commit :notify_slack_message_posted
+      base.after_update_commit :notify_slack_message_updated
+      base.after_destroy_commit :notify_slack_message_deleted
+    end
+
+    private
+
+    def notify_slack_message_posted
+      notify_slack_message('posted')
+    end
+
+    def notify_slack_message_updated
+      return unless (previous_changes.keys & %w[subject content sticky locked]).any?
+      notify_slack_message('updated')
+    end
+
+    def notify_slack_message_deleted
+      notify_slack_message('deleted')
+    end
+
+    def notify_slack_message(action)
+      path = action == 'deleted' ? "/projects/#{project.identifier}/boards/#{board_id}" :
+        "/boards/#{board_id}/topics/#{parent_id || id}?r=#{id}#message-#{id}"
+      Slackmine.enqueue(
+        Slackmine::Formatter.generic_payload(
+          noun: 'Message', action: action, subject: subject,
+          url: Slackmine::Formatter.url(path), project: project,
+          actor: action == 'posted' ? author : User.current,
+          notes: content, body_diff: action == 'updated' && previous_changes['content']
+        ), project: project, event: "message_#{action}"
+      )
+    end
+  end
+
   module ProjectPatch
     def self.included(base)
       base.after_update { notify_slack_project_updated }

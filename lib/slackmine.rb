@@ -46,6 +46,18 @@ module Slackmine
     'version_created' => %w[version created],
     'version_updated' => %w[version updated],
     'version_deleted' => %w[version deleted],
+    'document_created' => %w[document created],
+    'document_file_added' => %w[document file added],
+    'document_file_deleted' => %w[document file deleted],
+    'file_added' => %w[file added],
+    'file_deleted' => %w[file deleted],
+    'message_posted' => %w[message posted],
+    'document_updated' => %w[document updated],
+    'document_deleted' => %w[document deleted],
+    'document_file_updated' => %w[document file updated],
+    'file_updated' => %w[file updated],
+    'message_updated' => %w[message updated],
+    'message_deleted' => %w[message deleted],
     'project_updated' => %w[project updated]
   }.transform_values(&:freeze).freeze
   EVENT_KEYS = EVENT_PATHS.keys.freeze
@@ -53,7 +65,7 @@ module Slackmine
     key != 'issue_updated' && path.first(2) == %w[issue updated]
   end.keys.freeze
   ISSUE_UPDATE_PARENT_PATH = %w[issue updated enabled].freeze
-  DEFAULT_DISABLED_EVENTS = %w[wiki_deleted news_deleted time_entry_deleted version_deleted].freeze
+  DEFAULT_DISABLED_EVENTS = %w[wiki_deleted news_deleted time_entry_deleted version_deleted file_deleted document_file_deleted document_deleted message_deleted].freeze
   BODY_DIFF_PATHS = {
     issue_description: %w[issue description], issue_comment: %w[issue comment],
     wiki_body: %w[wiki body], news_description: %w[news description], news_comment: %w[news comment]
@@ -576,6 +588,9 @@ module Slackmine
     TimeEntry.include Slackmine::TimeEntryPatch if defined?(TimeEntry) && !(TimeEntry < Slackmine::TimeEntryPatch)
     Version.include Slackmine::VersionPatch if defined?(Version) && !(Version < Slackmine::VersionPatch)
     Project.include Slackmine::ProjectPatch if defined?(Project) && !(Project < Slackmine::ProjectPatch)
+    Document.include Slackmine::DocumentPatch if defined?(Document) && !(Document < Slackmine::DocumentPatch)
+    Attachment.include Slackmine::AttachmentPatch if defined?(Attachment) && !(Attachment < Slackmine::AttachmentPatch)
+    Message.include Slackmine::MessagePatch if defined?(Message) && !(Message < Slackmine::MessagePatch)
     Comment.include Slackmine::CommentPatch if defined?(Comment) && !(Comment < Slackmine::CommentPatch)
   end
 end

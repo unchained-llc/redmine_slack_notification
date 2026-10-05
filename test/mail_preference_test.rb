@@ -16,6 +16,8 @@ class MailPreferenceTest < Minitest::Test
     @responses = [{ 'members' => ['U123'] }]
     @calls = []
     @disabled = []
+    @notified_events = ['issue_updated']
+    Setting.define_singleton_method(:notified_events) { [] } unless Setting.respond_to?(:notified_events)
   end
 
   def configured
@@ -26,7 +28,7 @@ class MailPreferenceTest < Minitest::Test
           result = @responses.shift
           raise result if result.is_a?(Exception)
           result
-        }) { yield }
+        }) { Setting.stub(:notified_events, @notified_events) { yield } }
       end
     end
   end
@@ -265,6 +267,55 @@ class MailPreferenceTest < Minitest::Test
     refute suppress
   ensure
     Thread.current[:slackmine_thread_comment] = nil
+  end
+
+  def test_comment_mail_ignores_changes_that_are_not_enabled_mail_triggers
+    @notified_events = ['issue_note_added']
+    %w[relation attachment cf attr].each do |property|
+      @responses << { 'members' => ['U123'] }
+      detail = OpenStruct.new(property: property, prop_key: 'due_date', value: '2')
+      @disabled = %w[relation_added attachment_added custom_field_changed due_date_changed]
+      assert suppress(:issue_edit, journal(notes: 'Comment', details: [detail]))
+    end
+    refute suppress(:issue_edit, journal(details: [OpenStruct.new(property: 'relation', value: '2')]))
+  end
+
+  def test_enabled_specialized_mail_triggers_still_require_slack_coverage
+    @notified_events = %w[issue_note_added issue_status_updated]
+    @disabled = ['status_changed']
+    detail = OpenStruct.new(property: 'attr', prop_key: 'status_id', value: '2')
+    refute suppress(:issue_edit, journal(notes: 'Comment', details: [detail]))
+    @disabled.clear
+    assert suppress(:issue_edit, journal(notes: 'Comment', details: [detail]))
+  end
+
+  def test_attachment_removal_does_not_trigger_attachment_added_mail
+    @notified_events = ['issue_attachment_added']
+    refute suppress(:issue_edit, journal(details: [OpenStruct.new(property: 'attachment', value: nil)]))
+    assert suppress(:issue_edit, journal(details: [OpenStruct.new(property: 'attachment', value: 'image.png')]))
+  end
+
+  def test_document_and_forum_mail
+    object = OpenStruct.new(project: @project)
+    assert suppress(:document_added, object)
+    @responses << { 'members' => ['U123'] }
+    assert suppress(:message_posted, object)
+    @disabled = %w[document_created message_posted]
+    refute suppress(:document_added, object)
+    refute suppress(:message_posted, object)
+  end
+
+  def test_document_mailer_preserves_author_argument
+    klass = Class.new do
+      def document_added(user, document, author)
+        [user, document, author]
+      end
+      prepend Slackmine::MailerPatch
+    end
+    object = OpenStruct.new(project: @project)
+    configured { assert_nil klass.new.document_added(@user, object, :author) }
+    @pref.slack_suppress_mail = false
+    configured { assert_equal [@user, object, :author], klass.new.document_added(@user, object, :author) }
   end
 
   def test_supported_wiki_and_news_actions

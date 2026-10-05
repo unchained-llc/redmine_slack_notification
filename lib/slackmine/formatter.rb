@@ -10,6 +10,7 @@ module Slackmine
     BODY_DIFF_LCS_CELLS = 40_000
     DUE_REMINDER_COLORS = { 'overdue' => '#D92D20', 'today' => '#F79009' }.freeze
     EVENT_NOUN_KEYS = {
+      'Document' => 'document', 'File' => 'file', 'Message' => 'message',
       'Issue' => 'issue', 'Comment' => 'comment', 'Wiki page' => 'wiki', 'News' => 'news',
       'News comment' => 'news_comment', 'Time entry' => 'time_entry', 'Version' => 'version',
       'Project' => 'project'
@@ -112,6 +113,9 @@ module Slackmine
         'image_failed' => '⚠️ The reply was not saved. Check file size, file access, and the files:read bot scope.'
       },
       'events' => {
+        'document' => { 'created' => 'Document created', 'updated' => 'Document updated', 'deleted' => 'Document deleted' },
+        'file' => { 'added' => 'File added', 'updated' => 'File updated', 'deleted' => 'File deleted' },
+        'message' => { 'posted' => 'Message posted', 'updated' => 'Message updated', 'deleted' => 'Message deleted' },
         'issue' => { 'created' => 'Issue created', 'updated' => 'Issue updated', 'deleted' => 'Issue deleted' },
         'comment' => { 'added' => 'Comment added', 'updated' => 'Comment updated', 'deleted' => 'Comment deleted' },
         'wiki' => { 'created' => 'Wiki page created', 'updated' => 'Wiki page updated', 'deleted' => 'Wiki page deleted' },
@@ -122,6 +126,9 @@ module Slackmine
         'project' => { 'updated' => 'Project updated' }
       },
       'icons' => {
+        'document' => { 'created' => '📄', 'updated' => '✏️', 'deleted' => '🗑️' },
+        'file' => { 'added' => '📎', 'updated' => '✏️', 'deleted' => '🗑️' },
+        'message' => { 'posted' => '💬', 'updated' => '✏️', 'deleted' => '🗑️' },
         'issue' => { 'created' => '🆕', 'updated' => '🔄', 'deleted' => '🗑️' },
         'comment' => { 'added' => '💬', 'updated' => '💬', 'deleted' => '🗑️' },
         'wiki' => { 'created' => '📚', 'updated' => '✏️', 'deleted' => '🗑️' },
