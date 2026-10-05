@@ -214,12 +214,21 @@ class ThreadImageCommentsTest < ThreadCommentsUrlTest
     assert @upload.closed?
   end
 
-  def test_pdf_reply_adds_download_link_instead_of_image_markup
-    @attachment.filename = 'F123-report.pdf'
-    @attachment.content_type = 'application/pdf'
-    assert_equal :saved, persist
-    assert_includes @journal.notes, '[F123-report.pdf](https://redmine.example.com/attachments/download/55)'
-    refute_includes @journal.notes, '![]'
+  def test_non_image_reply_uses_quoted_attachment_reference_in_both_formatters
+    %w[markdown textile].each_with_index do |format, index|
+      if index > 0
+        teardown
+        setup
+      end
+      @attachment.filename = 'F123-振込受付書.pdf'
+      @attachment.content_type = 'application/pdf'
+      Setting.stub(:text_formatting, format) do
+        assert_equal :saved, persist
+        assert_includes @journal.notes, 'attachment:"F123-振込受付書.pdf"'
+        refute_includes @journal.notes, '/attachments/download/'
+        refute_includes @journal.notes, '![]'
+      end
+    end
   end
 
   def test_attachment_permission_denies_before_downloading

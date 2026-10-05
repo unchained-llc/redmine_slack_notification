@@ -195,8 +195,7 @@ module Slackmine
           references = attachments.map do |attachment|
             path = attachment.filename
             unless ThreadFiles::TYPES.key?(attachment.content_type)
-              url = Formatter.url("/attachments/download/#{attachment.id}")
-              next Setting.text_formatting == 'textile' ? %Q("#{path}":#{url}) : "[#{path}](#{url})"
+              next %Q(attachment:"#{path}")
             end
             Setting.text_formatting == 'textile' ? "!#{path}!" : "![](#{path})"
           end

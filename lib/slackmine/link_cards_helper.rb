@@ -124,10 +124,11 @@ module Slackmine
         downloads = Nokogiri::XML::Node.new('span', fragment.document)
         downloads['class'] = 'slackmine-link-card-files'
         files.each do |file|
-          url = Formatter.url("/attachments/download/#{file.id}")
-          # Remove only the importer's exact download link; unrelated links stay.
+          url = Formatter.url("/attachments/#{file.id}")
+          source_urls = [url, Formatter.url("/attachments/download/#{file.id}")]
+          # Recognize both Redmine attachment references and earlier imported URLs.
           fragment.css('a[href]').select do |anchor|
-            !anchor.ancestors.include?(card) && URI.join(url, anchor['href']).to_s == url
+            !anchor.ancestors.include?(card) && source_urls.include?(URI.join(url, anchor['href']).to_s)
           rescue URI::InvalidURIError
             false
           end.each do |anchor|

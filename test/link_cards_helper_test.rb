@@ -203,12 +203,16 @@ class LinkCardsHelperTest < Minitest::Test
     card = { 'author' => 'Example', 'channel' => 'example', 'text' => 'Reply', 'url' => url,
              'thread_file_ids' => [41] }
     file = OpenStruct.new(id: 41, filename: 'F123-report.pdf')
-    download = Slackmine::Formatter.url('/attachments/download/41')
+    download = Slackmine::Formatter.url('/attachments/41')
     html = Slackmine::LinkCards.render_card(card, url, @issue.project) + %(<p><a href="#{download}">report.pdf</a></p><p>Other content</p>)
     rendered = Slackmine::LinkCards.place_reply_files(html, [card], attachments: [file])
     doc = Nokogiri::HTML.fragment(rendered)
     assert_equal 'F123-report.pdf', doc.at_css('.slackmine-link-card-files a').text
     assert_equal download, doc.at_css('.slackmine-link-card-files a')['href']
+    legacy = html.sub(download, Slackmine::Formatter.url('/attachments/download/41'))
+    legacy_doc = Nokogiri::HTML.fragment(Slackmine::LinkCards.place_reply_files(legacy, [card], attachments: [file]))
+    assert_equal 1, legacy_doc.css('.slackmine-link-card-files a').size
+    assert_empty legacy_doc.css('a[href*="/attachments/download/"]')
     assert_equal 1, doc.css("a[href='#{download}']").size
     assert_equal 'Other content', doc.at_css('p').text
     assert_equal 'Open in Slack', doc.at_css('.slackmine-link-card').element_children.last.text

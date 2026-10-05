@@ -204,7 +204,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     Slackmine::ThreadFiles.stub(:download, files) { assert_equal :saved, persist }
     assert_equal 2, Attachment.count
     assert_includes Journal.first.notes, "![](#{Attachment.first.filename})"
-    assert_includes Journal.first.notes, "[F124-report.pdf](https://redmine.example.com/attachments/download/#{Attachment.last.id})"
+    assert_includes Journal.first.notes, 'attachment:"F124-report.pdf"'
     Slackmine::ThreadFiles.stub(:download, ->(*) { flunk 'Duplicate downloaded files' }) { assert_equal :duplicate, persist }
     assert_equal 1, Journal.count
     assert_equal 2, Attachment.count
