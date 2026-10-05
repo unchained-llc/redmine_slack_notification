@@ -2,6 +2,8 @@
 
 # Slackmine
 
+![Slackmine — Slack and Redmine integration](docs/assets/slackmine-icon.png)
+
 Version **1.0.0**.
 
 The plugin was renamed from **Redmine Event Notifications for Slack** (`redmine_slack_notification`) to **Slackmine** as it grew from notifications into a broader Slack–Redmine integration. Internal names, plugin ID, configuration filename and endpoints now use `slackmine`; the former names are no longer supported.
@@ -42,7 +44,12 @@ The images below illustrate supported feature content and controls using fiction
 - For due-date DMs, turn on the Slack app's **App Home → Display Messages tab** setting.
 - An ActiveJob worker that processes the `slack` queue. Sidekiq is recommended in production.
 
-1. Place this directory at `plugins/slackmine` in the Redmine application.
+1. From the Redmine application root, clone this repository into `plugins/slackmine`:
+
+   ```sh
+   git clone https://github.com/unchained-llc/slackmine.git plugins/slackmine
+   ```
+
 2. Copy the [example configuration](config/slackmine.yml.example) to the application's `config/slackmine.yml`.
 3. Set the Bot Token and a default or project-specific channel ID. Keep the real YAML file out of Git.
 4. Configure Sidekiq to process the `slack` queue and invite the bot to the configured channels.

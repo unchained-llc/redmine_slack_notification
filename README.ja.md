@@ -2,6 +2,8 @@
 
 # Slackmine
 
+![Slackmine — SlackとRedmineの連携](docs/assets/slackmine-icon.png)
+
 バージョン **1.0.0**。
 
 通知機能からSlackとRedmineの統合へ機能が広がったため、**Redmine Event Notifications for Slack**（`redmine_slack_notification`）から **Slackmine** に改名しました。内部名・プラグインID・設定ファイル名・エンドポイントも `slackmine` に統一し、旧名の互換対応は設けていません。
@@ -42,7 +44,12 @@ Work Objectのプレビュー・操作、スラッシュコマンド、スレッ
 - 期日リマインダーの DM を使う場合は、Slack アプリの **App Home → Display Messages tab** を有効にしてください。
 - `slack` キューを処理する ActiveJob ワーカー。本番環境では Sidekiq を推奨します。
 
-1. このディレクトリを Redmine の `plugins/slackmine` に配置します。
+1. Redmine 本体のルートディレクトリから、このリポジトリを `plugins/slackmine` に clone します。
+
+   ```sh
+   git clone https://github.com/unchained-llc/slackmine.git plugins/slackmine
+   ```
+
 2. [設定例](config/slackmine.yml.example)を Redmine アプリケーションの `config/slackmine.yml` にコピーします。
 3. Bot Token と、デフォルトまたはプロジェクト固有のチャンネル ID を設定します。実際の YAML ファイルは Git に含めないでください。
 4. Sidekiq が `slack` キューを処理するように設定し、ボットを通知先チャンネルに招待します。
