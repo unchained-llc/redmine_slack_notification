@@ -38,6 +38,11 @@ module RedmineSlackNotification
       return unless %w[author channel timestamp].all? { |key| data[key].is_a?(String) }
       Time.iso8601(data['timestamp'])
       return unless data['names'].nil? || valid_names?(data['names'])
+      if data.key?('thread_image_ids')
+        ids = data['thread_image_ids']
+        return unless ids.is_a?(Array) && ids.size.between?(1, 10) && ids.uniq == ids &&
+                      ids.all? { |id| id.is_a?(Integer) && id > 0 }
+      end
       data['avatar'] = safe_avatar(data['avatar'])
       if data['parent_url']
         return unless LinkCards.parse(data['parent_url'])
@@ -121,6 +126,10 @@ module RedmineSlackNotification
         # Notification replies already have their parent comment in Redmine.
         if Thread.current[:redmine_slack_thread_comment]
           card = card.reject { |key, _| %w[thread_reply parent parent_url].include?(key) }
+          images = Thread.current[:redmine_slack_thread_images]
+          if images && !images[:ids].empty? && identity(images[:url]) == identity(url)
+            card = card.merge('thread_image_ids' => images[:ids])
+          end
         end
         quote = encode(card, url)
         next if blocks(quote).empty?

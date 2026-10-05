@@ -239,6 +239,28 @@ class SlackEventsControllerTest < Minitest::Test
     end
   end
 
+  def test_image_only_reply_keeps_file_ids_through_queue_serialization
+    @settings['slack'].merge!('thread_comments' => true, 'default_channel_id' => 'C123')
+    @payload['event'] = { 'type' => 'message', 'subtype' => 'file_share', 'user' => 'U123',
+      'channel' => 'C123', 'ts' => '1000.000002', 'thread_ts' => '1000.000001',
+      'files' => [{ 'id' => 'F123', 'url_private' => 'do not queue', 'name' => 'screen.png' }],
+      'unused_field' => 'do not queue' }
+    queued = []
+    RedmineSlackThreadCommentJob.stub(:perform_later, ->(*args) { queued << args }) do
+      assert_equal :ok, dispatch.status
+    end
+    assert_equal 1, queued.size
+    args = JSON.parse(JSON.generate(queued.first))
+    assert_equal [{ 'id' => 'F123' }], args.last['files']
+    refute args.last.key?('unused_field')
+    assert RedmineSlackNotification::ThreadComments.reply_event?(args.last)
+    received = []
+    RedmineSlackNotification::ThreadComments.stub(:process, ->(*values) { received << values }) do
+      RedmineSlackThreadCommentJob.new.perform(*args)
+    end
+    assert_equal args, received.first
+  end
+
   def test_thread_reply_is_queued_only_when_enabled_and_for_the_configured_channel
     @settings['slack'].merge!('thread_comments' => true, 'default_channel_id' => 'C123')
     @payload['event'] = { 'type' => 'message', 'user' => 'U123', 'text' => 'Reply',

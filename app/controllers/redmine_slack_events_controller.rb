@@ -108,9 +108,15 @@ class RedmineSlackEventsController < ActionController::Base
         'type', 'user', 'links', 'channel', 'message_ts', 'unfurl_id', 'source', 'is_unfurl_refresh'
       ))
     elsif payload['type'] == 'event_callback' && RedmineSlackNotification::ThreadComments.accepted_reply?(payload['api_app_id'], payload['team_id'], event)
-      RedmineSlackThreadCommentJob.perform_later(payload['api_app_id'], payload['team_id'], event.slice(
+      reply = event.slice(
         'type', 'subtype', 'user', 'text', 'channel', 'ts', 'thread_ts'
-      ))
+      )
+      # The worker resolves authoritative metadata with files.info. Keep only
+      # IDs, but do not drop image-only replies at the queue boundary.
+      if event['files'].is_a?(Array)
+        reply['files'] = event['files'].map { |file| file.is_a?(Hash) ? file.slice('id') : {} }
+      end
+      RedmineSlackThreadCommentJob.perform_later(payload['api_app_id'], payload['team_id'], reply)
     end
     head :ok
   rescue JSON::ParserError, ArgumentError

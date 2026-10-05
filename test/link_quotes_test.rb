@@ -129,6 +129,26 @@ class LinkQuotesTest < Minitest::Test
     end
   end
 
+  def test_image_association_is_only_recorded_for_the_imported_reply
+    origin = Thread.current[:redmine_slack_thread_comment]
+    images = Thread.current[:redmine_slack_thread_images]
+    source = %(<a href="#{URL}">reply</a>)
+    Thread.current[:redmine_slack_thread_comment] = true
+    Thread.current[:redmine_slack_thread_images] = { url: URL, ids: [41, 42] }
+    assert_equal [41, 42], Q.blocks(import(source)).first.last['thread_image_ids']
+    Thread.current[:redmine_slack_thread_images] = { url: URL.sub('C123', 'C456'), ids: [41] }
+    refute Q.blocks(import(source)).first.last.key?('thread_image_ids')
+    Thread.current[:redmine_slack_thread_images] = { url: URL, ids: [41] }
+    Thread.current[:redmine_slack_thread_comment] = nil
+    refute Q.blocks(import(source)).first.last.key?('thread_image_ids')
+    [[], [0], ['41'], [41, 41], (1..11).to_a].each do |ids|
+      assert_empty Q.blocks(Q.encode(@card.merge('thread_image_ids' => ids), URL))
+    end
+  ensure
+    Thread.current[:redmine_slack_thread_comment] = origin
+    Thread.current[:redmine_slack_thread_images] = images
+  end
+
   def test_invalid_metadata_is_not_interpreted_and_unsafe_avatar_is_removed
     encoded = Base64.strict_encode64(JSON.generate(@card.merge('url' => 'javascript:alert(1)')))
     assert_nil Q.decode(encoded, 'body')

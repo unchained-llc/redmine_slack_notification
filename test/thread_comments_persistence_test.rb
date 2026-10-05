@@ -21,6 +21,7 @@ end
 module Setting
   def self.protocol; 'https'; end
   def self.host_name; 'redmine.example.com'; end
+  def self.text_formatting; 'markdown'; end
 end
 
 class Project < OpenStruct
@@ -52,6 +53,12 @@ ActiveRecord::Schema.define do
     t.datetime :created_on, precision: 6
     t.datetime :updated_on, precision: 6
   end
+  create_table(:attachments) do |t|
+    t.integer :issue_id
+    t.integer :author_id
+    t.string :filename
+    t.binary :content
+  end
 end
 
 class EmailAddress < ActiveRecord::Base
@@ -59,6 +66,7 @@ end
 
 class Issue < ActiveRecord::Base
   has_many :journals
+  has_many :attachments
   attr_accessor :project, :private_issue, :can_view, :can_comment, :pending_journal
   after_save do
     if pending_journal
@@ -70,7 +78,20 @@ class Issue < ActiveRecord::Base
   def is_private?; !!private_issue; end
   def visible?(_viewer); can_view; end
   def notes_addable?(_viewer); can_comment; end
+  def attachments_addable?(_viewer); can_comment; end
   def init_journal(viewer, notes); self.pending_journal = journals.build(user_id: viewer.id, notes: notes); end
+end
+
+# Minimal real-DB attachment fixture: the production Redmine Attachment model
+# owns disk storage, filename/extension validation and rollback cleanup.
+class Attachment < ActiveRecord::Base
+  validates_presence_of :filename, :content
+  def file=(upload)
+    self.filename = upload.original_filename
+    self.content = upload.read
+    upload.rewind
+  end
+  def author=(viewer); self.author_id = viewer.id; end
 end
 
 class Journal < ActiveRecord::Base
@@ -87,6 +108,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     EmailAddress.delete_all
     User.delete_all
     Journal.delete_all
+    Attachment.delete_all
     Issue.delete_all
     @project = Project.new(identifier: 'agentic', active?: true)
     @issue = Issue.create!(subject: 'Thread target')
@@ -142,6 +164,70 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     assert_equal 2, Journal.count
   end
 
+  def image_upload(name = 'F123-screen.png')
+    file = Tempfile.new('thread-image-db-test')
+    file.binmode
+    file.write("\x89PNG\r\n\x1a\nimage".b)
+    file.rewind
+    file.define_singleton_method(:original_filename) { name }
+    file
+  end
+
+  def test_image_only_reply_persists_attachment_and_inline_reference_once
+    @event['text'] = ''
+    @event['subtype'] = 'file_share'
+    @event['files'] = [{ 'id' => 'F123' }]
+    file = image_upload
+    assert COMMENTS.reply_event?(@event)
+    RedmineSlackNotification::ThreadImages.stub(:download, [file]) { assert_equal :saved, persist }
+    assert_equal 1, Attachment.count
+    assert_equal @issue.id, Attachment.first.issue_id
+    assert_equal 3, Attachment.first.author_id
+    assert_includes Journal.first.notes, "![](#{Attachment.first.filename})"
+    assert file.closed?
+    RedmineSlackNotification::ThreadImages.stub(:download, ->(*) { flunk 'Duplicate downloaded images' }) do
+      assert_equal :duplicate, persist
+    end
+    assert_equal 1, Journal.count
+    assert_equal 1, Attachment.count
+  ensure
+    file.close! if file && !file.closed?
+  end
+
+  def test_image_failure_after_attachment_save_rolls_back_every_record
+    @event['files'] = [{ 'id' => 'F123' }]
+    file = image_upload
+    original_save = @issue.method(:save!)
+    RedmineSlackNotification::ThreadImages.stub(:download, [file]) do
+      @issue.stub(:save!, -> { original_save.call; raise IOError, 'simulated crash' }) do
+        assert_raises(IOError) { persist }
+      end
+    end
+    assert_equal 0, Journal.count
+    assert_equal 0, Attachment.count
+    assert file.closed?
+    assert_same @previous_user, User.current
+    # A fresh model, as on a Sidekiq retry, can save both records successfully.
+    @issue.reload
+    file = image_upload
+    RedmineSlackNotification::ThreadImages.stub(:download, [file]) { assert_equal :saved, persist }
+    assert_equal 1, Journal.count
+    assert_equal 1, Attachment.count
+  ensure
+    file.close! if file && !file.closed?
+  end
+
+  def test_invalid_attachment_rejects_all_images_and_comment
+    @event['files'] = [{ 'id' => 'F123' }, { 'id' => 'F124' }]
+    files = [image_upload, image_upload('')]
+    RedmineSlackNotification::ThreadImages.stub(:download, files) { assert_equal :restricted, persist }
+    assert_equal 0, Attachment.count
+    assert_equal 0, Journal.count
+    assert files.all?(&:closed?)
+  ensure
+    files.each { |file| file.close! unless file.closed? } if files
+  end
+
   def test_restricted_users_private_issues_and_long_text_never_save
     @issue.can_comment = false
     assert_equal :restricted, persist
@@ -177,9 +263,9 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     assert_nil COMMENTS.issue_from_parent(@parent, 'ATEST', @event['thread_ts'])
   end
 
-  def test_message_edits_bots_files_and_root_posts_are_ignored
+  def test_message_edits_bots_and_root_posts_are_ignored
     assert COMMENTS.reply_event?(@event)
-    [{ 'bot_id' => 'B123' }, { 'subtype' => 'message_changed' }, { 'subtype' => 'file_share' },
+    [{ 'bot_id' => 'B123' }, { 'subtype' => 'message_changed' },
      { 'ts' => @event['thread_ts'] }, { 'edited' => {} }, { 'text' => '' }].each do |override|
       refute COMMENTS.reply_event?(@event.merge(override))
     end

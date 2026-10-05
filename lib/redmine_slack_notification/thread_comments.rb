@@ -10,13 +10,14 @@ module RedmineSlackNotification
 
     def reply_event?(event)
       event.is_a?(Hash) && event['type'] == 'message' &&
-        [nil, '', 'thread_broadcast'].include?(event['subtype']) &&
+        [nil, '', 'thread_broadcast', 'file_share'].include?(event['subtype']) &&
         !event['bot_id'] && !event['app_id'] && !event['edited'] &&
         event['user'].to_s.match?(/\A[UW][A-Z0-9]+\z/) &&
         event['channel'].to_s.match?(/\A[CG][A-Z0-9]+\z/) &&
         event['thread_ts'].to_s.match?(/\A\d+\.\d+\z/) &&
         posted_at(event['ts']) && event['ts'] != event['thread_ts'] &&
-        event['text'].is_a?(String) && !event['text'].strip.empty?
+        (event['text'].nil? || event['text'].is_a?(String)) &&
+        (!event['text'].to_s.strip.empty? || Array(event['files']).any?)
     end
 
     def contexts(app_id, team_id, channel)
@@ -105,7 +106,7 @@ module RedmineSlackNotification
           result = persist_reply(issue, event, team_id)
           # A duplicate never creates a second Journal or a second feedback post.
           return if result == :duplicate
-          key = result == :saved ? 'saved' : 'restricted'
+          key = result == :saved ? 'saved' : (result == :image_failed ? 'image_failed' : 'restricted')
           text = Formatter.interpolate(Formatter.message('thread_comments', key), { id: issue.id, product_name: Formatter.message('work_objects', 'product_name') },
                                        fallback: Formatter::DEFAULT_MESSAGES.dig('thread_comments', key))
           text = Formatter.link_issue_reference(text, issue.id)
@@ -140,8 +141,10 @@ module RedmineSlackNotification
     def persist_reply(issue, event, team_id)
       previous_user = User.current
       previous_origin = Thread.current[:redmine_slack_thread_comment]
+      previous_images = Thread.current[:redmine_slack_thread_images]
       original_project = issue.project.identifier
       Thread.current[:redmine_slack_thread_comment] = true
+      uploads = []
       timestamp = posted_at(event['ts'])
       return :restricted unless timestamp
 
@@ -155,11 +158,12 @@ module RedmineSlackNotification
         next :duplicate if legacy_duplicate
         viewer = WorkObjects.viewer_for(event['user'])
         allowed = viewer && issue.project.active? && !issue.is_private? && issue.visible?(viewer) &&
-                  issue.notes_addable?(viewer) && event['text'].length <= 10_000
+                  issue.notes_addable?(viewer) && event['text'].to_s.length <= 10_000
         next :restricted unless allowed
         # The existing comment author and original posting time identify a
         # retry, even after the comment text has been edited in Redmine.
         next :duplicate if issue.journals.exists?(user_id: viewer.id, created_on: timestamp)
+        next :restricted if Array(event['files']).any? && !issue.attachments_addable?(viewer)
 
         response = RedmineSlackNotification.slack_api('chat.getPermalink',
           { 'channel' => event['channel'], 'message_ts' => event['ts'] },
@@ -176,19 +180,42 @@ module RedmineSlackNotification
                                        [['thread_ts', event['thread_ts']]])
         User.current = viewer
         journal = issue.init_journal(viewer, uri.to_s)
+        uploads = ThreadImages.download(event, RedmineSlackNotification.bot_token(issue.project))
+        # The Issue row lock's transaction includes both attachments and Journal.
+        # Validate every image before saving any, then use the Issue association
+        # so Redmine records attachment additions in this same Journal.
+        attachments = uploads.map { |file| Attachment.new(file: file, author: viewer) }
+        attachments.each { |attachment| raise ActiveRecord::RecordInvalid.new(attachment) unless attachment.valid? }
+        attachments.each do |attachment|
+          attachment.save!
+          issue.attachments << attachment
+        end
+        unless attachments.empty?
+          images = attachments.map do |attachment|
+            path = attachment.filename
+            Setting.text_formatting == 'textile' ? "!#{path}!" : "![](#{path})"
+          end
+          journal.notes = uri.to_s + "\n\n" + images.join("\n\n")
+        end
         journal.created_on = timestamp
         # A new imported note is not an edit. Redmine displays "edited" when
         # updated_on differs from created_on; later edits keep normal timestamps.
         journal.updated_on = timestamp
+        Thread.current[:redmine_slack_thread_images] = { url: uri.to_s, ids: attachments.map(&:id) }
         issue.save!
         raise 'Slack reply Journal was not persisted' unless journal.persisted?
         :saved
       end
+    rescue ThreadImages::ImportError => error
+      Rails.logger&.warn("RedmineSlackNotification: thread image rejected: #{error.message}")
+      :image_failed
     rescue ActiveRecord::RecordInvalid
       :restricted
     ensure
+      uploads.each(&:close!) if uploads
       User.current = previous_user
       Thread.current[:redmine_slack_thread_comment] = previous_origin
+      Thread.current[:redmine_slack_thread_images] = previous_images
     end
   end
 end

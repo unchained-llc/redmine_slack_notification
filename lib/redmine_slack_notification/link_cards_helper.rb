@@ -56,14 +56,54 @@ module RedmineSlackNotification
       return html.html_safe unless card_view
       @slack_link_card_state ||= { api: {}, cards: {}, count: 0,
                                    deadline: Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5 }
-      LinkCards.render_links(html, issue, User.current, journal_id, @slack_link_card_state,
+      html = LinkCards.render_links(html, issue, User.current, journal_id, @slack_link_card_state,
                              time_formatter: time_formatter,
-                             quoted_urls: quotes.map { |_, card| card['url'] }).html_safe
+                             quoted_urls: quotes.map { |_, card| card['url'] })
+      html = LinkCards.place_reply_images(html, quotes.map(&:last), attachments: issue.attachments) if journal_id
+      html.html_safe
     end
   end
 
   module LinkCards
     module_function
+
+    # Only the importer records this association; never infer it from note text.
+    # Move already formatted images, preserving Redmine's sizing and links.
+    def place_reply_images(html, quotes, attachments: [])
+      marked = quotes.select { |quote| quote['thread_image_ids'] }
+      return html if marked.empty?
+      fragment = Nokogiri::HTML.fragment(html.to_s)
+      marked.each do |quote|
+        ids = quote['thread_image_ids']
+        next unless (ids - attachments.map(&:id)).empty?
+        cards = fragment.css('.redmine-slack-link-card').select do |card|
+          footer = card.element_children.last
+          footer && footer.name == 'a' && LinkQuotes.identity(footer['href']) == LinkQuotes.identity(quote['url'])
+        end
+        next unless cards.size == 1
+        card = cards.first
+        images = ids.map do |id|
+          image_url = Formatter.url("/attachments/download/#{id}")
+          fragment.css('img[src]').find do |img|
+            src = URI.join(image_url, img['src']).to_s
+            (src == image_url || src.start_with?(image_url + '/')) && !img.ancestors.include?(card)
+          rescue URI::InvalidURIError
+            false
+          end
+        end
+        next if images.any?(&:nil?)
+        gallery = Nokogiri::XML::Node.new('span', fragment.document)
+        gallery['class'] = 'redmine-slack-link-card-images'
+        card.element_children.last.add_previous_sibling(gallery)
+        images.each do |img|
+          node = img.parent.name == 'a' && img.parent.element_children.size == 1 && img.parent.text.strip.empty? ? img.parent : img
+          paragraph = node.parent
+          gallery.add_child(node)
+          paragraph.remove if paragraph.name == 'p' && paragraph.text.strip.empty? && paragraph.element_children.all? { |child| child.name == 'br' }
+        end
+      end
+      fragment.to_html
+    end
 
     def place_saved_cards(fragment, replacements, quote_urls)
       quote_urls.each do |token, url|

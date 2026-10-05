@@ -27,6 +27,7 @@ class LinkCardsHelperTest < Minitest::Test
     @view.html.define_singleton_method(:html_safe) { self }
     @issue = Issue.new(123)
     @issue.project = OpenStruct.new(identifier: 'example')
+    @issue.define_singleton_method(:attachments) { [] }
   end
 
   def test_hook_renders_after_normal_formatting_and_keeps_source_permission_check
@@ -176,6 +177,74 @@ class LinkCardsHelperTest < Minitest::Test
     RedmineSlackNotification::LinkCards.place_saved_cards(fragment, replacements, { 'TOKEN' => url })
     assert_equal '<span class="redmine-slack-link-card">saved quote</span>', replacements['TOKEN']
     assert_equal url, fragment.at_css('pre a').text
+  end
+
+  def test_explicit_imported_images_move_inside_card_and_preserve_sizing
+    url = LinkCardsTest::URL
+    card = { 'author' => 'Example', 'channel' => 'example', 'text' => 'Reply', 'url' => url,
+             'thread_image_ids' => [41, 42] }
+    attachments = [41, 42].map { |id| OpenStruct.new(id: id) }
+    image_urls = [41, 42].map { |id| "/attachments/download/#{id}/screen@2x.png" }
+    html = '<p>' + RedmineSlackNotification::LinkCards.render_card(card, url, @issue.project) + '</p>' +
+           image_urls.map { |src| %(<p><a href="#{src}" class="image"><img src="#{src}" width="344" height="805" loading="lazy"></a></p>) }.join
+    rendered = RedmineSlackNotification::LinkCards.place_reply_images(html, [card], attachments: attachments)
+    doc = Nokogiri::HTML.fragment(rendered)
+    assert_equal image_urls, doc.css('.redmine-slack-link-card-images img').map { |img| img['src'] }
+    assert_equal image_urls, doc.css('.redmine-slack-link-card-images a').map { |a| a['href'] }
+    assert_equal ['344', '344'], doc.css('img').map { |img| img['width'] }
+    assert_equal ['805', '805'], doc.css('img').map { |img| img['height'] }
+    assert_equal 'Open in Slack', doc.at_css('.redmine-slack-link-card').element_children.last.text
+    assert_equal 1, doc.css('p').size
+    assert_equal rendered, RedmineSlackNotification::LinkCards.place_reply_images(rendered, [card], attachments: attachments)
+  end
+
+  def test_unmarked_missing_and_external_images_stay_outside_card
+    url = LinkCardsTest::URL
+    card = { 'author' => 'Example', 'channel' => 'example', 'text' => 'Reply', 'url' => url }
+    image_url = '/attachments/download/41/screen.png'
+    html = RedmineSlackNotification::LinkCards.render_card(card, url, @issue.project) + %(<p><img src="#{image_url}"></p>)
+    attachments = [OpenStruct.new(id: 41)]
+    assert_equal html, RedmineSlackNotification::LinkCards.place_reply_images(html, [card], attachments: attachments)
+    assert_equal html, RedmineSlackNotification::LinkCards.place_reply_images(html, [], attachments: attachments)
+    marked = card.merge('thread_image_ids' => [41])
+    [[], [OpenStruct.new(id: 42)]].each do |unrelated|
+      doc = Nokogiri::HTML.fragment(RedmineSlackNotification::LinkCards.place_reply_images(html, [marked], attachments: unrelated))
+      assert_empty doc.css('.redmine-slack-link-card-images')
+    end
+    external = html.sub(image_url, 'https://external.example' + image_url)
+    doc = Nokogiri::HTML.fragment(RedmineSlackNotification::LinkCards.place_reply_images(external, [marked], attachments: attachments))
+    assert_empty doc.css('.redmine-slack-link-card-images')
+  end
+
+  def test_journal_rendering_groups_saved_image_without_fetching_slack
+    url = LinkCardsTest::URL
+    image_url = RedmineSlackNotification::Formatter.url('/attachments/download/41')
+    card = { 'author' => 'Example', 'channel' => 'example', 'timestamp' => '2026-10-05T00:00:00Z', 'text' => 'Reply', 'thread_image_ids' => [41] }
+    @issue.define_singleton_method(:attachments) { [OpenStruct.new(id: 41)] }
+    quote = RedmineSlackNotification::LinkQuotes.encode(card, url)
+    source = "#{url}\n\n![](#{image_url})\n\n#{quote}"
+    journal = Journal.new
+    journal.define_singleton_method(:journalized) { @issue }
+    journal.instance_variable_set(:@issue, @issue)
+    journal.define_singleton_method(:id) { 456 }
+    @view.define_singleton_method(:format_time) { |value| value.iso8601 }
+    @view.source_formatter = lambda do |text|
+      text.split("\n\n").map do |part|
+        content = part == url ? %(<a href="#{url}">#{url}</a>) :
+                  (part == "![](#{image_url})" ? %(<img src="#{image_url}">) : CGI.escapeHTML(part))
+        "<p>#{content}</p>"
+      end.join
+    end
+    User.stub(:current, Object.new) do
+      RedmineSlackNotification::LinkCards.stub(:source, source) do
+        RedmineSlackNotification::LinkCards.stub(:fetch, ->(*) { flunk 'saved quotes must not fetch' }) do
+          doc = Nokogiri::HTML.fragment(@view.textilizable(journal, :notes))
+          assert_equal 1, doc.css('.redmine-slack-link-card-images img').size
+          assert_equal 1, doc.css('img').size
+          assert_equal 1, doc.css('.redmine-slack-link-card').size
+        end
+      end
+    end
   end
 
 end
