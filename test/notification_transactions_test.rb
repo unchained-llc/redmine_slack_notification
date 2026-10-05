@@ -130,4 +130,14 @@ class NotificationTransactionsTest < Minitest::Test
       end
     end
   end
+  def test_news_and_time_edits_display_editor_instead_of_creator
+    capture do
+      [News, TimeEntry].each do |klass|
+        record = klass.create!(title: 'before', hours: 1)
+        assert_equal :original_author, Slackmine.deliveries.last.first[:actor]
+        record.update!(title: 'after')
+        assert_equal :editor, Slackmine.deliveries.last.first[:actor]
+      end
+    end
+  end
 end

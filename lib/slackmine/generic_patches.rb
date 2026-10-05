@@ -25,7 +25,7 @@ module Slackmine
         Slackmine::Formatter.generic_payload(
           noun: noun, action: action, subject: title,
           url: Slackmine::Formatter.url(action == 'deleted' ? "/projects/#{project.identifier}/news" : "/news/#{id}"),
-          project: project, actor: action == 'deleted' ? User.current : (respond_to?(:author) ? author : User.current),
+          project: project, actor: action == 'created' ? author : User.current,
           summary: respond_to?(:description) ? description : nil,
           body_diff: description_diff,
           notes: nil
@@ -51,7 +51,7 @@ module Slackmine
       Slackmine.enqueue(
         Slackmine::Formatter.generic_payload(
           noun: noun, action: action, subject: "##{id}", url: Slackmine::Formatter.url("/projects/#{project.identifier}/time_entries"),
-          project: project, actor: action == 'deleted' ? User.current : (user || User.current), fields: fields, notes: comments
+          project: project, actor: action == 'created' ? (user || User.current) : User.current, fields: fields, notes: comments
         ), project: project, event: "time_entry_#{action}"
       )
     end
