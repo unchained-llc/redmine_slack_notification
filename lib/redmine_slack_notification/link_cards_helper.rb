@@ -14,7 +14,7 @@ module RedmineSlackNotification
       else
         return super
       end
-      card_view = options[:formatting] != false &&
+      card_view = respond_to?(:controller_name) && options[:formatting] != false &&
                   ((controller_name == 'issues' && action_name == 'show' && request.format.html?) ||
                    (controller_name == 'journals' && action_name == 'update' && request.format.js?))
       raw = if card_view

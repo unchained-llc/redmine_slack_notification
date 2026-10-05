@@ -148,7 +148,7 @@ module RedmineSlackNotification
                     'unassigned' => 'Unassigned', 'none' => 'None', 'empty' => '(empty)', 'added' => 'Added', 'removed' => 'Removed',
                     'created' => 'created', 'updated' => 'updated', 'deleted' => 'deleted' },
       'diff' => { 'heading' => '%{label} diff', 'omitted' => 'Diff truncated. See the linked page for the full text.' },
-      'images' => { 'preparing' => 'Preparing image', 'alt' => 'Image', 'link_label' => 'Image: %{name}' },
+      'images' => { 'alt' => 'Image', 'link_label' => 'Image: %{name}' },
       'templates' => {
         'issue_updated_header' => '%{actor} *%{event}*',
         'issue_fallback' => '[%{project}] %{actor} %{action} %{tracker} #%{id}: %{subject}',

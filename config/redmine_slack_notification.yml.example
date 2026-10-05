@@ -347,7 +347,6 @@ messages:
     heading: "%{label} diff"
     omitted: Diff truncated. See the linked page for the full text.
   images:
-    preparing: Preparing image
     alt: Image
     link_label: 'Image: %{name}'
   templates:

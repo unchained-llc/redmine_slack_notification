@@ -63,6 +63,26 @@ class LinkCardsHelperTest < Minitest::Test
       assert_equal @view.html, @view.textilizable('preview text')
     end
   end
+  def test_mailer_view_without_controller_name_renders_normal_and_saved_notes
+    mailer_view = Class.new(BaseView) do
+      undef_method :controller_name
+      prepend RedmineSlackNotification::LinkCardsHelper
+      def format_time(value); value.iso8601; end
+    end.new
+    mailer_view.html = '<p>Normal description</p>'
+    @issue.define_singleton_method(:description) { @description }
+    @issue.instance_variable_set(:@description, 'Normal description')
+    RedmineSlackNotification::LinkCards.stub(:source, ->(*) { flunk 'mail must not fetch Slack' }) do
+      assert_equal mailer_view.html, mailer_view.textilizable(@issue, :description)
+      card = { 'author' => 'Example', 'channel' => 'example', 'timestamp' => '2026-10-05T00:00:00Z', 'text' => 'Saved message' }
+      @issue.instance_variable_set(:@description, RedmineSlackNotification::LinkQuotes.encode(card, LinkCardsTest::URL))
+      mailer_view.render_source = true
+      rendered = mailer_view.textilizable(@issue, :description)
+      assert_includes rendered, 'Saved message'
+      refute_includes rendered, '[slack-quote:'
+    end
+  end
+
   def test_saved_quote_renders_without_network_and_preserves_private_note_gate
     card = { 'author' => 'Example', 'channel' => 'test', 'timestamp' => '2026-10-05T00:00:00Z',
              'text' => 'Searchable <script>alert(1)</script> {{include(private)}}', 'names' => {} }

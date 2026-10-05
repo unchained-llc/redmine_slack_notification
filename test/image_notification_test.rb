@@ -1416,6 +1416,8 @@ class ImageNotificationTest < Minitest::Test
     initial = calls[0][1]
     final = calls[1][1]
     assert_equal '#6D5DFB', initial.dig('attachments', 0, 'color')
+    assert_equal 'Example Tracker notification', initial['text']
+    assert_equal initial['text'], initial.dig('blocks', 0, 'text', 'text')
     assert_equal 'F123', initial.dig('blocks', 0, 'accessory', 'slack_file', 'id')
     assert_equal %w[markdown image markdown], initial.dig('attachments', 0, 'blocks').map { |block| block['type'] }
     assert_equal '123.456', final['ts']
@@ -1423,6 +1425,31 @@ class ImageNotificationTest < Minitest::Test
     assert_equal [], final['blocks']
     assert_equal initial['attachments'], final['attachments']
     assert_nil message['blocks']
+  end
+
+  def test_image_notification_preserves_explicit_text_and_limits_preview_text
+    message = RedmineSlackNotification::Formatter.payload('Attachment fallback', blocks: [
+      { 'type' => 'image', 'slack_file' => { 'id' => 'F123' }, 'alt_text' => 'screenshot' }
+    ])
+    message['text'] = 'Notification summary ' * 200
+    calls = []
+    RedmineSlackNotification.stub(:slack_api, ->(method, body, _token) { calls << [method, body]; { 'ok' => true, 'ts' => '1.2' } }) do
+      RedmineSlackNotification.post_message(message, 'C123', 'token')
+    end
+    assert_equal message['text'], calls.first[1]['text']
+    assert_equal message['text'][0, 3000], calls.first[1].dig('blocks', 0, 'text', 'text')
+  end
+
+  def test_message_without_images_keeps_attachment_fallback_without_top_level_text
+    message = RedmineSlackNotification::Formatter.payload('Notification summary', blocks: [
+      { 'type' => 'markdown', 'text' => 'Comment' }
+    ])
+    calls = []
+    RedmineSlackNotification.stub(:slack_api, ->(method, body, _token) { calls << [method, body]; { 'ok' => true } }) do
+      RedmineSlackNotification.post_message(message, 'C123', 'token')
+    end
+    assert_equal [['chat.postMessage', message.merge('channel' => 'C123')]], calls
+    refute calls.first[1].key?('text')
   end
 
   def test_retries_attachment_until_new_image_is_ready
@@ -1994,9 +2021,10 @@ class WorkObjectNotificationTest < Minitest::Test
     assert_equal %w[chat.postMessage chat.update], calls.map(&:first)
     calls.each do |_method, body|
       assert_equal message['metadata'], body['metadata']
-      assert_equal message['text'], body['text']
       assert_equal 'C123', body['channel']
     end
+    assert_equal message.dig('attachments', 0, 'fallback'), calls.first[1]['text']
+    assert_equal message['text'], calls.last[1]['text']
   end
 
   def test_non_issue_notifications_remain_unchanged
@@ -3213,7 +3241,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
                     'wiki' => { 'updated' => 'Page revised' } },
       'sections' => { 'comment' => 'Note', 'metadata' => 'Properties' },
       'diff' => { 'heading' => '%{label} changes' },
-      'images' => { 'preparing' => 'Loading picture', 'alt' => 'Picture' }
+      'images' => { 'alt' => 'Picture' }
     } }
     project = OpenStruct.new(name: 'Agentic', identifier: 'agentic')
     issue = OpenStruct.new(id: 7, subject: 'Subject', project: project, tracker: OpenStruct.new(name: 'Task'))
@@ -3240,7 +3268,8 @@ class NotificationDisplaySettingsTest < Minitest::Test
       RedmineSlackNotification.stub(:slack_api, ->(method, body, _token) { calls << [method, body]; { 'ok' => true, 'ts' => '1.2' } }) do
         RedmineSlackNotification.post_message(image_payload, 'C1', 'token')
       end
-      assert_equal 'Loading picture', calls.first[1].dig('blocks', 0, 'text', 'text')
+      assert_equal 'fallback', calls.first[1]['text']
+      assert_equal 'fallback', calls.first[1].dig('blocks', 0, 'text', 'text')
       assert_equal 'Picture', calls.first[1].dig('blocks', 0, 'accessory', 'alt_text')
     end
   end

@@ -350,13 +350,16 @@ module RedmineSlackNotification
     end.compact.uniq
     request = payload.merge('channel' => channel)
     if image_ids.any?
+      summary = payload['text'].to_s
+      summary = payload.dig('attachments', 0, 'fallback').to_s if summary.strip.empty?
+      request['text'] = summary
       # A private Slack file becomes available to the channel when referenced
       # in a top-level image element. Keep the colored attachment from the
       # first post, then remove these temporary small previews.
       request['blocks'] = image_ids.map do |file_id|
         {
           'type' => 'section',
-          'text' => { 'type' => 'plain_text', 'text' => Formatter.message('images', 'preparing') },
+          'text' => { 'type' => 'plain_text', 'text' => summary[0, 3000] },
           'accessory' => { 'type' => 'image', 'slack_file' => { 'id' => file_id }, 'alt_text' => Formatter.message('images', 'alt') }
         }
       end
