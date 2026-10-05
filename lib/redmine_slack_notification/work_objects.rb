@@ -299,7 +299,7 @@ module RedmineSlackNotification
       blocks.select! { |block| block['block_id'] == 'assignee' } if assignee_only
       return if blocks.empty?
 
-      context = source.slice('entity_url', 'external_ref', 'channel_id', 'message_ts', 'is_ephemeral')
+      context = source.slice('entity_url', 'external_ref', 'channel_id', 'message_ts', 'is_ephemeral', 'app_home')
       { 'type' => 'modal', 'callback_id' => comment_only ? 'redmine_add_comment' : 'redmine_edit_issue',
         'title' => { 'type' => 'plain_text', 'text' => comment_only ? Formatter.message('work_objects', 'add_comment') : work_object_message('edit_title', id: issue.id) },
         'submit' => { 'type' => 'plain_text', 'text' => Formatter.message('work_objects', 'save') },
@@ -530,6 +530,14 @@ module RedmineSlackNotification
                                  priority_id: priority, due_date: due_date, comment: comment, description: description)
         end
         Rails.logger&.info("RedmineSlackNotification: Work Object interaction issue=#{issue.id} result=#{outcome}")
+        if modal && AppHome::FILTERS.include?(context['app_home'])
+          begin
+            notice = work_object_message('edit_failed', id: issue.id) unless %i[saved unchanged].include?(outcome)
+            AppHome.publish(app_id, team_id, payload.dig('user', 'id'), context['app_home'], notice: notice)
+          rescue StandardError => e
+            Rails.logger&.warn("RedmineSlackNotification: App Home refresh failed issue=#{issue.id} #{e.class}")
+          end
+        end
         if (outcome == :saved || outcome == :unchanged) && context['is_ephemeral'] != true &&
            context['channel_id'].to_s.match?(/\A[CDG][A-Z0-9]+\z/) &&
            context['message_ts'].to_s.match?(/\A\d+\.\d+\z/)

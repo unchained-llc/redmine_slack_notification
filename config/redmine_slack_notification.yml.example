@@ -78,6 +78,11 @@ slack:
   # Requires slack.events, explicit users mappings or auto_map_users_by_email,
   # message.groups + groups:history (private channels), and an app reinstall.
   thread_comments: false
+  # Publish personal open-issue lists in the shared Slack app's Home tab.
+  # Enable App Home > Home Tab and subscribe to app_home_opened at the Events URL.
+  # Requires shared slack.events, bot_token and user mappings (or email matching).
+  # Project overrides may disable this; apps configured only per project are not used.
+  app_home: false
   # Post comment-only additions/edits/deletions in the latest Issue notification
   # thread, showing only the comment body (edits/deletions retain body/diffs).
   # Falls back to a full channel notification if no match is found or lookup fails.
@@ -174,6 +179,19 @@ due_reminders:
 # All displayed notification wording is optional. The values below are examples;
 # edit individual keys as needed. %{...} are placeholders.
 messages:
+  app_home:
+    title: My issues
+    all: All my issues
+    my: 担当しているチケット
+    reported: 報告したチケット
+    updated: 更新したチケット
+    this_week: 今週期限のチケット
+    refresh: Refresh
+    detail: Open details
+    open: Open in Redmine
+    empty: No open issues.
+    unmapped: Your Slack account is not linked to an active Redmine user.
+    limit: Up to 10 open issues per section. Open details or refresh to get current data.
   commands:
     project: 'Project'
     continue: 'Continue'

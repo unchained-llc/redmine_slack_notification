@@ -42,6 +42,9 @@ class RedmineSlackEventsController < ActionController::Base
     return head :forbidden unless app_id == integration['app_id'] && team_id == integration['team_id']
 
     if form
+      if RedmineSlackNotification::AppHome.handles?(payload)
+        return render json: RedmineSlackNotification::AppHome.interaction(app_id, team_id, payload)
+      end
       if RedmineSlackNotification::MessageShortcuts.handles?(payload)
         return render json: RedmineSlackNotification::MessageShortcuts.interaction(app_id, team_id, payload)
       end
@@ -83,7 +86,15 @@ class RedmineSlackEventsController < ActionController::Base
     end
 
     event = payload['event']
-    if payload['type'] == 'event_callback' && event.is_a?(Hash) && event['type'] == 'entity_details_requested'
+    if payload['type'] == 'event_callback' && event.is_a?(Hash) && event['type'] == 'app_home_opened'
+      return head :bad_request unless event['user'].is_a?(String)
+      if event['tab'] == 'home' && RedmineSlackNotification::AppHome.enabled?(app_id, team_id)
+        view = event['view']
+        filter = view.is_a?(Hash) && view['callback_id'] == 'redmine_home' ? view['private_metadata'] : nil
+        filter = 'all' unless RedmineSlackNotification::AppHome::FILTERS.include?(filter)
+        RedmineSlackAppHomeJob.perform_later(app_id, team_id, event['user'], filter)
+      end
+    elsif payload['type'] == 'event_callback' && event.is_a?(Hash) && event['type'] == 'entity_details_requested'
       return head :bad_request if event['trigger_id'].to_s.empty? || event['user'].to_s.empty?
 
       # ACK immediately; external HTTP calls run on the existing Slack queue.

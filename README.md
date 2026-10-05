@@ -21,6 +21,7 @@ The plugin provides notifications, Work Object actions, and optional slash comma
 | [Create an Issue from a Slack message](#create-an-issue-from-a-slack-message) | Use a message shortcut, choose a permitted project, and review a new-Issue form prefilled with the selected message and its source link. |
 | [Slack link retrieval and cards](#slack-message-cards-in-issue-text) | Fetch messages linked from Issue descriptions/comments, save searchable quotes in the existing text fields, and display cards at the link positions with resolved names and thread context. |
 | [Due-date reminders](#daily-due-date-dms) | Send scheduled Slack DM digests of assigned open Issues that are overdue or due within a configurable window. Scheduling is configured separately. |
+| [App Home issue lists](#app-home-issue-lists) | View updated, due this week, assigned, and reported open issues in Slack Home. Switch lists, refresh, and open permitted edit/comment forms. |
 | [User mapping](#assignee-mentions) | Map Redmine users to Slack IDs explicitly; optionally match names for outgoing mentions or [email addresses for incoming authorization](#match-viewers-by-email). Actions still enforce Redmine permissions and workflow rules. |
 | [Personal email preference](#personal-email-preference) | Let each user opt out of supported notification emails when Slack notification settings and channel membership qualify. Account/security emails remain enabled; Slack delivery success is not checked. |
 
@@ -566,6 +567,20 @@ Open a message's **More actions** menu and choose the shortcut. Select a project
 The picker includes up to 100 active projects where the mapped user can create Issues and the configured app/team integration is authorized. Projects matching the source channel appear first. Permissions and allowed trackers are checked again in the next form and on save. No Issue is created by opening the shortcut or selecting a project. Required custom fields still use the full Redmine form link; opening that link does not transfer the draft. Saving follows the existing Issue-creation path and its cache-based retry protection and normal notifications.
 
 The selected message is temporarily stored in the existing `Rails.cache`, bound to the initiating user and app/team, for 30 minutes. After the picker changes to the creation form, the draft is held in the form. An expired or unavailable source cache requires reopening the shortcut. Multiple web workers need a shared cache or session affinity for this two-step flow. No new database tables or cache service are installed. Opening and updating modals is synchronous and subject to Slack's three-second response limit; test with the installed app after deployment. A private-channel or DM source can be copied into a project visible to other members: review the destination and draft before saving.
+
+## App Home issue lists
+
+The Home shows four sections in order: Updated by me, Due this week, Assigned to me, and Reported by me. Updated means any visible journal authored by you, not only the last updater. Updated and reported issues sort by latest issue update; assigned issues sort by priority then latest update; due-this-week issues sort by project. All use Redmine’s standard `IssueQuery` filters for open issues, active projects, user/group assignment, visibility, and the current week.
+
+Lists use Slack’s `data_table` with subject, project, status, assignee, and due-date columns, showing five rows per page. The issue title is a normal browser link, with up to 200 characters. A separate “Edit issue” button opens the permission-checked form inside Slack. Clients without action-cell support retain the title link. Slack controls column widths; `data_table` does not expose a width setting. Customize labels with `messages.app_home` and column headings with `messages.fields`. Reopening Home preserves the selected filter.
+
+Enable shared `slack.app_home: true`, configure the shared bot token and `slack.events` app/team IDs and signing secret, enable **App Home → Show Tabs → Home Tab** in Slack, and subscribe to the bot event `app_home_opened` at the existing `/redmine_slack/events` endpoint. Configure user mappings (or email matching), then restart Redmine and Sidekiq.
+
+A selector switches between all four sections or one section. Each section shows up to 10 issues (`10+` means more); an issue matching several sections can appear in each. Due-this-week includes the entire current week, including dates earlier this week, and uses Redmine’s week boundary.
+
+Data refreshes when Home opens, when the filter changes, on Refresh, and after saving from a Home detail form. Other updates appear on the next refresh. No new database schema or periodic job is required. Projects must be active, visible to the viewer, enabled for App Home, use the shared app/team, and map the Slack user to the same Redmine account as the shared configuration. Project-only apps are unsupported. Unmapped users see an explanation without issue data.
+
+Open details shows an issue link and permitted edit/comment inputs, reusing the Work Object modal and Redmine permission/workflow checks. Existing `work_object_previews`, `work_object_actions`, and `work_object_buttons` settings control edits. Otherwise details are read-only. Visible private issues may be listed, but retain the existing prohibition on Slack edits. Override labels through `messages.app_home` in the example configuration.
 
 ## Slash command
 
