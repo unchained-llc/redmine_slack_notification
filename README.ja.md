@@ -831,6 +831,7 @@ slack:
 
 ```bash
 ruby -Itest test/image_notification_test.rb
+ruby -Itest test/standard_notifications_test.rb
 ruby -Itest test/slack_events_controller_test.rb
 ruby -Itest test/slash_commands_cache_test.rb
 ruby -Itest test/slash_commands_edit_test.rb
@@ -838,7 +839,44 @@ ruby -Itest test/app_home_test.rb
 ruby -Itest test/thread_images_test.rb
 ```
 
-テストはスタブを使って通知の整形と配信ロジックを確認します。追加の `ruby -Itest test/thread_comments_persistence_test.rb` は ActiveRecord と sqlite3 が利用できる環境で実行し、メモリ内のテスト用チケット・コメントテーブルで保存、重複抑制、権限拒否、通知ループ抑制を確認します。本番DBやRedisへ接続せず、Slackへの投稿や稼働中のRedmine環境も検証しません。
+テストはスタブを使って通知の整形と配信ロジックを確認します。追加の `ruby -Itest test/thread_comments_persistence_test.rb` は ActiveRecord と sqlite3 が利用できる環境で実行し、メモリ内のテスト用チケット・コメントテーブルで保存、重複抑制、権限拒否、通知ループ抑制を確認します。追加の `ruby -Itest test/notification_transactions_test.rb` は ActiveRecord と sqlite3 のある環境で別プロセスで実行し、Issue削除と汎用通知モデルのcommit・rollbackを確認します。対応表と実環境での未確認事項は [通知監査](#通知の対応範囲と検証) を参照してください。本番DBやRedisへ接続せず、Slackへの投稿や稼働中のRedmine環境も検証しません。
+
+## 通知の対応範囲と検証
+
+以下は実装・設定・整形の対応表と自動テストの検証範囲です。Slackへの表示・SMTPでの配信は、実環境で別途確認します。
+
+| 対象 | 通知 | 本文編集時の表示 | 標準メールの抑制対象 |
+| --- | --- | --- | --- |
+| チケット | 作成・削除、履歴の属性・関連・添付・親子変更 | `body_diff.issue.description` | 作成と有効なRedmine履歴メールの通知条件 |
+| チケットコメント | 追加・編集・削除 | `body_diff.issue.comment`。削除時は削除行を表示 | 新規コメントのみ。編集・削除ではメール処理を追加しない |
+| Wiki | 作成・本文／編集コメントの更新・削除 | `body_diff.wiki.body` | 作成・更新 |
+| ニュース | 作成・更新・削除 | `body_diff.news.description` | 作成 |
+| ニュースコメント | 追加・本文編集・削除 | `body_diff.news.comment`。削除時は削除行を表示 | 追加 |
+| 文書 | 作成・題名／説明／カテゴリの編集・削除 | `body_diff.document.description` | 作成 |
+| プロジェクト／バージョンのファイル | 追加・ファイル名／説明／Content-Type／ダイジェストの編集・削除 | 説明本文。生成した本文差分は使わない | 追加 |
+| 文書の添付 | 追加・編集・削除 | ファイルと共通の整形・文言・アイコン・メタデータ | 追加 |
+| フォーラムのトピック／返信 | 投稿・件名／本文／固定／ロックの編集・削除 | `body_diff.message.body` | 投稿 |
+| 作業時間 | 作成・更新・削除 | 現在のコメント本文。生成した本文差分は使わない | 標準メール処理の抑制なし |
+| バージョン | 作成・更新・削除 | 現在の説明本文。生成した本文差分は使わない | 標準メール処理の抑制なし |
+| プロジェクト | 更新 | 現在の説明本文。生成した本文差分は使わない | 標準メール処理の抑制なし |
+| 期日リマインダー | 設定した日次／手動の一覧 | 専用のリマインダー形式 | リマインダーメールは抑制しない |
+
+イベントの切り替えは `events`、見出し・アイコンは `messages.events`・`messages.icons`、メタデータは `slack.metadata` で設定します。プロジェクト別設定は `projects.<identifier>` 以下の同じ構造を使います。文書添付のイベント設定は `events.document.file` で独立していますが、表示には共通の `file` キーを使います。
+
+`body_diff: false` は本文を隠す設定ではなく、差分の代わりに更新後の本文を表示します。差分設定の省略時はtrueです。全通知の本文を隠す独立した全体スイッチはありません。新しく追加された削除スイッチは初期値falseで、チケット・コメントの削除設定は従来の初期値を維持します。
+
+### 自動テストの検証範囲
+
+スタブテストは通知整形・配信経路・メール方針・コマンドの権限・Work Object・App Home・引用・取り込み・イベント処理を確認します。イベント設定は全体で無効、プロジェクト別で有効にする場合を検証し、本文差分の設定は種類ごとに独立して検証します。モデルの簡易fixtureによるテストは、保存・重複抑制・権限・通知ループ抑制・トランザクションのcommit／rollback・添付のライフサイクル・更新者を確認します。完全なRedmine 7環境の代わりにはなりません。
+
+通知はトランザクションのcommit後にキューへ追加し、rollbackした変更は通知しません。作成は元の作成者、更新・削除は操作したユーザーを表示します。フォーラムの本文編集は差分または更新後の本文を一度だけ表示します。メール抑制はRedmineで有効な通知条件に従い、関連・日付・カスタムフィールドの条件が無効でも、有効なコメント通知の抑制は妨げません。
+
+### 実環境の確認と制限
+
+- ActionMailerのテストにはActionMailerと関連依存が必要です。依存がない環境では、そのテストの検証は未完了です。
+- Redmine 7の実際のコールバック順序・親削除に伴う連鎖削除・Sidekiq処理・Slack表示・SMTP配信は、テスト用の実環境で確認します。
+- メール抑制は有効なイベント・ユーザー・チャンネル設定・参加状況を確認します。非同期のSlack配信成功は待たないため、抑制後の通信障害・ワーカー障害で配信できない場合があります。
+- YAMLはプロセスごとにキャッシュします。設定変更後はRedmineとワーカーを再起動または再読み込みしてください。
 
 ## バージョン履歴
 

@@ -26,6 +26,21 @@ class StandardNotificationsTest < Minitest::Test
     object
   end
 
+  def test_every_notification_event_has_a_working_yaml_switch_and_project_override
+    example = YAML.safe_load(File.read(File.expand_path('../config/slackmine.yml.example', __dir__)))
+    Slackmine::EVENT_PATHS.each do |event, path|
+      assert_includes [true, false], example.fetch('events').dig(*path), event
+      disabled = path.reverse.inject(false) { |value, key| { key => value } }
+      enabled = path.reverse.inject(true) { |value, key| { key => value } }
+      Slackmine.stub(:config, { 'events' => disabled }) do
+        refute Slackmine.event_enabled?(@project, event), event
+      end
+      Slackmine.stub(:config, { 'events' => disabled, 'projects' => { 'example' => { 'events' => enabled } } }) do
+        assert Slackmine.event_enabled?(@project, event), event
+      end
+    end
+  end
+
   def test_all_formatter_nouns_have_customizable_labels_icons_and_example_metadata
     example = YAML.safe_load(File.read(File.expand_path('../config/slackmine.yml.example', __dir__)))
     Slackmine::Formatter::EVENT_NOUN_KEYS.each do |noun, key|
@@ -43,6 +58,19 @@ class StandardNotificationsTest < Minitest::Test
             assert_equal 'Custom event', Slackmine::Formatter.event_label(noun, action)
             assert_equal 'ICON', Slackmine::Formatter.event_icon(action, noun: noun)
           end
+        end
+      end
+    end
+  end
+
+  def test_all_body_diff_types_are_documented_and_can_be_disabled_independently
+    example = YAML.safe_load(File.read(File.expand_path('../config/slackmine.yml.example', __dir__)))
+    Slackmine::BODY_DIFF_PATHS.each do |kind, path|
+      assert_equal true, example.fetch('slack').fetch('body_diff').dig(*path), kind
+      disabled = path.reverse.inject(false) { |value, key| { key => value } }
+      Slackmine.stub(:config, { 'slack' => { 'body_diff' => disabled } }) do
+        Slackmine::BODY_DIFF_PATHS.each_key do |other|
+          assert_equal other != kind, Slackmine.body_diff_enabled?(other), "#{kind}/#{other}"
         end
       end
     end

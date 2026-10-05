@@ -845,6 +845,7 @@ The repository's local test suite can be run with:
 
 ```bash
 ruby -Itest test/image_notification_test.rb
+ruby -Itest test/standard_notifications_test.rb
 ruby -Itest test/slack_events_controller_test.rb
 ruby -Itest test/slash_commands_cache_test.rb
 ruby -Itest test/slash_commands_edit_test.rb
@@ -853,7 +854,44 @@ ruby -Itest test/message_shortcuts_test.rb
 ruby -Itest test/thread_images_test.rb
 ```
 
-These tests exercise notification formatting and delivery logic with stubs. Additionally, run `ruby -Itest test/thread_comments_persistence_test.rb` where ActiveRecord and sqlite3 are available to check persistence, duplicate suppression, permission denial, and notification-loop suppression using in-memory Issue/Journal fixture tables. These tests do not connect to production databases or Redis, post to Slack, or verify a live Redmine installation.
+These tests exercise notification formatting and delivery logic with stubs. Additionally, run `ruby -Itest test/thread_comments_persistence_test.rb` where ActiveRecord and sqlite3 are available to check persistence, duplicate suppression, permission denial, and notification-loop suppression using in-memory Issue/Journal fixture tables. Run `ruby -Itest test/notification_transactions_test.rb` separately with ActiveRecord and sqlite3 to verify commit/rollback behavior for Issue deletion and generic notification models. See [notification audit](#notification-coverage-and-verification) for the coverage matrix and remaining runtime checks. These tests do not connect to production databases or Redis, post to Slack, or verify a live Redmine installation.
+
+## Notification coverage and verification
+
+The following matrix describes the implementation, configuration, and formatting covered by automated tests. Live Slack and SMTP delivery require separate integration checks.
+
+| Object | Notifications | Body edit presentation | Standard email suppression |
+| --- | --- | --- | --- |
+| Issue | Creation, deletion, journal attribute/relation/attachment/parent/child changes | `body_diff.issue.description` | Creation and enabled Redmine journal mail triggers |
+| Issue comment | Addition, editing, deletion | `body_diff.issue.comment`; deletion always shows removed lines | New-comment trigger only; edits/deletions do not add new mail actions |
+| Wiki | Creation, text/edit-comment updates, deletion | `body_diff.wiki.body` | Creation/update |
+| News | Creation, update, deletion | `body_diff.news.description` | Creation |
+| News comment | Addition, content edits, deletion | `body_diff.news.comment`; deletion always shows removed lines | Addition |
+| Document | Creation, title/description/category edits, deletion | `body_diff.document.description` | Creation |
+| Project/Version file | Addition, filename/description/content-type/digest edits, deletion | Description text; no generated body diff | Addition |
+| Document attachment | Addition, editing, deletion | Same File formatter, labels, icons, and metadata | Addition |
+| Forum topic/reply | Posting, subject/content/sticky/locked edits, deletion | `body_diff.message.body` | Posting |
+| Time entry | Creation, update, deletion | Current comment text; no generated body diff | No standard mail action intercepted |
+| Version | Creation, update, deletion | Current description text; no generated body diff | No standard mail action intercepted |
+| Project | Update | Current description text; no generated body diff | No standard mail action intercepted |
+| Due reminder | Configured daily/on-demand digest | Dedicated reminder formatting | No suppression of reminder emails |
+
+Event switches use `events`; headings/icons use `messages.events` and `messages.icons`; metadata uses `slack.metadata`. Project overrides use the same trees under `projects.<identifier>`. Document attachment event switches are separate under `events.document.file`, while their rendering uses the shared `file` keys.
+
+`body_diff: false` displays updated text instead of hiding it. Missing diff settings default to true. There is no separate global switch to hide all notification bodies. New deletion switches default to false; Issue and comment deletion defaults retain their established behavior.
+
+### Verification scope
+
+Stub tests cover notification formatting, delivery paths, mail policy, command permissions, Work Objects, App Home, quotes, imports, and event handling. Event switches are tested disabled globally and enabled per project; body-diff settings are tested independently. Model-fixture tests cover persistence, duplicate suppression, permissions, notification-loop suppression, transaction commit/rollback, attachment lifecycle, and updater identity. These simplified fixtures do not replace a full Redmine 7 installation.
+
+Notifications are queued after transaction commit so rolled-back changes do not enqueue them. Creation uses the original author; updates and deletions use the current actor. Forum body edits display either the diff or the updated body once. Mail suppression follows Redmine's enabled notification triggers; a disabled relation/date/custom-field trigger does not block suppression of an enabled comment trigger.
+
+### Integration checks and limits
+
+- ActionMailer tests require ActionMailer and the relevant dependencies. An unavailable dependency means that suite has not been verified in that environment.
+- Live Redmine 7 callback ordering, cascading parent deletions, Sidekiq execution, Slack rendering, and SMTP delivery require checks on a test installation.
+- Mail suppression checks enabled events, user identity, channel configuration, and membership. It does not wait for successful asynchronous Slack delivery; network or worker failures after suppression can prevent delivery.
+- YAML is cached in each process. Restart or reload Redmine and workers after applying configuration changes.
 
 ## Version history
 
