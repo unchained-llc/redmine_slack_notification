@@ -38,8 +38,9 @@ module Slackmine
       return unless %w[author channel timestamp].all? { |key| data[key].is_a?(String) }
       Time.iso8601(data['timestamp'])
       return unless data['names'].nil? || valid_names?(data['names'])
-      if data.key?('thread_image_ids')
-        ids = data['thread_image_ids']
+      %w[thread_image_ids thread_file_ids].each do |key|
+        next unless data.key?(key)
+        ids = data[key]
         return unless ids.is_a?(Array) && ids.size.between?(1, 10) && ids.uniq == ids &&
                       ids.all? { |id| id.is_a?(Integer) && id > 0 }
       end
@@ -130,6 +131,10 @@ module Slackmine
           if images && !images[:ids].empty? && identity(images[:url]) == identity(url)
             card = card.merge('thread_image_ids' => images[:ids])
           end
+        end
+        files = Thread.current[:slackmine_thread_files] if Thread.current[:slackmine_thread_comment]
+        if files && !files[:ids].empty? && identity(files[:url]) == identity(url)
+          card = card.merge('thread_file_ids' => files[:ids])
         end
         quote = encode(card, url)
         next if blocks(quote).empty?

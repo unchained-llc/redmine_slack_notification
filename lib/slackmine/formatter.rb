@@ -109,7 +109,7 @@ module Slackmine
       'thread_comments' => {
         'saved' => '✅ Comment added to Redmine #%{id}.',
         'restricted' => '⚠️ Could not add the comment. Check the user mapping, Issue permissions and state, and text length.',
-        'image_failed' => '⚠️ The reply was not saved. Check image format and size, file access, and the files:read bot scope.'
+        'image_failed' => '⚠️ The reply was not saved. Check file size, file access, and the files:read bot scope.'
       },
       'events' => {
         'issue' => { 'created' => 'Issue created', 'updated' => 'Issue updated', 'deleted' => 'Issue deleted' },

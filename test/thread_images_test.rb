@@ -6,8 +6,8 @@ module Setting
   def self.text_formatting; 'markdown'; end
 end
 
-class ThreadImagesTest < Minitest::Test
-  IMAGES = Slackmine::ThreadImages
+class ThreadFilesTest < Minitest::Test
+  IMAGES = Slackmine::ThreadFiles
   PNG = "\x89PNG\r\n\x1a\nexample".b
 
   def setup
@@ -51,6 +51,20 @@ class ThreadImagesTest < Minitest::Test
     assert_equal 'image/png', files.first.content_type
   end
 
+  def test_pdf_and_other_files_keep_their_extension_and_content
+    [['application/pdf', 'report.pdf', '%PDF-1.7 example'],
+     ['application/zip', 'archive.zip', "PK archive"],
+     ['text/plain', 'notes.txt', 'notes'],
+     ['application/pdf', '資料.pdf', '%PDF-1.7 example'],
+     ['image/svg+xml', 'diagram.svg', '<svg></svg>']].each do |mime, name, data|
+      @metadata.merge!('mimetype' => mime, 'name' => name, 'size' => data.bytesize)
+      file = download(data).first
+      assert_equal "F123-#{name}", file.original_filename
+      assert_equal mime, file.content_type
+      assert_equal data, file.read
+    end
+  end
+
   def test_duplicate_references_download_once
     @event['files'] *= 2
     assert_equal 1, download.size
@@ -58,7 +72,7 @@ class ThreadImagesTest < Minitest::Test
   end
 
   def test_unsupported_external_wrong_id_and_oversized_files_never_download
-    [{ 'mimetype' => 'image/svg+xml' }, { 'is_external' => true }, { 'id' => 'FOTHER' },
+    [{ 'mimetype' => 'invalid' }, { 'is_external' => true }, { 'id' => 'FOTHER' },
      { 'size' => 0 }, { 'size' => 5120 * 1024 + 1 }].each do |changes|
       original = @metadata
       @metadata = original.merge(changes)
@@ -173,8 +187,8 @@ class ThreadImageCommentsTest < ThreadCommentsUrlTest
     @issue.define_singleton_method(:attachments_addable?) { |_| true }
     @issue.attachments = []
     @upload = Tempfile.new('thread-image-test')
-    @upload.write(ThreadImagesTest::PNG); @upload.rewind
-    @attachment = OpenStruct.new(id: 55, filename: 'F123-screen@2x.png', valid?: true)
+    @upload.write(ThreadFilesTest::PNG); @upload.rewind
+    @attachment = OpenStruct.new(id: 55, filename: 'F123-screen@2x.png', content_type: 'image/png', valid?: true)
     @attachment.define_singleton_method(:save!) { true }
   end
 
@@ -187,7 +201,7 @@ class ThreadImageCommentsTest < ThreadCommentsUrlTest
     attachment_factory.define_singleton_method(:new) { |**_| @attachment }
     attachment_factory.instance_variable_set(:@attachment, @attachment)
     Object.const_set(:Attachment, attachment_factory)
-    Slackmine::ThreadImages.stub(:download, [@upload]) { super }
+    Slackmine::ThreadFiles.stub(:download, [@upload]) { super }
   ensure
     Object.send(:remove_const, :Attachment)
   end
@@ -198,6 +212,14 @@ class ThreadImageCommentsTest < ThreadCommentsUrlTest
     assert_equal [@attachment], @issue.attachments
     assert_equal 3, @journal.user_id
     assert @upload.closed?
+  end
+
+  def test_pdf_reply_adds_download_link_instead_of_image_markup
+    @attachment.filename = 'F123-report.pdf'
+    @attachment.content_type = 'application/pdf'
+    assert_equal :saved, persist
+    assert_includes @journal.notes, '[F123-report.pdf](https://redmine.example.com/attachments/download/55)'
+    refute_includes @journal.notes, '![]'
   end
 
   def test_attachment_permission_denies_before_downloading

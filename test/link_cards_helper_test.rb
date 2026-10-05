@@ -198,6 +198,26 @@ class LinkCardsHelperTest < Minitest::Test
     assert_equal rendered, Slackmine::LinkCards.place_reply_images(rendered, [card], attachments: attachments)
   end
 
+  def test_explicit_file_downloads_appear_inside_only_their_card
+    url = LinkCardsTest::URL
+    card = { 'author' => 'Example', 'channel' => 'example', 'text' => 'Reply', 'url' => url,
+             'thread_file_ids' => [41] }
+    file = OpenStruct.new(id: 41, filename: 'F123-report.pdf')
+    download = Slackmine::Formatter.url('/attachments/download/41')
+    html = Slackmine::LinkCards.render_card(card, url, @issue.project) + %(<p><a href="#{download}">report.pdf</a></p><p>Other content</p>)
+    rendered = Slackmine::LinkCards.place_reply_files(html, [card], attachments: [file])
+    doc = Nokogiri::HTML.fragment(rendered)
+    assert_equal 'F123-report.pdf', doc.at_css('.slackmine-link-card-files a').text
+    assert_equal download, doc.at_css('.slackmine-link-card-files a')['href']
+    assert_equal 1, doc.css("a[href='#{download}']").size
+    assert_equal 'Other content', doc.at_css('p').text
+    assert_equal 'Open in Slack', doc.at_css('.slackmine-link-card').element_children.last.text
+    assert_equal rendered, Slackmine::LinkCards.place_reply_files(rendered, [card], attachments: [file])
+    assert_equal html, Slackmine::LinkCards.place_reply_files(html, [], attachments: [file])
+    doc = Nokogiri::HTML.fragment(Slackmine::LinkCards.place_reply_files(html, [card], attachments: []))
+    assert_empty doc.css('.slackmine-link-card-files')
+  end
+
   def test_unmarked_missing_and_external_images_stay_outside_card
     url = LinkCardsTest::URL
     card = { 'author' => 'Example', 'channel' => 'example', 'text' => 'Reply', 'url' => url }

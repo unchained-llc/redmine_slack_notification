@@ -74,10 +74,11 @@ slack:
     status: true
     description: false
     last_comment: false
-  # Save text/image replies to Issue notification threads as Redmine notes.
+  # Save text/file replies to Issue notification threads as Redmine notes.
   # Requires slack.events, explicit users mappings or auto_map_users_by_email,
   # message.groups + groups:history (private channels), and an app reinstall.
-  # Images also require files:read. PNG/JPEG/GIF/WebP only, up to 10 files,
+  # Files also require files:read. Images preview inline; other files use download links.
+  # Up to 10 files,
   # 10 MiB each (or Redmine's lower attachment limit), 50 MiB total per reply.
   thread_comments: false
   # Publish personal open-issue lists in the shared Slack app's Home tab.
@@ -414,7 +415,7 @@ messages:
     # Supports %{id} and %{product_name}; #%{id} automatically becomes a link.
     saved: '✅ Comment added to Redmine #%{id}.'
     restricted: '⚠️ Could not add the comment. Check the user mapping, Issue permissions and state, and text length.'
-    image_failed: '⚠️ The reply was not saved. Check image format and size, file access, and the files:read bot scope.'
+    image_failed: '⚠️ The reply was not saved. Check file size, file access, and the files:read bot scope.'
   due_reminders:
     # Omit a key to use its built-in default. Projects can override keys under
     # projects.<identifier>.messages.due_reminders.

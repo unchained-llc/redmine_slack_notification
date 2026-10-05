@@ -19,3 +19,5 @@
 
 /* Official Slack mark: https://slack.com/media-kit */
 .slackmine-link-card > a:last-child::before { content: ""; display: inline-block; width: 1em; height: 1em; margin-right: .35em; vertical-align: -.15em; background: url("../images/slack-mark.svg") center / contain no-repeat; }
+
+.slackmine-link-card-files { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; overflow-wrap: anywhere; }

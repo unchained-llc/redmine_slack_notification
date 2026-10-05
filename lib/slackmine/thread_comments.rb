@@ -141,6 +141,7 @@ module Slackmine
     def persist_reply(issue, event, team_id)
       previous_user = User.current
       previous_origin = Thread.current[:slackmine_thread_comment]
+      previous_files = Thread.current[:slackmine_thread_files]
       previous_images = Thread.current[:slackmine_thread_images]
       original_project = issue.project.identifier
       Thread.current[:slackmine_thread_comment] = true
@@ -180,9 +181,9 @@ module Slackmine
                                        [['thread_ts', event['thread_ts']]])
         User.current = viewer
         journal = issue.init_journal(viewer, uri.to_s)
-        uploads = ThreadImages.download(event, Slackmine.bot_token(issue.project))
+        uploads = ThreadFiles.download(event, Slackmine.bot_token(issue.project))
         # The Issue row lock's transaction includes both attachments and Journal.
-        # Validate every image before saving any, then use the Issue association
+        # Validate every file before saving any, then use the Issue association
         # so Redmine records attachment additions in this same Journal.
         attachments = uploads.map { |file| Attachment.new(file: file, author: viewer) }
         attachments.each { |attachment| raise ActiveRecord::RecordInvalid.new(attachment) unless attachment.valid? }
@@ -191,23 +192,28 @@ module Slackmine
           issue.attachments << attachment
         end
         unless attachments.empty?
-          images = attachments.map do |attachment|
+          references = attachments.map do |attachment|
             path = attachment.filename
+            unless ThreadFiles::TYPES.key?(attachment.content_type)
+              url = Formatter.url("/attachments/download/#{attachment.id}")
+              next Setting.text_formatting == 'textile' ? %Q("#{path}":#{url}) : "[#{path}](#{url})"
+            end
             Setting.text_formatting == 'textile' ? "!#{path}!" : "![](#{path})"
           end
-          journal.notes = uri.to_s + "\n\n" + images.join("\n\n")
+          journal.notes = uri.to_s + "\n\n" + references.join("\n\n")
         end
         journal.created_on = timestamp
         # A new imported note is not an edit. Redmine displays "edited" when
         # updated_on differs from created_on; later edits keep normal timestamps.
         journal.updated_on = timestamp
-        Thread.current[:slackmine_thread_images] = { url: uri.to_s, ids: attachments.map(&:id) }
+        Thread.current[:slackmine_thread_images] = { url: uri.to_s, ids: attachments.select { |a| ThreadFiles::TYPES.key?(a.content_type) }.map(&:id) }
+        Thread.current[:slackmine_thread_files] = { url: uri.to_s, ids: attachments.reject { |a| ThreadFiles::TYPES.key?(a.content_type) }.map(&:id) }
         issue.save!
         raise 'Slack reply Journal was not persisted' unless journal.persisted?
         :saved
       end
-    rescue ThreadImages::ImportError => error
-      Rails.logger&.warn("Slackmine: thread image rejected: #{error.message}")
+    rescue ThreadFiles::ImportError => error
+      Rails.logger&.warn("Slackmine: thread file rejected: #{error.message}")
       :image_failed
     rescue ActiveRecord::RecordInvalid
       :restricted
@@ -216,6 +222,7 @@ module Slackmine
       User.current = previous_user
       Thread.current[:slackmine_thread_comment] = previous_origin
       Thread.current[:slackmine_thread_images] = previous_images
+      Thread.current[:slackmine_thread_files] = previous_files
     end
   end
 end

@@ -60,6 +60,7 @@ module Slackmine
                              time_formatter: time_formatter,
                              quoted_urls: quotes.map { |_, card| card['url'] })
       html = LinkCards.place_reply_images(html, quotes.map(&:last), attachments: issue.attachments) if journal_id
+      html = LinkCards.place_reply_files(html, quotes.map(&:last), attachments: issue.attachments) if journal_id
       html.html_safe
     end
   end
@@ -101,6 +102,45 @@ module Slackmine
           gallery.add_child(node)
           paragraph.remove if paragraph.name == 'p' && paragraph.text.strip.empty? && paragraph.element_children.all? { |child| child.name == 'br' }
         end
+      end
+      fragment.to_html
+    end
+
+    # Only explicit reply-import metadata may associate downloads with a card.
+    def place_reply_files(html, quotes, attachments: [])
+      marked = quotes.select { |quote| quote['thread_file_ids'] }
+      return html if marked.empty?
+      fragment = Nokogiri::HTML.fragment(html.to_s)
+      marked.each do |quote|
+        files = quote['thread_file_ids'].map { |id| attachments.find { |a| a.id == id } }
+        next if files.any?(&:nil?)
+        cards = fragment.css('.slackmine-link-card').select do |card|
+          footer = card.element_children.last
+          footer && footer.name == 'a' && LinkQuotes.identity(footer['href']) == LinkQuotes.identity(quote['url'])
+        end
+        next unless cards.size == 1
+        card = cards.first
+        next if card.at_css('.slackmine-link-card-files')
+        downloads = Nokogiri::XML::Node.new('span', fragment.document)
+        downloads['class'] = 'slackmine-link-card-files'
+        files.each do |file|
+          url = Formatter.url("/attachments/download/#{file.id}")
+          # Remove only the importer's exact download link; unrelated links stay.
+          fragment.css('a[href]').select do |anchor|
+            !anchor.ancestors.include?(card) && URI.join(url, anchor['href']).to_s == url
+          rescue URI::InvalidURIError
+            false
+          end.each do |anchor|
+            paragraph = anchor.parent
+            anchor.remove
+            paragraph.remove if paragraph.name == 'p' && paragraph.text.strip.empty? && paragraph.element_children.all? { |child| child.name == 'br' }
+          end
+          link = Nokogiri::XML::Node.new('a', fragment.document)
+          link['href'] = url
+          link.content = file.filename
+          downloads.add_child(link)
+        end
+        card.element_children.last.add_previous_sibling(downloads)
       end
       fragment.to_html
     end

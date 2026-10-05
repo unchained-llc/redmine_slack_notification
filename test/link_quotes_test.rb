@@ -129,6 +129,23 @@ class LinkQuotesTest < Minitest::Test
     end
   end
 
+  def test_file_association_is_only_recorded_for_the_imported_reply
+    origin = Thread.current[:slackmine_thread_comment]
+    previous = Thread.current[:slackmine_thread_files]
+    Thread.current[:slackmine_thread_comment] = true
+    Thread.current[:slackmine_thread_files] = { url: URL, ids: [41] }
+    source = %(<a href="#{URL}">reply</a>)
+    assert_equal [41], Q.blocks(import(source)).first.last['thread_file_ids']
+    Thread.current[:slackmine_thread_files] = { url: URL.sub('C123', 'C456'), ids: [41] }
+    refute Q.blocks(import(source)).first.last.key?('thread_file_ids')
+    [[], [0], ['41'], [41, 41], (1..11).to_a].each do |ids|
+      assert_empty Q.blocks(Q.encode(@card.merge('thread_file_ids' => ids), URL))
+    end
+  ensure
+    Thread.current[:slackmine_thread_comment] = origin
+    Thread.current[:slackmine_thread_files] = previous
+  end
+
   def test_image_association_is_only_recorded_for_the_imported_reply
     origin = Thread.current[:slackmine_thread_comment]
     images = Thread.current[:slackmine_thread_images]

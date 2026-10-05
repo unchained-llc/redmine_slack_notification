@@ -56,6 +56,7 @@ ActiveRecord::Schema.define do
   create_table(:attachments) do |t|
     t.integer :issue_id
     t.integer :author_id
+    t.string :content_type
     t.string :filename
     t.binary :content
   end
@@ -88,6 +89,7 @@ class Attachment < ActiveRecord::Base
   validates_presence_of :filename, :content
   def file=(upload)
     self.filename = upload.original_filename
+    self.content_type = upload.content_type
     self.content = upload.read
     upload.rewind
   end
@@ -170,6 +172,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     file.write("\x89PNG\r\n\x1a\nimage".b)
     file.rewind
     file.define_singleton_method(:original_filename) { name }
+    file.define_singleton_method(:content_type) { 'image/png' }
     file
   end
 
@@ -179,13 +182,13 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     @event['files'] = [{ 'id' => 'F123' }]
     file = image_upload
     assert COMMENTS.reply_event?(@event)
-    Slackmine::ThreadImages.stub(:download, [file]) { assert_equal :saved, persist }
+    Slackmine::ThreadFiles.stub(:download, [file]) { assert_equal :saved, persist }
     assert_equal 1, Attachment.count
     assert_equal @issue.id, Attachment.first.issue_id
     assert_equal 3, Attachment.first.author_id
     assert_includes Journal.first.notes, "![](#{Attachment.first.filename})"
     assert file.closed?
-    Slackmine::ThreadImages.stub(:download, ->(*) { flunk 'Duplicate downloaded images' }) do
+    Slackmine::ThreadFiles.stub(:download, ->(*) { flunk 'Duplicate downloaded images' }) do
       assert_equal :duplicate, persist
     end
     assert_equal 1, Journal.count
@@ -194,11 +197,28 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     file.close! if file && !file.closed?
   end
 
+  def test_mixed_pdf_and_image_reply_persists_both_and_duplicate_does_not_download
+    @event['files'] = [{ 'id' => 'F123' }, { 'id' => 'F124' }]
+    files = [image_upload, image_upload('F124-report.pdf')]
+    files.last.define_singleton_method(:content_type) { 'application/pdf' }
+    Slackmine::ThreadFiles.stub(:download, files) { assert_equal :saved, persist }
+    assert_equal 2, Attachment.count
+    assert_includes Journal.first.notes, "![](#{Attachment.first.filename})"
+    assert_includes Journal.first.notes, "[F124-report.pdf](https://redmine.example.com/attachments/download/#{Attachment.last.id})"
+    Slackmine::ThreadFiles.stub(:download, ->(*) { flunk 'Duplicate downloaded files' }) { assert_equal :duplicate, persist }
+    assert_equal 1, Journal.count
+    assert_equal 2, Attachment.count
+    assert files.all?(&:closed?)
+    assert_nil Thread.current[:slackmine_thread_files]
+  ensure
+    files.each { |file| file.close! unless file.closed? } if files
+  end
+
   def test_image_failure_after_attachment_save_rolls_back_every_record
     @event['files'] = [{ 'id' => 'F123' }]
     file = image_upload
     original_save = @issue.method(:save!)
-    Slackmine::ThreadImages.stub(:download, [file]) do
+    Slackmine::ThreadFiles.stub(:download, [file]) do
       @issue.stub(:save!, -> { original_save.call; raise IOError, 'simulated crash' }) do
         assert_raises(IOError) { persist }
       end
@@ -210,7 +230,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     # A fresh model, as on a Sidekiq retry, can save both records successfully.
     @issue.reload
     file = image_upload
-    Slackmine::ThreadImages.stub(:download, [file]) { assert_equal :saved, persist }
+    Slackmine::ThreadFiles.stub(:download, [file]) { assert_equal :saved, persist }
     assert_equal 1, Journal.count
     assert_equal 1, Attachment.count
   ensure
@@ -220,7 +240,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
   def test_invalid_attachment_rejects_all_images_and_comment
     @event['files'] = [{ 'id' => 'F123' }, { 'id' => 'F124' }]
     files = [image_upload, image_upload('')]
-    Slackmine::ThreadImages.stub(:download, files) { assert_equal :restricted, persist }
+    Slackmine::ThreadFiles.stub(:download, files) { assert_equal :restricted, persist }
     assert_equal 0, Attachment.count
     assert_equal 0, Journal.count
     assert files.all?(&:closed?)
