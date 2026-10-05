@@ -743,7 +743,7 @@ module Slackmine
       end
       metadata = [['project', text(project.name)], ['updater', text(actor&.name || message('values', 'unknown'))]] + fields
       append_metadata(blocks, event_key(noun), metadata)
-      if notes.to_s.strip.present?
+      if notes.to_s.strip.present? && !(noun == 'Message' && body_diff)
         blocks.insert(2, *(ordered_list?(notes) ? mrkdwn_sections(section_label('comment'), notes.to_s) : [section_text("*#{text(section_label('comment'))}*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}")]))
       end
       payload(fallback, blocks: blocks)

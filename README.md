@@ -557,7 +557,7 @@ After deploying code and YAML, restart Redmine and Sidekiq. Reply to a test Issu
 
 ### Body diffs
 
-By default, edits to Issue descriptions and comments, Wiki and forum message bodies, News descriptions and comments, and Document descriptions show a line diff. The `diff` code block marks removed lines with `-` and added lines with `+`, with two unchanged lines of context. Long lines and large diffs are shortened; follow the record link for the full text. A Wiki edit that changes only its edit comment has no body diff. `document.description` controls Document description diffs; `message.body` controls forum topic and reply body diffs. File notifications show the description as text and do not generate body diffs.
+By default, edits to Issue descriptions and comments, Wiki and forum message bodies, News descriptions and comments, and Document descriptions show a line diff. The `diff` code block marks removed lines with `-` and added lines with `+`, with two unchanged lines of context. Long lines and large diffs are shortened; follow the record link for the full text. A Wiki edit that changes only its edit comment has no body diff. `document.description` controls Document description diffs; `message.body` controls forum topic and reply body diffs. Forum edits display the diff or updated body once. File notifications show the description as text and do not generate body diffs.
 
 Set `slack.body_diff` for each type. `false` shows the updated text instead of a diff:
 

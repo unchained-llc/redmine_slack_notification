@@ -3350,7 +3350,7 @@ class BodyDiffNotificationTest < Minitest::Test
                project: project, actor: OpenStruct.new(name: 'Editor'), body_diff: ['old body', 'new body'] }
     Slackmine.stub(:config, settings) do
       document = Slackmine::Formatter.generic_payload(noun: 'Document', **common).dig('attachments', 0, 'blocks')
-      forum = Slackmine::Formatter.generic_payload(noun: 'Message', **common).dig('attachments', 0, 'blocks')
+      forum = Slackmine::Formatter.generic_payload(noun: 'Message', notes: 'new body', **common).dig('attachments', 0, 'blocks')
       refute document.any? { |block| block['type'] == 'markdown' }
       assert document.any? { |block| block.dig('text', 'text').to_s.include?("*Summary*\nnew body") }
       assert_equal 1, forum.count { |block| block['type'] == 'markdown' && block['text'].include?('+ new body') }
@@ -3359,7 +3359,7 @@ class BodyDiffNotificationTest < Minitest::Test
     Slackmine.stub(:config, { 'slack' => { 'body_diff' => { 'document' => false, 'message' => false } } }) do
       refute Slackmine.body_diff_enabled?(:document_description)
       refute Slackmine.body_diff_enabled?(:message_body)
-      forum = Slackmine::Formatter.generic_payload(noun: 'Message', **common).dig('attachments', 0, 'blocks')
+      forum = Slackmine::Formatter.generic_payload(noun: 'Message', notes: 'new body', **common).dig('attachments', 0, 'blocks')
       refute forum.any? { |block| block['type'] == 'markdown' }
       assert_equal 1, forum.count { |block| block.dig('text', 'text').to_s.include?('new body') }
       added = Slackmine::Formatter.generic_payload(noun: 'Message', **common.merge(action: 'posted', body_diff: nil, notes: 'new body')).dig('attachments', 0, 'blocks')
