@@ -1,6 +1,8 @@
 [English](README.md) | [日本語](README.ja.md)
 
-# Redmine Event Notifications for Slack
+# Slackmine
+
+The plugin was renamed from **Redmine Event Notifications for Slack** (`redmine_slack_notification`) to **Slackmine** as it grew from notifications into a broader Slack–Redmine integration. Internal names, plugin ID, configuration filename and endpoints now use `slackmine`; the former names are no longer supported.
 
 A Redmine 7 plugin that sends Issue, Wiki, News, time entry, Version, and Project events to Slack. It can also send daily Issue due-date reminders to assignees by Slack DM. Notifications use a colored Block Kit attachment with a link to the Redmine record. Delivery runs through ActiveJob, normally on Sidekiq's `slack` queue.
 
@@ -38,8 +40,8 @@ The images below illustrate supported feature content and controls using fiction
 - For due-date DMs, turn on the Slack app's **App Home → Display Messages tab** setting.
 - An ActiveJob worker that processes the `slack` queue. Sidekiq is recommended in production.
 
-1. Place this directory at `plugins/redmine_slack_notification` in the Redmine application.
-2. Copy the [example configuration](config/redmine_slack_notification.yml.example) to the application's `config/redmine_slack_notification.yml`.
+1. Place this directory at `plugins/slackmine` in the Redmine application.
+2. Copy the [example configuration](config/slackmine.yml.example) to the application's `config/slackmine.yml`.
 3. Set the Bot Token and a default or project-specific channel ID. Keep the real YAML file out of Git.
 4. Configure Sidekiq to process the `slack` queue and invite the bot to the configured channels.
 5. Restart Redmine and Sidekiq. Both processes cache the YAML configuration.
@@ -61,8 +63,8 @@ projects:
 
 The plugin reads the first configuration file it finds:
 
-1. `<Redmine root>/config/redmine_slack_notification.yml`
-2. `plugins/redmine_slack_notification/config/redmine_slack_notification.yml`
+1. `<Redmine root>/config/slackmine.yml`
+2. `plugins/slackmine/config/slackmine.yml`
 
 Every top-level configuration group can be overridden under `projects.<identifier>`: `slack`, `events`, `messages`, `users`, and `due_reminders`. Nested maps merge by key, so omitted project keys inherit the global value. Explicit `false` values override `true`. For Bot Tokens, the priority is `projects.<identifier>.slack.bot_token`, then `SLACK_BOT_TOKEN`, then global `slack.bot_token`. For channels, `projects.<identifier>.slack.default_channel_id` takes priority over the older `projects.<identifier>.channel_id`, then a unique automatic name match for that project when enabled. If neither resolves a channel, the same checks are applied to each ancestor from nearest to farthest, then global `slack.default_channel_id` is used. Project keys are Redmine **identifiers**, not display names. A missing token or channel prevents delivery and is logged. Channel IDs typically begin with `C` for public channels or `G` for private channels. Keep every project token out of Git and restart Redmine and Sidekiq after changing the YAML.
 
@@ -155,7 +157,7 @@ projects:
           status_changed: false
 ```
 
-A project override takes precedence over the global value for the same leaf. To override a globally disabled `issue.updated.enabled`, enable that parent for the project as well. Existing flat keys such as `status_changed`, `comment_added`, and `issue_updated` remain supported at either level. At the same level, a nested leaf wins over its flat equivalent. For legacy flat configuration, `issue_updated` controls both the parent switch and `other_changed`. The [example YAML](config/redmine_slack_notification.yml.example) contains the full nested tree.
+A project override takes precedence over the global value for the same leaf. To override a globally disabled `issue.updated.enabled`, enable that parent for the project as well. Existing flat keys such as `status_changed`, `comment_added`, and `issue_updated` remain supported at either level. At the same level, a nested leaf wins over its flat equivalent. For legacy flat configuration, `issue_updated` controls both the parent switch and `other_changed`. The [example YAML](config/slackmine.yml.example) contains the full nested tree.
 
 Deletion of Wiki pages, News, time entries, and Versions defaults to off because those notifications were added after the original events. Deletion links point to a containing project view because the deleted record's own page is gone.
 
@@ -269,7 +271,7 @@ users:
 ```
 
 1. Deploy the code and YAML, restart Redmine and Sidekiq, and ensure Sidekiq consumes the `slack` queue.
-2. Enable **Event Subscriptions** in the Slack app. Set Request URL to `https://redmine.example.com/redmine_slack/events` and confirm **Verified**. Adjust the host and any Redmine installation subdirectory for your deployment.
+2. Enable **Event Subscriptions** in the Slack app. Set Request URL to `https://redmine.example.com/slackmine/events` and confirm **Verified**. Adjust the host and any Redmine installation subdirectory for your deployment.
 3. Add `entity_details_requested` under **Subscribe to bot events** and **Save Changes**. No additional OAuth scopes are required for this event or `entity.presentDetails`.
 4. Open a Work Object card and check status, assignee, due date, and description. Change the Issue in Redmine and refresh the detail pane to verify the current values. A new notification is unnecessary.
 
@@ -321,7 +323,7 @@ The main card Add comment button opens a comment-only modal. It requires comment
 
 ![Work Object card and detail actions](docs/images/features/issue-actions.webp)
 
-Set `slack.work_object_actions: true` to show status, assignee (including unassigned), priority, and due date plus the Add comment and Open in source service buttons on every public Issue Work Object card with previews enabled. Set `work_object_actions: false` to disable these features. Edit issue opens a Slack modal for permitted status, assignee, priority, due date, and comment changes. The default is disabled. Enable **Interactivity & Shortcuts** in the Slack app and set its Request URL to `https://redmine.example.com/redmine_slack/interactions`. The same `slack.events` signing configuration authenticates the requests.
+Set `slack.work_object_actions: true` to show status, assignee (including unassigned), priority, and due date plus the Add comment and Open in source service buttons on every public Issue Work Object card with previews enabled. Set `work_object_actions: false` to disable these features. Edit issue opens a Slack modal for permitted status, assignee, priority, due date, and comment changes. The default is disabled. Enable **Interactivity & Shortcuts** in the Slack app and set its Request URL to `https://redmine.example.com/slackmine/interactions`. The same `slack.events` signing configuration authenticates the requests.
 
 ```yaml
 slack:
@@ -526,7 +528,7 @@ To share a newly uploaded private file with the channel, the plugin posts a temp
 
 ### Wording and templates
 
-The top-level `messages` tree changes notification wording; it does not control whether an event is sent. All keys are optional. Omitted or empty strings use built-in defaults. The [example YAML](config/redmine_slack_notification.yml.example) lists every available key with sample values:
+The top-level `messages` tree changes notification wording; it does not control whether an event is sent. All keys are optional. Omitted or empty strings use built-in defaults. The [example YAML](config/slackmine.yml.example) lists every available key with sample values:
 
 | Group | Controls |
 | --- | --- |
@@ -582,7 +584,7 @@ The new assignee uses Slack's `<@U0123456789>` mention format. Issue authors, Jo
 
 ![Create an Issue from a Slack message](docs/images/features/message-to-issue.webp)
 
-In the Slack app's **Interactivity & Shortcuts**, enable Interactivity with Request URL `https://redmine.example.com/redmine_slack/interactions`, then create a **message shortcut** with callback ID `redmine_message_create`. Use a label such as **Create Redmine issue**. Add the `commands` Bot scope and reinstall the app when scopes change. This feature reuses the [slash-command](#slash-command) integration: configure `slack.slash_command`, the global Bot Token, signing secret, app/team IDs, and user mapping. Work Object previews are optional.
+In the Slack app's **Interactivity & Shortcuts**, enable Interactivity with Request URL `https://redmine.example.com/slackmine/interactions`, then create a **message shortcut** with callback ID `slackmine_message_create`. Use a label such as **Create Redmine issue**. Add the `commands` Bot scope and reinstall the app when scopes change. This feature reuses the [slash-command](#slash-command) integration: configure `slack.slash_command`, the global Bot Token, signing secret, app/team IDs, and user mapping. Work Object previews are optional.
 
 Open a message's **More actions** menu and choose the shortcut. Select a project, then review the tracker, subject, and description before saving. The first nonblank line becomes the subject; the description includes the message text and a permalink obtained with `chat.getPermalink`. Thread replies are supported, but only the selected message is copied. When the normal message text is empty, text from Block Kit sections and attachment cards (titles, bodies, and fields) is used instead. Attachment files, full thread history, and AI summaries are not imported. Slack's raw text formatting is retained. Subjects are limited to 255 characters, and descriptions to 3,000 characters with space reserved for the source link; review any shortened text before saving.
 
@@ -598,7 +600,7 @@ The Home shows four sections in order: Updated by me, Due this week, Assigned to
 
 Lists use a five-column table: title with project underneath, status, assignee, due date, and an “Edit issue” button. Title links open the browser (up to 200 characters), and edit buttons open the permission-checked Slack form. Each section has one heading and shows five issues per page, up to 10 issues total. Slack controls column widths and mobile rendering. Customize section labels with `messages.app_home`, attribute labels with `messages.fields`, and the edit button with `messages.work_objects.edit_issue`. Reopening Home preserves the selected filter.
 
-Enable shared `slack.app_home: true`, configure the shared bot token and `slack.events` app/team IDs and signing secret, enable **App Home → Show Tabs → Home Tab** in Slack, and subscribe to the bot event `app_home_opened` at the existing `/redmine_slack/events` endpoint. Configure user mappings (or email matching), then restart Redmine and Sidekiq.
+Enable shared `slack.app_home: true`, configure the shared bot token and `slack.events` app/team IDs and signing secret, enable **App Home → Show Tabs → Home Tab** in Slack, and subscribe to the bot event `app_home_opened` at the existing `/slackmine/events` endpoint. Configure user mappings (or email matching), then restart Redmine and Sidekiq.
 
 A selector switches between all four sections or one section. Each section shows up to 10 issues (`10+` means more); an issue matching several sections can appear in each. Due-this-week includes the entire current week, including dates earlier this week, and uses Redmine’s week boundary.
 
@@ -610,28 +612,28 @@ The edit button shows an issue link and permitted edit/comment inputs, reusing t
 
 ![Slash command](docs/images/features/slash-commands.webp)
 
-Set `slack.slash_command: /redmine` (omit it to disable), register the same command in the Slack app, and set its Request URL to `https://redmine.example.com/redmine_slack/commands`. Add the `commands` scope and reinstall the app. Keep Interactivity enabled at `/redmine_slack/interactions` and configure the existing signing secret, app/team IDs, bot token, and user mappings. This command uses the global integration and user mapping; results are limited to projects belonging to that integration.
+Set `slack.slash_command: /slackmine` (omit it to disable), register the same command in the Slack app, and set its Request URL to `https://redmine.example.com/slackmine/commands`. Add the `commands` scope and reinstall the app. Keep Interactivity enabled at `/slackmine/interactions` and configure the existing signing secret, app/team IDs, bot token, and user mappings. This command uses the global integration and user mapping; results are limited to projects belonging to that integration.
 
 No additional database tables or migrations are needed. Form-submission and direct-update retries use the existing `Rails.cache`: an in-flight key lasts five minutes and a successful submission key lasts 24 hours. Validation errors release the key so corrected forms can be submitted. Unexpected failures retain the short-lived key because the write outcome may be uncertain. This is best-effort deduplication, not a transaction with the issue write: cache eviction, expiry, process-local/null caches, and a crash between saving and recording success can allow duplicates. Direct updates use a server-derived request key and save the response before Slack delivery, so a delivery retry reuses the saved response. A shared cache with atomic `unless_exist` support coordinates web workers and command workers; no new cache service is installed by the plugin.
 
 | Command | Result |
 | --- | --- |
-| `/redmine` or `/redmine help` | Usage and My issues / Due soon / My due reminders / New issue buttons |
-| `/redmine 123` or `/redmine #123` | Work Object card when configured; otherwise an issue link, status, and comment button |
-| `/redmine my` | Your directly assigned, open issues |
-| `/redmine due` | Your overdue issues and issues due within three days |
-| `/redmine reminders` | Run your personal due-reminder digest now, using the scheduled reminder settings |
-| `/redmine search words` | Case-insensitive subject search |
-| `/redmine new [project-identifier]` | Project selection followed by a tracker, subject, and description modal |
-| `/redmine comment 123` | Button that opens the comment modal |
-| `/redmine status 123 [status name or ID]` | Change status directly, or omit the value for a permitted-status picker |
-| `/redmine assign 123 [user login, name, or ID]` | Change assignee directly, or omit the value for an assignable-user picker |
+| `/slackmine` or `/slackmine help` | Usage and My issues / Due soon / My due reminders / New issue buttons |
+| `/slackmine 123` or `/slackmine #123` | Work Object card when configured; otherwise an issue link, status, and comment button |
+| `/slackmine my` | Your directly assigned, open issues |
+| `/slackmine due` | Your overdue issues and issues due within three days |
+| `/slackmine reminders` | Run your personal due-reminder digest now, using the scheduled reminder settings |
+| `/slackmine search words` | Case-insensitive subject search |
+| `/slackmine new [project-identifier]` | Project selection followed by a tracker, subject, and description modal |
+| `/slackmine comment 123` | Button that opens the comment modal |
+| `/slackmine status 123 [status name or ID]` | Change status directly, or omit the value for a permitted-status picker |
+| `/slackmine assign 123 [user login, name, or ID]` | Change assignee directly, or omit the value for an assignable-user picker |
 
-The `status` and `assign` commands also accept `#123`. With no value, they open a picker from the returned button and save only after submitting the modal. Supplying a value saves directly when the queued command is processed: for example, `/redmine status 123 Done` or `/redmine assign 123 alice`. Names must match exactly (case-insensitively) and identify one permitted candidate; names containing spaces are supported without quotes. IDs avoid ambiguous names. Assignment also accepts `me`, `none`, and the configured unassigned label. Unknown, ambiguous, or disallowed values leave the issue unchanged and return a picker button. Replace `/redmine` with your configured `slack.slash_command`. They require `slack.work_object_actions: true`, an active mapped Redmine user, a public issue in the same integration, and permission to edit the selected attribute. Work Object previews are not required for these commands. Status choices follow the viewer's Redmine workflow; assignee choices use Redmine's assignable users, with an Unassigned option. The assignee picker supports at most 99 users, and the status picker at most 100 statuses; use Redmine's issue form if the picker cannot open. Saving rechecks permissions, integration, the workflow, and assignable users under the existing issue row lock. Selecting the current value closes the modal without adding a journal. No extra Slack command registration or scopes are required. Successful direct changes and unchanged results return the latest Work Object card when previews are configured, using the existing card fields and buttons. Without previews, they keep the text confirmation. The result is cached before delivery, so retries do not repeat the edit or rebuild the card.
+The `status` and `assign` commands also accept `#123`. With no value, they open a picker from the returned button and save only after submitting the modal. Supplying a value saves directly when the queued command is processed: for example, `/slackmine status 123 Done` or `/slackmine assign 123 alice`. Names must match exactly (case-insensitively) and identify one permitted candidate; names containing spaces are supported without quotes. IDs avoid ambiguous names. Assignment also accepts `me`, `none`, and the configured unassigned label. Unknown, ambiguous, or disallowed values leave the issue unchanged and return a picker button. Replace `/slackmine` with your configured `slack.slash_command`. They require `slack.work_object_actions: true`, an active mapped Redmine user, a public issue in the same integration, and permission to edit the selected attribute. Work Object previews are not required for these commands. Status choices follow the viewer's Redmine workflow; assignee choices use Redmine's assignable users, with an Unassigned option. The assignee picker supports at most 99 users, and the status picker at most 100 statuses; use Redmine's issue form if the picker cannot open. Saving rechecks permissions, integration, the workflow, and assignable users under the existing issue row lock. Selecting the current value closes the modal without adding a journal. No extra Slack command registration or scopes are required. Successful direct changes and unchanged results return the latest Work Object card when previews are configured, using the existing card fields and buttons. Without previews, they keep the text confirmation. The result is cached before delivery, so retries do not repeat the edit or rebuild the card.
 
-Results are ephemeral (visible only to the requester). When a number lookup or a `my` / `due` / `search` result contains exactly one issue, the response automatically uses a Work Object card if the project enables `slack.work_object_previews: true` and uses the command bot token. Card fields and buttons follow the existing YAML settings; no new switch is needed. Unconfigured previews and private issues keep the simple display. Work Object action buttons carry the issue ID because Slack can omit the entity URL and reference from ephemeral button interactions. The plugin resolves the ID against its own Redmine instance and applies the same integration, visibility, and edit checks. Editing from a private result opens the usual full form, including permitted status, priority, assignee, due date, and comment fields. Ephemeral cards cannot be refreshed with `chat.update`; run the lookup again after saving. Multi-issue lists use the reminder format: a colored attachment with a count heading and bulleted issue links, project names, and relative due dates. Issues without due dates omit the timing suffix. The list order is unchanged and there are no per-issue buttons. Line formatting uses `messages.due_reminders`; group labels use `messages.commands.my`, `.due`, and `.search`. Use `/redmine 123` or `/redmine comment 123` to access the comment action. Lists display up to ten results from the newest hundred candidates; the project picker displays up to twenty projects and prefers the current channel's project. Use the optional project identifier to narrow it. Every read checks Redmine visibility; form submission rechecks permissions and workflow validation. Required custom fields are not collected in the simple new-issue modal: use its full Redmine form link when necessary. Comments require `work_object_actions: true` and follow the existing public-issue edit policy. Successful writes use normal Redmine notification behavior; there is no automatic channel-sharing action. Slash commands are unavailable inside threads; the existing thread-comment integration remains available there.
+Results are ephemeral (visible only to the requester). When a number lookup or a `my` / `due` / `search` result contains exactly one issue, the response automatically uses a Work Object card if the project enables `slack.work_object_previews: true` and uses the command bot token. Card fields and buttons follow the existing YAML settings; no new switch is needed. Unconfigured previews and private issues keep the simple display. Work Object action buttons carry the issue ID because Slack can omit the entity URL and reference from ephemeral button interactions. The plugin resolves the ID against its own Redmine instance and applies the same integration, visibility, and edit checks. Editing from a private result opens the usual full form, including permitted status, priority, assignee, due date, and comment fields. Ephemeral cards cannot be refreshed with `chat.update`; run the lookup again after saving. Multi-issue lists use the reminder format: a colored attachment with a count heading and bulleted issue links, project names, and relative due dates. Issues without due dates omit the timing suffix. The list order is unchanged and there are no per-issue buttons. Line formatting uses `messages.due_reminders`; group labels use `messages.commands.my`, `.due`, and `.search`. Use `/slackmine 123` or `/slackmine comment 123` to access the comment action. Lists display up to ten results from the newest hundred candidates; the project picker displays up to twenty projects and prefers the current channel's project. Use the optional project identifier to narrow it. Every read checks Redmine visibility; form submission rechecks permissions and workflow validation. Required custom fields are not collected in the simple new-issue modal: use its full Redmine form link when necessary. Comments require `work_object_actions: true` and follow the existing public-issue edit policy. Successful writes use normal Redmine notification behavior; there is no automatic channel-sharing action. Slash commands are unavailable inside threads; the existing thread-comment integration remains available there.
 
-`/redmine reminders` reuses the scheduled digest selection and formatting: directly assigned open issues, Redmine visibility, `due_reminders.enabled`, and global/project `due_reminders.days`. It returns overdue, today, and upcoming sections privately in the invoking conversation, with an explicit empty result and batches of up to 100 issues. Only the current app/team and matching Slack user mapping are included. It does not run the all-user cron task or change its schedule. Unlike `/redmine due`, it uses the configured reminder window and is not limited to ten results. Existing `messages.due_reminders` wording/colors apply; the command label and empty message are under `messages.commands`. No additional Slack command registration, scopes, or database tables are needed.
+`/slackmine reminders` reuses the scheduled digest selection and formatting: directly assigned open issues, Redmine visibility, `due_reminders.enabled`, and global/project `due_reminders.days`. It returns overdue, today, and upcoming sections privately in the invoking conversation, with an explicit empty result and batches of up to 100 issues. Only the current app/team and matching Slack user mapping are included. It does not run the all-user cron task or change its schedule. Unlike `/slackmine due`, it uses the configured reminder window and is not limited to ten results. Existing `messages.due_reminders` wording/colors apply; the command label and empty message are under `messages.commands`. No additional Slack command registration, scopes, or database tables are needed.
 
 All command text is configurable under `messages.commands` in the English example. The multiline `messages.commands.help` lists every command and replaces `%{command}` with `slack.slash_command`. If your YAML already overrides `help`, update that value or remove it to use the new default. Search and lists run on the Slack queue. Modal buttons provide fresh trigger IDs, so queued commands do not try to open expired modal triggers. Modal opening and submission are synchronous and must complete within Slack's three-second deadline; monitor identity lookup and database latency.
 
@@ -642,8 +644,8 @@ All command text is configurable under `messages.commands` in the English exampl
 Run the task once a day in the Redmine application's time zone. It queues jobs on the `slack` queue; the worker sends the DMs:
 
 ```bash
-cd /path/to/redmine
-bundle exec rake redmine:slack:due_reminders RAILS_ENV=production
+cd /path/to/slackmine
+bundle exec rake slackmine:due_reminders RAILS_ENV=production
 ```
 
 Schedule the task once a day with the scheduler used by your Redmine installation. Each execution sends another digest, even on the same day.
@@ -652,8 +654,8 @@ For cron, put the command in a small script that changes to the Redmine director
 
 ```sh
 #!/bin/sh
-cd /path/to/redmine || exit 1
-bundle exec rake redmine:slack:due_reminders days=7 RAILS_ENV=production
+cd /path/to/slackmine || exit 1
+bundle exec rake slackmine:due_reminders days=7 RAILS_ENV=production
 ```
 
 The task accepts the same filters as Redmine's reminder command. Set them as Rake environment arguments; omitted filters include all matching Issues:
@@ -669,8 +671,8 @@ The task accepts the same filters as Redmine's reminder command. Set them as Rak
 For example, to restrict a run to users 3 and 5, or to combine all filters:
 
 ```bash
-bundle exec rake redmine:slack:due_reminders users=3,5 RAILS_ENV=production
-bundle exec rake redmine:slack:due_reminders days=7 tracker=2 project=example users=3,5 version="1.0" RAILS_ENV=production
+bundle exec rake slackmine:due_reminders users=3,5 RAILS_ENV=production
+bundle exec rake slackmine:due_reminders days=7 tracker=2 project=example users=3,5 version="1.0" RAILS_ENV=production
 ```
 
 Only Issues matching every supplied filter are included, and the worker checks the filters and assignee again before sending. Invalid values or nonexistent users, trackers, projects, and versions stop the task before any jobs are queued. Every invocation sends the current matching Issues again, including Issues already sent earlier that day.
@@ -695,7 +697,7 @@ Set `due_reminders.colors.overdue`, `.today`, and `.upcoming` to six-digit hex c
 
 The assignee must be an active Redmine user who can view the Issue, and must map to a Slack user through `users` or `slack.auto_map_users_by_name`. Group assignees and unmapped users are skipped and logged. Private Issues can be sent to their own assignee by DM when Redmine grants that user access. DM delivery needs a Bot Token with `chat:write` and `im:write`; it does not use the project's channel ID. In the Slack app settings, enable **App Home → Messages Tab → Display Messages tab**; otherwise Slack returns `messages_tab_disabled` even after `conversations.open` succeeds. After adding scopes, reinstall the Slack app. Verify a test Issue in the recipient's Slack DM before relying on the schedule.
 
-The digest wording is configurable under `messages.due_reminders` in the YAML file. The [example configuration](config/redmine_slack_notification.yml.example) lists every key and its placeholders. For example, change the title and the overdue group label without changing the other groups:
+The digest wording is configurable under `messages.due_reminders` in the YAML file. The [example configuration](config/slackmine.yml.example) lists every key and its placeholders. For example, change the title and the overdue group label without changing the other groups:
 
 ```yaml
 messages:
@@ -720,7 +722,7 @@ This option checks notification configuration and channel membership, **not Slac
 
 ## Delivery and operations
 
-`RedmineSlackNotificationJob` is enqueued after the Redmine event on the `slack` ActiveJob queue. For Sidekiq, include that queue in its configuration, for example:
+`SlackmineNotificationJob` is enqueued after the Redmine event on the `slack` ActiveJob queue. For Sidekiq, include that queue in its configuration, for example:
 
 ```yaml
 :queues:
@@ -729,7 +731,7 @@ This option checks notification configuration and channel membership, **not Slac
   - slack
 ```
 
-Slack API failures are logged and retried by Sidekiq. They do not roll back the Redmine operation. A failure to remove temporary image previews after a successful post is logged but does not retry the job, avoiding a duplicate message. Check the `RedmineSlackNotificationJob` and `RedmineSlackNotification` log lines when a notification is absent.
+Slack API failures are logged and retried by Sidekiq. They do not roll back the Redmine operation. A failure to remove temporary image previews after a successful post is logged but does not retry the job, avoiding a duplicate message. Check the `SlackmineNotificationJob` and `Slackmine` log lines when a notification is absent.
 
 For development, ActiveJob's inline adapter can run without Sidekiq:
 
@@ -775,7 +777,7 @@ At most 20 unique links are considered per save, with a five-second budget for s
 
 ## Privacy and development
 
-Channel notifications exclude private Issues and private Journal notes. Daily DMs may include private Issues only when the assignee can view them in Redmine. Images from private Issues or notes are not uploaded. Do not commit a real `redmine_slack_notification.yml` or expose the Bot Token in logs, examples, or support requests. Rotate a token if it is exposed.
+Channel notifications exclude private Issues and private Journal notes. Daily DMs may include private Issues only when the assignee can view them in Redmine. Images from private Issues or notes are not uploaded. Do not commit a real `slackmine.yml` or expose the Bot Token in logs, examples, or support requests. Rotate a token if it is exposed.
 
 The repository's local test suite can be run with:
 

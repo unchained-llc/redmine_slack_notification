@@ -1,6 +1,6 @@
 (function () {
   function placeMailPreference() {
-    const preference = document.getElementById('redmine-slack-mail-preference');
+    const preference = document.getElementById('slackmine-mail-preference');
     const noSelfNotified = document.getElementById('pref_no_self_notified');
     const anchor = noSelfNotified && noSelfNotified.closest('p');
     if (preference && anchor && preference.closest('form') === anchor.closest('form')) {

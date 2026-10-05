@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
-post 'redmine_slack/events', to: 'redmine_slack_events#receive'
-post 'redmine_slack/interactions', to: 'redmine_slack_events#receive'
-post 'redmine_slack/commands', to: 'redmine_slack_commands#receive'
+post 'slackmine/events', to: 'slackmine_events#receive'
+post 'slackmine/interactions', to: 'slackmine_events#receive'
+post 'slackmine/commands', to: 'slackmine_commands#receive'

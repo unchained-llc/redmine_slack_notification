@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 require 'minitest/autorun'
 require 'nokogiri'
-require_relative '../lib/redmine_slack_notification/slack_markup'
+require_relative '../lib/slackmine/slack_markup'
 
 class SlackMarkupTest < Minitest::Test
-  M = RedmineSlackNotification::SlackMarkup
+  M = Slackmine::SlackMarkup
 
   def test_emphasis_emoji_and_japanese_are_rendered
     html = M.render('💬 *追加コメント* _斜体_ ~削除~ :speech_balloon: **bold**')

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'message_shortcuts_test'
-require_relative '../app/jobs/redmine_slack_app_home_job'
+require_relative '../app/jobs/slackmine_app_home_job'
 
 class IssueQuery
 end unless defined?(IssueQuery)
@@ -22,8 +22,8 @@ class Watcher
 end unless defined?(Watcher)
 
 class AppHomeTest < Minitest::Test
-  HOME = RedmineSlackNotification::AppHome
-  WORK = RedmineSlackNotification::WorkObjects
+  HOME = Slackmine::AppHome
+  WORK = Slackmine::WorkObjects
 
   class Scope
     attr_reader :calls
@@ -70,12 +70,12 @@ class AppHomeTest < Minitest::Test
   def home_action(action = 'refresh', value = 'all')
     { 'type' => 'block_actions', 'api_app_id' => 'ATEST', 'team' => { 'id' => 'TTEST' },
       'user' => { 'id' => 'U123' }, 'trigger_id' => 'fresh-trigger',
-      'view' => { 'type' => 'home', 'callback_id' => 'redmine_home', 'private_metadata' => 'all' },
+      'view' => { 'type' => 'home', 'callback_id' => 'slackmine_home', 'private_metadata' => 'all' },
       'actions' => [{ 'action_id' => HOME::PREFIX + action, 'value' => value }] }
   end
 
   def test_enabled_requires_shared_opt_in_app_team_secret_and_token
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       assert HOME.enabled?('ATEST', 'TTEST')
       refute HOME.enabled?('OTHER', 'TTEST')
       refute HOME.enabled?('ATEST', 'OTHER')
@@ -85,19 +85,19 @@ class AppHomeTest < Minitest::Test
       @settings['slack']['events'].delete('signing_secret')
       WORK.stub(:integration_for, nil) { refute HOME.enabled?('ATEST', 'TTEST') }
       @settings['slack']['events']['signing_secret'] = 'test-secret'
-      RedmineSlackNotification.stub(:bot_token, '') { refute HOME.enabled?('ATEST', 'TTEST') }
+      Slackmine.stub(:bot_token, '') { refute HOME.enabled?('ATEST', 'TTEST') }
     end
   end
 
   def test_unmapped_user_publishes_no_issue_data_and_restores_project_context
     calls = []
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       WORK.stub(:viewer_for, nil) do
         HOME.stub(:allowed_projects, ->(*) { flunk 'queried projects for unmapped viewer' }) do
-          RedmineSlackNotification.stub(:slack_api, ->(*args, **options) { calls << [args, options] }) do
-            RedmineSlackNotification.with_project(@project) do
+          Slackmine.stub(:slack_api, ->(*args, **options) { calls << [args, options] }) do
+            Slackmine.with_project(@project) do
               HOME.publish('ATEST', 'TTEST', 'U123')
-              assert_equal @project, Thread.current[:redmine_slack_notification_project]
+              assert_equal @project, Thread.current[:slackmine_project]
             end
             HOME.publish('ATEST', 'TTEST', 'not-a-user')
             HOME.publish('ATEST', 'TTEST', 'U123', 'untrusted')
@@ -123,9 +123,9 @@ class AppHomeTest < Minitest::Test
       'other_user' => { 'users' => { 'another-user' => 'U123' } }
     }
     scope = Scope.new(projects)
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       Project.stub(:allowed_to, scope) do
-        WORK.stub(:viewer_for, ->(*) { Thread.current[:redmine_slack_notification_project].id == 12 ? OpenStruct.new(id: 99) : @viewer }) do
+        WORK.stub(:viewer_for, ->(*) { Thread.current[:slackmine_project].id == 12 ? OpenStruct.new(id: 99) : @viewer }) do
           assert_equal [9], HOME.allowed_projects(@viewer, 'ATEST', 'TTEST', 'U123')
         end
       end
@@ -155,7 +155,7 @@ class AppHomeTest < Minitest::Test
       blocks = []
       HOME.add_group(blocks, 'reported', scope)
       row = blocks.last['rows'][1]
-      expected = assignee ? assignee.name : RedmineSlackNotification::Formatter.message('values', 'unassigned')
+      expected = assignee ? assignee.name : Slackmine::Formatter.message('values', 'unassigned')
       assert_equal @issue.status.name, row[1]['text']
       assert_equal expected, row[2]['text']
       assert_equal @issue.due_date.iso8601, row[3]['text']
@@ -174,16 +174,16 @@ class AppHomeTest < Minitest::Test
     other.id = 8
     blocks = []
     HOME.add_group(blocks, 'my', [@issue, other])
-    edit_label = RedmineSlackNotification::Formatter.message('work_objects', 'edit_issue')
+    edit_label = Slackmine::Formatter.message('work_objects', 'edit_issue')
     blocks.last['rows'].drop(1).zip([@issue, other]).each do |row, issue|
       link = row[0].dig('elements', 0, 'elements', 0)
       assert_equal 'link', link['type']
-      assert_equal RedmineSlackNotification::Formatter.url("/issues/#{issue.id}"), link['url']
+      assert_equal Slackmine::Formatter.url("/issues/#{issue.id}"), link['url']
       assert_equal "##{issue.id} #{issue.subject}", link['text']
       assert_equal true, link.dig('style', 'bold')
       assert_equal 'action_cell', row[4]['type']
       edit = row[4]['element']
-      assert_equal "redmine_home_detail_#{issue.id}", edit['action_id']
+      assert_equal "slackmine_home_detail_#{issue.id}", edit['action_id']
       assert_equal issue.id.to_s, edit['value']
       assert_equal edit_label, edit.dig('text', 'text')
       assert_equal edit_label, row[4].dig('fallback', 'text')
@@ -201,7 +201,7 @@ class AppHomeTest < Minitest::Test
     @issue.status.name = 'x' * 1000
     @issue.assigned_to = OpenStruct.new(name: 'x' * 1000)
     blocks = []
-    formatter = RedmineSlackNotification::Formatter
+    formatter = Slackmine::Formatter
     formatter.stub(:field_label, 'x' * 1000) do
       formatter.stub(:message, 'x' * 1000) do
         %w[updated this_week my reported].each do |key|
@@ -245,8 +245,8 @@ class AppHomeTest < Minitest::Test
 
   def test_home_actions_only_accept_our_view_and_valid_filter
     queued = []
-    RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackAppHomeJob.stub(:perform_later, ->(*args) { queued << args }) do
+    Slackmine.stub(:config, @settings) do
+      SlackmineAppHomeJob.stub(:perform_later, ->(*args) { queued << args }) do
         HOME.interaction('ATEST', 'TTEST', home_action)
         select = home_action('filter')
         select['actions'][0]['selected_option'] = { 'value' => 'this_week' }
@@ -263,20 +263,20 @@ class AppHomeTest < Minitest::Test
 
   def test_selection_publishes_without_refresh_and_refresh_preserves_current_selection
     calls = []
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       WORK.stub(:viewer_for, nil) do
-        RedmineSlackNotification.stub(:slack_api, ->(_method, body, *_args, **_options) { calls << body }) do
-          RedmineSlackAppHomeJob.stub(:perform_later, ->(*args) { RedmineSlackAppHomeJob.new.perform(*args) }) do
+        Slackmine.stub(:slack_api, ->(_method, body, *_args, **_options) { calls << body }) do
+          SlackmineAppHomeJob.stub(:perform_later, ->(*args) { SlackmineAppHomeJob.new.perform(*args) }) do
             select = home_action('filter')
             select['actions'][0]['selected_option'] = { 'value' => 'reported' }
             HOME.interaction('ATEST', 'TTEST', select)
             assert_equal ['reported'], calls.map { |body| body.dig('view', 'private_metadata') }
 
             refresh = home_action('refresh', 'all')
-            refresh['actions'][0]['block_id'] = 'redmine_home_controls_all'
+            refresh['actions'][0]['block_id'] = 'slackmine_home_controls_all'
             refresh['view']['state'] = { 'values' => {
-              'redmine_home_controls_all' => { 'redmine_home_filter' => { 'selected_option' => { 'value' => 'reported' } } },
-              'redmine_home_controls_my' => { 'redmine_home_filter' => { 'selected_option' => { 'value' => 'my' } } }
+              'slackmine_home_controls_all' => { 'slackmine_home_filter' => { 'selected_option' => { 'value' => 'reported' } } },
+              'slackmine_home_controls_my' => { 'slackmine_home_filter' => { 'selected_option' => { 'value' => 'my' } } }
             } }
             HOME.interaction('ATEST', 'TTEST', refresh)
             assert_equal %w[reported reported], calls.map { |body| body.dig('view', 'private_metadata') }
@@ -350,17 +350,17 @@ class AppHomeTest < Minitest::Test
     @issue.define_singleton_method(:safe_attribute?) { |*_args| false }
     @issue.define_singleton_method(:notes_addable?) { |*_args| true }
     calls = []
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       WORK.stub(:viewer_for, @viewer) do
         Issue.stub(:find_by, @issue) do
-          RedmineSlackNotification.stub(:slack_api, ->(*args, **_options) { calls << args }) do
+          Slackmine.stub(:slack_api, ->(*args, **_options) { calls << args }) do
             HOME.open_detail('ATEST', 'TTEST', 'U123', '7', 'fresh', 'this_week')
           end
         end
       end
     end
     form = calls.first[1]['view']
-    assert_equal 'redmine_edit_issue', form['callback_id']
+    assert_equal 'slackmine_edit_issue', form['callback_id']
     assert form['submit']
     context = JSON.parse(form['private_metadata'])
     assert_equal 'this_week', context['app_home']
@@ -371,12 +371,12 @@ class AppHomeTest < Minitest::Test
   def test_modal_save_refreshes_home_and_reports_failed_update_without_repeating_write
     @settings['slack'].merge!('work_object_actions' => true, 'work_object_previews' => true)
     payload = { 'type' => 'view_submission', 'user' => { 'id' => 'U123' },
-      'view' => { 'type' => 'modal', 'callback_id' => 'redmine_edit_issue',
+      'view' => { 'type' => 'modal', 'callback_id' => 'slackmine_edit_issue',
         'private_metadata' => JSON.generate('app_home' => 'my'), 'state' => { 'values' => {} } } }
     writes = []
     refreshes = []
     result = :saved
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       WORK.stub(:viewer_for, @viewer) do
         WORK.stub(:issue_for, @issue) do
           WORK.stub(:update_issue, ->(*args, **_attrs) { writes << args; result }) do
@@ -400,10 +400,10 @@ class AppHomeTest < Minitest::Test
 
   def test_detail_rechecks_visibility_mapping_and_integration_before_opening
     calls = []
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       WORK.stub(:viewer_for, @viewer) do
         Issue.stub(:find_by, @issue) do
-          RedmineSlackNotification.stub(:slack_api, ->(*args, **_options) { calls << args }) do
+          Slackmine.stub(:slack_api, ->(*args, **_options) { calls << args }) do
             HOME.open_detail('ATEST', 'TTEST', 'U123', '7', 'fresh', 'all')
             @issue.define_singleton_method(:visible?) { |*_args| false }
             HOME.open_detail('ATEST', 'TTEST', 'U123', '7', 'fresh', 'all')
@@ -427,7 +427,7 @@ class SlackEventsControllerTest
     @settings['slack'].merge!('app_home' => true, 'bot_token' => 'token')
     event = { 'type' => 'event_callback', 'api_app_id' => 'ATEST', 'team_id' => 'TTEST',
               'event' => { 'type' => 'app_home_opened', 'user' => 'U123', 'tab' => 'home', 'channel' => 'D123' } }
-    RedmineSlackAppHomeJob.stub(:perform_later, ->(*args) { queued << args }) do
+    SlackmineAppHomeJob.stub(:perform_later, ->(*args) { queued << args }) do
       assert_equal :ok, dispatch(event).status
       assert_equal :unauthorized, dispatch(event, signature: 'v0=' + '0' * 64).status
       event['event']['tab'] = 'messages'
@@ -441,8 +441,8 @@ class SlackEventsControllerTest
     queued = []
     event = { 'type' => 'event_callback', 'api_app_id' => 'ATEST', 'team_id' => 'TTEST',
               'event' => { 'type' => 'app_home_opened', 'user' => 'U123', 'tab' => 'home',
-                'view' => { 'callback_id' => 'redmine_home', 'private_metadata' => 'my' } } }
-    RedmineSlackAppHomeJob.stub(:perform_later, ->(*args) { queued << args }) do
+                'view' => { 'callback_id' => 'slackmine_home', 'private_metadata' => 'my' } } }
+    SlackmineAppHomeJob.stub(:perform_later, ->(*args) { queued << args }) do
       assert_equal :ok, dispatch(event).status
       event['event']['view']['private_metadata'] = 'invalid'
       assert_equal :ok, dispatch(event).status
@@ -455,7 +455,7 @@ class SlackEventsControllerTest
   def test_home_detail_routing_is_synchronous_and_requires_signature
     calls = []
     payload = AppHomeTest.new('test_home_actions_only_accept_our_view_and_valid_filter').home_action('detail', '7')
-    RedmineSlackNotification::AppHome.stub(:interaction, ->(*args) { calls << args; {} }) do
+    Slackmine::AppHome.stub(:interaction, ->(*args) { calls << args; {} }) do
       raw = URI.encode_www_form('payload' => JSON.generate(payload))
       assert_equal :ok, dispatch(raw: raw).status
       assert_equal :unauthorized, dispatch(raw: raw, signature: 'v0=' + '0' * 64).status

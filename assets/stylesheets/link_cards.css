@@ -1,21 +1,21 @@
-.redmine-slack-link-card { display: block; margin: .7em 0; padding: 14px 16px; max-width: 680px; border: 1px solid rgba(128,128,128,.3); border-color: color-mix(in srgb, currentColor 18%, transparent); border-left: 4px solid var(--slack-card-color, #6D5DFB); border-radius: 8px; background: var(--background-color, transparent); color: inherit; }
-.redmine-slack-link-card-header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: .9em; }
-.redmine-slack-link-card-header img { width: 28px; height: 28px; border-radius: 6px; object-fit: cover; }
-.redmine-slack-link-card-header > span { opacity: .7; }
-.redmine-slack-link-card-text { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0; max-height: 320px; overflow: auto; }
-.redmine-slack-link-card-images { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin: 10px 0; }
-.redmine-slack-link-card-images > a { display: block; max-width: 100%; }
-.redmine-slack-link-card-images img { display: block; max-width: 100%; height: auto; max-height: 480px; object-fit: contain; border-radius: 6px; }
+.slackmine-link-card { display: block; margin: .7em 0; padding: 14px 16px; max-width: 680px; border: 1px solid rgba(128,128,128,.3); border-color: color-mix(in srgb, currentColor 18%, transparent); border-left: 4px solid var(--slack-card-color, #6D5DFB); border-radius: 8px; background: var(--background-color, transparent); color: inherit; }
+.slackmine-link-card-header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: .9em; }
+.slackmine-link-card-header img { width: 28px; height: 28px; border-radius: 6px; object-fit: cover; }
+.slackmine-link-card-header > span { opacity: .7; }
+.slackmine-link-card-text { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0; max-height: 320px; overflow: auto; }
+.slackmine-link-card-images { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin: 10px 0; }
+.slackmine-link-card-images > a { display: block; max-width: 100%; }
+.slackmine-link-card-images img { display: block; max-width: 100%; height: auto; max-height: 480px; object-fit: contain; border-radius: 6px; }
 
-.redmine-slack-link-card-text code { padding: 1px 4px; border-radius: 3px; background: rgba(128,128,128,.12); color: inherit; font-family: monospace; }
-.redmine-slack-link-card-text .slack-markdown-code-block { display: block; padding: 10px; margin: 6px 0; white-space: pre-wrap; }
-.redmine-slack-link-card-text .slack-markdown-quote { display: block; border-left: 3px solid #aaa; padding-left: 10px; margin: 3px 0; }
-.redmine-slack-link-card-text .slack-markdown-list-item { display: block; padding-left: 12px; }
-.redmine-slack-link-card-text .slack-markdown-heading { display: block; margin: 6px 0; }
+.slackmine-link-card-text code { padding: 1px 4px; border-radius: 3px; background: rgba(128,128,128,.12); color: inherit; font-family: monospace; }
+.slackmine-link-card-text .slack-markdown-code-block { display: block; padding: 10px; margin: 6px 0; white-space: pre-wrap; }
+.slackmine-link-card-text .slack-markdown-quote { display: block; border-left: 3px solid #aaa; padding-left: 10px; margin: 3px 0; }
+.slackmine-link-card-text .slack-markdown-list-item { display: block; padding-left: 12px; }
+.slackmine-link-card-text .slack-markdown-heading { display: block; margin: 6px 0; }
 
-.redmine-slack-thread-label { display: block; font-size: .85em; opacity: .75; margin-bottom: 8px; }
-.redmine-slack-thread-parent { display: block; padding: 10px 12px; margin-bottom: 12px; border-left: 2px solid rgba(128,128,128,.3); border-left-color: color-mix(in srgb, currentColor 18%, transparent); background: rgba(128,128,128,.06); font-size: .9em; }
-.redmine-slack-thread-parent .redmine-slack-link-card-text { max-height: 100px; }
+.slackmine-thread-label { display: block; font-size: .85em; opacity: .75; margin-bottom: 8px; }
+.slackmine-thread-parent { display: block; padding: 10px 12px; margin-bottom: 12px; border-left: 2px solid rgba(128,128,128,.3); border-left-color: color-mix(in srgb, currentColor 18%, transparent); background: rgba(128,128,128,.06); font-size: .9em; }
+.slackmine-thread-parent .slackmine-link-card-text { max-height: 100px; }
 
 /* Official Slack mark: https://slack.com/media-kit */
-.redmine-slack-link-card > a:last-child::before { content: ""; display: inline-block; width: 1em; height: 1em; margin-right: .35em; vertical-align: -.15em; background: url("../images/slack-mark.svg") center / contain no-repeat; }
+.slackmine-link-card > a:last-child::before { content: ""; display: inline-block; width: 1em; height: 1em; margin-right: .35em; vertical-align: -.15em; background: url("../images/slack-mark.svg") center / contain no-repeat; }

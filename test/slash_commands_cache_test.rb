@@ -6,7 +6,7 @@ module Rails
 end
 
 class SlashCommandsCacheTest < Minitest::Test
-  COMMANDS = RedmineSlackNotification::SlashCommands
+  COMMANDS = Slackmine::SlashCommands
   class Cache
     def initialize; @data = {}; end
     def read(key); @data[key]; end
@@ -22,7 +22,7 @@ class SlashCommandsCacheTest < Minitest::Test
     @cache = Cache.new
     @viewer = OpenStruct.new(id: 123)
     @payload = { 'type' => 'view_submission', 'user' => { 'id' => 'U123' }, 'view' => {
-      'id' => 'V123', 'callback_id' => 'redmine_command_create', 'private_metadata' => '1',
+      'id' => 'V123', 'callback_id' => 'slackmine_command_create', 'private_metadata' => '1',
       'state' => { 'values' => {} } } }
   end
 
@@ -30,7 +30,7 @@ class SlashCommandsCacheTest < Minitest::Test
     Rails.stub(:cache, @cache) do
       COMMANDS.stub(:enabled?, true) do
         COMMANDS.stub(:integration?, true) do
-          RedmineSlackNotification::WorkObjects.stub(:viewer_for, @viewer) do
+          Slackmine::WorkObjects.stub(:viewer_for, @viewer) do
             COMMANDS.stub(:save_form, save) { COMMANDS.interaction('ATEST', 'TTEST', @payload) }
           end
         end

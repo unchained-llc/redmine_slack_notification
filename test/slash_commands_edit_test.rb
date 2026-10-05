@@ -2,11 +2,11 @@
 require_relative 'slash_commands_cache_test'
 
 class SlashCommandsEditTest < Minitest::Test
-  COMMANDS = RedmineSlackNotification::SlashCommands
-  WORK = RedmineSlackNotification::WorkObjects
+  COMMANDS = Slackmine::SlashCommands
+  WORK = Slackmine::WorkObjects
 
   def setup
-    @settings = { 'slack' => { 'slash_command' => '/redmine', 'bot_token' => 'token',
+    @settings = { 'slack' => { 'slash_command' => '/slackmine', 'bot_token' => 'token',
       'work_object_actions' => true, 'events' => { 'app_id' => 'ATEST', 'team_id' => 'TTEST', 'signing_secret' => 'test-secret' } } }
     @viewer = OpenStruct.new(id: 3, name: 'Example User')
     @project = OpenStruct.new(active?: true, identifier: 'example')
@@ -37,12 +37,12 @@ class SlashCommandsEditTest < Minitest::Test
   end
 
   def with_edits(viewer: @viewer)
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       WORK.stub(:viewer_for, viewer) do
         COMMANDS.stub(:authorized_project?, ->(project, *) { @authorized && project.active? }) do
           Issue.stub(:find_by, ->(id:) { id.to_s == '7' ? @issue : nil }) do
-            RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
-              RedmineSlackNotification.stub(:slack_api, ->(*args) { raise 'Delivery unavailable' if @delivery_failure; @calls << args }) do
+            Slackmine::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+              Slackmine.stub(:slack_api, ->(*args) { raise 'Delivery unavailable' if @delivery_failure; @calls << args }) do
                 Rails.stub(:cache, @cache) { yield }
               end
             end
@@ -60,7 +60,7 @@ class SlashCommandsEditTest < Minitest::Test
   def submission(kind, value)
     key = kind == 'assign' ? 'assignee' : 'status'
     { 'type' => 'view_submission', 'user' => { 'id' => 'U123' }, 'view' => {
-      'id' => "V#{kind}", 'callback_id' => "redmine_command_#{kind}", 'private_metadata' => '7',
+      'id' => "V#{kind}", 'callback_id' => "slackmine_command_#{kind}", 'private_metadata' => '7',
       'state' => { 'values' => { key => { key => { 'selected_option' => { 'value' => value } } } } } } }
   end
 
@@ -117,7 +117,7 @@ class SlashCommandsEditTest < Minitest::Test
         assert_equal 'views.open', method
         assert_equal 'fresh-trigger', result['trigger_id']
         view = result['view']
-        assert_equal "redmine_command_#{kind}", view['callback_id']
+        assert_equal "slackmine_command_#{kind}", view['callback_id']
         assert_equal '7', view['private_metadata']
         fields = view['blocks'].select { |block| block['type'] == 'input' }
         assert_equal [kind == 'assign' ? 'assignee' : 'status'], fields.map { |field| field['block_id'] }
@@ -226,8 +226,8 @@ class SlashCommandsEditTest < Minitest::Test
 
   def test_help_and_button_labels_are_configurable
     with_edits do
-      assert_includes COMMANDS.message('help'), '/redmine status 123'
-      assert_includes COMMANDS.message('help'), '/redmine assign 123'
+      assert_includes COMMANDS.message('help'), '/slackmine status 123'
+      assert_includes COMMANDS.message('help'), '/slackmine assign 123'
       @settings['messages'] = { 'commands' => { 'status' => 'Change workflow status', 'assign' => 'Pick assignee' } }
       assert_equal 'Change workflow status', COMMANDS.run('ATEST', 'TTEST', 'U123', 'C123', 'status 7').last.dig('elements', 0, 'text', 'text')
       assert_equal 'Pick assignee', COMMANDS.modal('assign', '7', @viewer).dig('title', 'text')
@@ -281,8 +281,8 @@ class SlashCommandsEditTest < Minitest::Test
       assert_equal 'Done', entity.dig('entity_payload', 'fields', 'status', 'value')
       assert_equal @viewer.name, entity.dig('entity_payload', 'fields', 'assignee', 'user', 'text')
       assert_equal '2026-10-10', entity.dig('entity_payload', 'fields', 'due_date', 'value')
-      assert_equal 'redmine_edit_issue', entity.dig('entity_payload', 'actions', 'primary_actions', 0, 'action_id')
-      assert_equal 'redmine_issue:7', entity.dig('entity_payload', 'actions', 'primary_actions', 0, 'value')
+      assert_equal 'slackmine_edit_issue', entity.dig('entity_payload', 'actions', 'primary_actions', 0, 'action_id')
+      assert_equal 'slackmine_issue:7', entity.dig('entity_payload', 'actions', 'primary_actions', 0, 'value')
       assert_includes result['text'], 'Issue updated.'
       refute result.key?('blocks')
       assert_equal 1, reloads

@@ -2,7 +2,7 @@
 require_relative 'link_cards_test'
 
 class ThreadCommentsUrlTest < Minitest::Test
-  COMMENTS = RedmineSlackNotification::ThreadComments
+  COMMENTS = Slackmine::ThreadComments
   URL = 'https://example.slack.com/archives/C123/p1791115675755579'
 
   def setup
@@ -25,9 +25,9 @@ class ThreadCommentsUrlTest < Minitest::Test
   end
 
   def persist(url = URL)
-    RedmineSlackNotification.stub(:config, { 'slack' => { 'thread_comments' => true, 'bot_token' => 'test-token' } }) do
-      RedmineSlackNotification::WorkObjects.stub(:viewer_for, @viewer) do
-        RedmineSlackNotification.stub(:slack_api, ->(method, body, token, **_) {
+    Slackmine.stub(:config, { 'slack' => { 'thread_comments' => true, 'bot_token' => 'test-token' } }) do
+      Slackmine::WorkObjects.stub(:viewer_for, @viewer) do
+        Slackmine.stub(:slack_api, ->(method, body, token, **_) {
           @calls << [method, body, token]
           { 'permalink' => url }
         }) { COMMENTS.persist_reply(@issue, @event, 'TTEST') }
@@ -44,7 +44,7 @@ class ThreadCommentsUrlTest < Minitest::Test
     assert_equal @journal.created_on, @journal.updated_on
     assert_equal [['chat.getPermalink', { 'channel' => 'C123', 'message_ts' => @event['ts'] }, 'test-token']], @calls
     assert_same previous, User.current
-    assert_nil Thread.current[:redmine_slack_thread_comment]
+    assert_nil Thread.current[:slackmine_thread_comment]
   end
 
   def test_missing_invalid_or_different_reply_url_never_saves

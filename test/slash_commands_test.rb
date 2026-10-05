@@ -1,17 +1,17 @@
 # frozen_string_literal: true
 require_relative 'slack_events_controller_test'
-require_relative '../app/controllers/redmine_slack_commands_controller'
-require_relative '../app/jobs/redmine_slack_command_job'
+require_relative '../app/controllers/slackmine_commands_controller'
+require_relative '../app/jobs/slackmine_command_job'
 
 class SlashCommandsTest < Minitest::Test
-  COMMANDS = RedmineSlackNotification::SlashCommands
+  COMMANDS = Slackmine::SlashCommands
 
   def setup
     @date_current = Date.method(:current) if Date.respond_to?(:current)
     Date.singleton_class.define_method(:current) { Date.new(2026, 10, 4) }
-    @settings = { 'slack' => { 'slash_command' => '/redmine', 'events' => {
+    @settings = { 'slack' => { 'slash_command' => '/slackmine', 'events' => {
       'app_id' => 'ATEST', 'team_id' => 'TTEST', 'signing_secret' => 'secret' } } }
-    @payload = { 'command' => '/redmine', 'api_app_id' => 'ATEST', 'team_id' => 'TTEST',
+    @payload = { 'command' => '/slackmine', 'api_app_id' => 'ATEST', 'team_id' => 'TTEST',
                  'user_id' => 'U123', 'channel_id' => 'C123', 'text' => 'my',
                  'token' => 'not-queued', 'response_url' => 'https://example.invalid/not-used' }
   end
@@ -27,12 +27,12 @@ class SlashCommandsTest < Minitest::Test
   def dispatch(signature: nil, timestamp: Time.now.to_i)
     body = URI.encode_www_form(@payload)
     signature ||= 'v0=' + OpenSSL::HMAC.hexdigest('SHA256', 'secret', "v0:#{timestamp}:#{body}")
-    controller = RedmineSlackCommandsController.new
+    controller = SlackmineCommandsController.new
     controller.request = OpenStruct.new(content_length: body.bytesize, raw_post: body, headers: {
       'X-Slack-Request-Timestamp' => timestamp.to_s, 'X-Slack-Signature' => signature })
     @queued = []
-    RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackCommandJob.stub(:perform_later, ->(*args) { @queued << args }) { controller.receive }
+    Slackmine.stub(:config, @settings) do
+      SlackmineCommandJob.stub(:perform_later, ->(*args) { @queued << args }) { controller.receive }
     end
     controller
   end
@@ -69,13 +69,13 @@ class SlashCommandsTest < Minitest::Test
     @payload['command'] = '/other'
     assert_equal :forbidden, dispatch.status
     assert_empty @queued
-    @payload['command'] = '/redmine'
+    @payload['command'] = '/slackmine'
     @settings['slack'].delete('slash_command')
     assert_equal :forbidden, dispatch.status
   end
 
   def test_unknown_identity_cannot_read_issues_or_projects
-    RedmineSlackNotification::WorkObjects.stub(:viewer_for, nil) do
+    Slackmine::WorkObjects.stub(:viewer_for, nil) do
       %w[my due new 7].each do |text|
         assert_includes COMMANDS.run('ATEST', 'TTEST', 'U123', 'C123', text).to_json, 'Not available'
       end
@@ -84,9 +84,9 @@ class SlashCommandsTest < Minitest::Test
 
   def test_results_are_ephemeral_and_use_requesting_user
     calls = []
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       COMMANDS.stub(:run, ->(*) { [COMMANDS.section('Example')] }) do
-        RedmineSlackNotification.stub(:slack_api, ->(*args) { calls << args }) do
+        Slackmine.stub(:slack_api, ->(*args) { calls << args }) do
           COMMANDS.deliver('ATEST', 'TTEST', @payload)
         end
       end
@@ -101,8 +101,8 @@ class SlashCommandsTest < Minitest::Test
     issue = OpenStruct.new(id: 7, subject: 'Task', project: project, status: OpenStruct.new(name: 'Open'), is_private?: false)
     @settings['slack'].merge!('bot_token' => 'token', 'work_object_previews' => true,
                               'work_object_fields' => { 'status' => true })
-    RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+    Slackmine.stub(:config, @settings) do
+      Slackmine::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
         card = COMMANDS.single_issue_payload(issue)
         assert_equal 'slack#/entities/task', card.dig('metadata', 'entities', 0, 'entity_type')
         assert_equal ['status'], card.dig('metadata', 'entities', 0, 'entity_payload', 'display_order')
@@ -130,7 +130,7 @@ class SlashCommandsTest < Minitest::Test
     added_sanitize = !Issue.respond_to?(:sanitize_sql_like)
     Issue.define_singleton_method(:visible) { |_| scope } if added_visible
     Issue.define_singleton_method(:sanitize_sql_like) { |value| value } if added_sanitize
-    RedmineSlackNotification::WorkObjects.stub(:viewer_for, viewer) do
+    Slackmine::WorkObjects.stub(:viewer_for, viewer) do
       COMMANDS.stub(:authorized_project?, true) do
         Issue.stub(:find_by, issue) do
           assert_equal :card, COMMANDS.run('ATEST', 'TTEST', 'U123', 'C123', '7') { :card }
@@ -140,12 +140,12 @@ class SlashCommandsTest < Minitest::Test
             assert_equal :card, COMMANDS.run('ATEST', 'TTEST', 'U123', 'C123', "#{command} task") { :card }
           end
           rows << issue
-          RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+          Slackmine::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
             blocks = COMMANDS.run('ATEST', 'TTEST', 'U123', 'C123', 'my') { flunk 'multiple results rendered as a card' }
             assert_equal 1, blocks['attachments'].size
             assert_includes blocks['attachments'].to_json, '• '
             assert_includes blocks['attachments'].to_json, 'Example'
-            refute_includes blocks.to_json, 'redmine_command_run'
+            refute_includes blocks.to_json, 'slackmine_command_run'
           end
         end
       end
@@ -161,7 +161,7 @@ class SlashCommandsTest < Minitest::Test
       OpenStruct.new(id: index + 1, subject: 'Task', project: project,
                      due_date: days && Date.current + days)
     end
-    RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+    Slackmine::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
       result = COMMANDS.issue_list_payload(issues, 'search')
       body = result['attachments'].to_json
       assert_includes body, 'Search results (3)'
@@ -174,7 +174,7 @@ class SlashCommandsTest < Minitest::Test
 
   def test_help_uses_configured_command_and_supports_custom_copy
     @settings['slack']['slash_command'] = '/tickets'
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       help = COMMANDS.message('help')
       assert_includes help, '/tickets reminders'
       assert_includes help, '/tickets comment 123'
@@ -185,8 +185,8 @@ class SlashCommandsTest < Minitest::Test
   end
 
   def test_help_buttons_have_unique_action_ids_and_route_their_commands
-    RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackNotification::WorkObjects.stub(:viewer_for, OpenStruct.new(id: 3)) do
+    Slackmine.stub(:config, @settings) do
+      Slackmine::WorkObjects.stub(:viewer_for, OpenStruct.new(id: 3)) do
         ['', 'help'].each do |text|
           blocks = COMMANDS.run('ATEST', 'TTEST', 'U123', 'C123', text)
           buttons = blocks.last['elements']
@@ -199,7 +199,7 @@ class SlashCommandsTest < Minitest::Test
                         'channel' => { 'id' => 'C123' }, 'actions' => [button] }
             assert COMMANDS.handles?(payload)
             queued = []
-            RedmineSlackCommandJob.stub(:perform_later, ->(*args) { queued << args }) do
+            SlackmineCommandJob.stub(:perform_later, ->(*args) { queued << args }) do
               COMMANDS.interaction('ATEST', 'TTEST', payload)
             end
             assert_equal button['value'], queued.first.last['text']
@@ -213,18 +213,18 @@ class SlashCommandsTest < Minitest::Test
     calls = []
     @payload['text'] = 'reminders'
     @settings['slack']['bot_token'] = 'token'
-    job = RedmineSlackDueDigestJob.new
+    job = SlackmineDueDigestJob.new
     job.define_singleton_method(:due_issues_for) do |user, today|
       raise 'wrong viewer or date' unless user.id == 7 && today == Date.current
       groups
     end
-    RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackNotification::WorkObjects.stub(:viewer_for, viewer) do
-        RedmineSlackDueDigestJob.stub(:new, job) do
+    Slackmine.stub(:config, @settings) do
+      Slackmine::WorkObjects.stub(:viewer_for, viewer) do
+        SlackmineDueDigestJob.stub(:new, job) do
           COMMANDS.stub(:authorized_project?, allowed) do
             COMMANDS.stub(:sleep, nil) do
-              RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
-                RedmineSlackNotification.stub(:slack_api, ->(*args) { calls << args }) do
+              Slackmine::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+                Slackmine.stub(:slack_api, ->(*args) { calls << args }) do
                   COMMANDS.deliver('ATEST', 'TTEST', @payload)
                 end
               end
@@ -304,7 +304,7 @@ class SlashCommandsTest < Minitest::Test
     viewer = Object.new
     issue = Object.new
     issue.define_singleton_method(:visible?) { |_viewer| false }
-    RedmineSlackNotification::WorkObjects.stub(:viewer_for, viewer) do
+    Slackmine::WorkObjects.stub(:viewer_for, viewer) do
       Issue.stub(:find_by, issue) do
         assert_includes COMMANDS.run('ATEST', 'TTEST', 'U123', 'C123', '7').to_json, 'Not available'
       end

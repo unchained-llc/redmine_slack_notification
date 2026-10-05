@@ -11,7 +11,7 @@
     ],
     [
       "channel-routing",
-      "Show a GENERIC text editor crop titled config/redmine_slack_notification.yml with only this valid root-indented YAML, exact text:\nslack:\n  default_channel_id: 'CEXAMPLE01'\nprojects:\n  product:\n    channel_id: 'CEXAMPLE02'\n  website:\n    channel_id: 'CEXAMPLE03'\nNo GUI settings or sidebar. Below editor, small plainly titled 'Routing order' with three simple text boxes 'Own project' → 'Nearest parent project' → 'Global default'. This is a configuration illustration, not an actual app page. Never indent projects under slack. No secrets."
+      "Show a GENERIC text editor crop titled config/slackmine.yml with only this valid root-indented YAML, exact text:\nslack:\n  default_channel_id: 'CEXAMPLE01'\nprojects:\n  product:\n    channel_id: 'CEXAMPLE02'\n  website:\n    channel_id: 'CEXAMPLE03'\nNo GUI settings or sidebar. Below editor, small plainly titled 'Routing order' with three simple text boxes 'Own project' → 'Nearest parent project' → 'Global default'. This is a configuration illustration, not an actual app page. Never indent projects under slack. No secrets."
     ],
     [
       "work-object-previews",
@@ -51,7 +51,7 @@
     ],
     [
       "user-mapping",
-      "Generic text editor crop titled config/redmine_slack_notification.yml, not inside a Slack message and not in a plugin settings page. Exact YAML roots users and slack aligned, values quoted:\nusers:\n  alice: 'UEXAMPLE01'\n  sam: 'UEXAMPLE02'\nslack:\n  auto_map_users_by_name: false\n  auto_map_users_by_email: true\nOutside editor below, small text 'Explicit mappings take priority. Email matching authorizes incoming actions; name matching resolves outgoing mentions.' No made-up account mapping GUI, no Settings menu, no bot message claiming to publish configuration."
+      "Generic text editor crop titled config/slackmine.yml, not inside a Slack message and not in a plugin settings page. Exact YAML roots users and slack aligned, values quoted:\nusers:\n  alice: 'UEXAMPLE01'\n  sam: 'UEXAMPLE02'\nslack:\n  auto_map_users_by_name: false\n  auto_map_users_by_email: true\nOutside editor below, small text 'Explicit mappings take priority. Email matching authorizes incoming actions; name matching resolves outgoing mentions.' No made-up account mapping GUI, no Settings menu, no bot message claiming to publish configuration."
     ],
     [
       "email-preference",

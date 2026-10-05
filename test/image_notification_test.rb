@@ -127,7 +127,7 @@ class Tracker
   end
 end
 
-require_relative '../app/jobs/redmine_slack_notification_job'
+require_relative '../app/jobs/slackmine_notification_job'
 
 class User
   attr_accessor :login, :mail, :name
@@ -162,7 +162,7 @@ end
 class News < OpenStruct
 end
 
-require_relative '../lib/redmine_slack_notification'
+require_relative '../lib/slackmine'
 
 class AutomaticUserMappingTest < Minitest::Test
   class MemoryCache
@@ -176,20 +176,20 @@ class AutomaticUserMappingTest < Minitest::Test
   end
 
   def test_disabled_mapping_does_not_fetch_users
-    RedmineSlackNotification.stub(:config, { 'slack' => { 'auto_map_users_by_name' => false } }) do
-      RedmineSlackNotification.stub(:slack_user_directory, -> { flunk 'users.list was called' }) do
-        assert_nil RedmineSlackNotification.slack_user_id_for_name('alice')
+    Slackmine.stub(:config, { 'slack' => { 'auto_map_users_by_name' => false } }) do
+      Slackmine.stub(:slack_user_directory, -> { flunk 'users.list was called' }) do
+        assert_nil Slackmine.slack_user_id_for_name('alice')
       end
     end
   end
 
   def test_matches_only_a_unique_name_without_case_sensitivity
     directory = { 'alice' => ['U123'], 'jun' => %w[U456 U789] }
-    RedmineSlackNotification.stub(:config, { 'slack' => { 'auto_map_users_by_name' => true } }) do
-      RedmineSlackNotification.stub(:slack_user_directory, directory) do
-        assert_equal 'U123', RedmineSlackNotification.slack_user_id_for_name(' Alice ')
-        assert_nil RedmineSlackNotification.slack_user_id_for_name('jun')
-        assert_nil RedmineSlackNotification.slack_user_id_for_name('missing')
+    Slackmine.stub(:config, { 'slack' => { 'auto_map_users_by_name' => true } }) do
+      Slackmine.stub(:slack_user_directory, directory) do
+        assert_equal 'U123', Slackmine.slack_user_id_for_name(' Alice ')
+        assert_nil Slackmine.slack_user_id_for_name('jun')
+        assert_nil Slackmine.slack_user_id_for_name('missing')
       end
     end
   end
@@ -199,9 +199,9 @@ class AutomaticUserMappingTest < Minitest::Test
     user.login = 'alice'
     user.mail = 'alice@example.com'
     user.name = 'Alice'
-    RedmineSlackNotification.stub(:user_mapping, { 'alice' => PresenceValue.new('U123') }) do
-      RedmineSlackNotification.stub(:slack_user_id_for_name, ->(*) { flunk 'automatic lookup ran' }) do
-        assert_equal '<@U123>', RedmineSlackNotification::Formatter.user_mention(user)
+    Slackmine.stub(:user_mapping, { 'alice' => PresenceValue.new('U123') }) do
+      Slackmine.stub(:slack_user_id_for_name, ->(*) { flunk 'automatic lookup ran' }) do
+        assert_equal '<@U123>', Slackmine::Formatter.user_mention(user)
       end
     end
   end
@@ -211,9 +211,9 @@ class AutomaticUserMappingTest < Minitest::Test
     user.login = 'alice'
     user.mail = 'alice@example.com'
     user.name = 'Alice'
-    RedmineSlackNotification.stub(:user_mapping, {}) do
-      RedmineSlackNotification.stub(:slack_user_id_for_name, PresenceValue.new('U123')) do
-        assert_equal '<@U123>', RedmineSlackNotification::Formatter.user_mention(user)
+    Slackmine.stub(:user_mapping, {}) do
+      Slackmine.stub(:slack_user_id_for_name, PresenceValue.new('U123')) do
+        assert_equal '<@U123>', Slackmine::Formatter.user_mention(user)
       end
     end
   end
@@ -236,8 +236,8 @@ class AutomaticUserMappingTest < Minitest::Test
       responses.shift
     end
 
-    RedmineSlackNotification.stub(:slack_api, api) do
-      directory = RedmineSlackNotification.fetch_slack_user_directory('token')
+    Slackmine.stub(:slack_api, api) do
+      directory = Slackmine.fetch_slack_user_directory('token')
       assert_equal %w[U123 U789], directory['alice']
       assert_equal ['U789'], directory['jun']
       refute directory.key?('bot')
@@ -261,10 +261,10 @@ class AutomaticUserMappingTest < Minitest::Test
 
     Rails.stub(:cache, cache) do
       Rails.stub(:logger, logger) do
-        RedmineSlackNotification.stub(:bot_token, 'token') do
-          RedmineSlackNotification.stub(:slack_api, api) do
-            assert_equal({}, RedmineSlackNotification.slack_user_directory)
-            assert_equal({}, RedmineSlackNotification.slack_user_directory)
+        Slackmine.stub(:bot_token, 'token') do
+          Slackmine.stub(:slack_api, api) do
+            assert_equal({}, Slackmine.slack_user_directory)
+            assert_equal({}, Slackmine.slack_user_directory)
           end
         end
       end
@@ -311,36 +311,36 @@ class ProjectConfigurationTest < Minitest::Test
   end
 
   def test_project_overrides_all_config_sections_without_losing_global_siblings
-    RedmineSlackNotification.stub(:config, settings) do
+    Slackmine.stub(:config, settings) do
       ENV.stub(:[], ->(key) { key == 'SLACK_BOT_TOKEN' ? 'environment-token' : nil }) do
-        assert_equal 'project-token', RedmineSlackNotification.bot_token(project)
-        assert_equal 'environment-token', RedmineSlackNotification.bot_token(project('other'))
+        assert_equal 'project-token', Slackmine.bot_token(project)
+        assert_equal 'environment-token', Slackmine.bot_token(project('other'))
       end
-      assert_equal 'C_PROJECT', RedmineSlackNotification.channel_id(project)
-      assert_equal 'C_GLOBAL', RedmineSlackNotification.channel_id(project('other'))
+      assert_equal 'C_PROJECT', Slackmine.channel_id(project)
+      assert_equal 'C_GLOBAL', Slackmine.channel_id(project('other'))
 
-      RedmineSlackNotification.with_project(project) do
-        assert_equal 'Project issue created', RedmineSlackNotification::Formatter.message('events', 'issue', 'created')
-        assert_equal 'Issue updated', RedmineSlackNotification::Formatter.message('events', 'issue', 'updated')
-        assert_equal '#123456', RedmineSlackNotification::Formatter.attachment_color
-        assert RedmineSlackNotification.body_diff_enabled?(:issue_description)
-        refute RedmineSlackNotification.body_diff_enabled?(:issue_comment)
-        assert_equal false, RedmineSlackNotification.effective_config.dig('slack', 'issue_changes_when_hidden')
-        assert_equal({ 'alice' => 'U_PROJECT', 'bob' => 'U_BOB' }, RedmineSlackNotification.user_mapping)
+      Slackmine.with_project(project) do
+        assert_equal 'Project issue created', Slackmine::Formatter.message('events', 'issue', 'created')
+        assert_equal 'Issue updated', Slackmine::Formatter.message('events', 'issue', 'updated')
+        assert_equal '#123456', Slackmine::Formatter.attachment_color
+        assert Slackmine.body_diff_enabled?(:issue_description)
+        refute Slackmine.body_diff_enabled?(:issue_comment)
+        assert_equal false, Slackmine.effective_config.dig('slack', 'issue_changes_when_hidden')
+        assert_equal({ 'alice' => 'U_PROJECT', 'bob' => 'U_BOB' }, Slackmine.user_mapping)
         user = User.new
         user.login = 'alice'
         user.mail = 'alice@example.com'
         user.name = 'Alice'
-        assert_equal '<@U_PROJECT>', RedmineSlackNotification::Formatter.user_mention(user)
-        RedmineSlackNotification.stub(:slack_user_directory, { 'charlie' => ['U_CHARLIE'] }) do
-          assert_equal 'U_CHARLIE', RedmineSlackNotification.slack_user_id_for_name('charlie')
+        assert_equal '<@U_PROJECT>', Slackmine::Formatter.user_mention(user)
+        Slackmine.stub(:slack_user_directory, { 'charlie' => ['U_CHARLIE'] }) do
+          assert_equal 'U_CHARLIE', Slackmine.slack_user_id_for_name('charlie')
         end
       end
-      assert_equal 'Global issue created', RedmineSlackNotification::Formatter.message('events', 'issue', 'created')
-      assert_equal '#6D5DFB', RedmineSlackNotification::Formatter.attachment_color
-      assert RedmineSlackNotification.body_diff_enabled?(:issue_comment)
-      RedmineSlackNotification.with_project(project('other')) do
-        assert_nil RedmineSlackNotification.slack_user_id_for_name('charlie')
+      assert_equal 'Global issue created', Slackmine::Formatter.message('events', 'issue', 'created')
+      assert_equal '#6D5DFB', Slackmine::Formatter.attachment_color
+      assert Slackmine.body_diff_enabled?(:issue_comment)
+      Slackmine.with_project(project('other')) do
+        assert_nil Slackmine.slack_user_id_for_name('charlie')
       end
     end
   end
@@ -352,9 +352,9 @@ class ProjectConfigurationTest < Minitest::Test
                                  tracker: OpenStruct.new(name: 'Task'))
     deliveries = []
 
-    RedmineSlackNotification.stub(:config, settings) do
-      card = RedmineSlackNotification::Formatter.issue_payload(issue, actor: nil, action: 'created')
-      other_card = RedmineSlackNotification::Formatter.issue_payload(other_issue, actor: nil, action: 'created')
+    Slackmine.stub(:config, settings) do
+      card = Slackmine::Formatter.issue_payload(issue, actor: nil, action: 'created')
+      other_card = Slackmine::Formatter.issue_payload(other_issue, actor: nil, action: 'created')
       assert_equal '#123456', card.dig('attachments', 0, 'color')
       assert_includes card.dig('attachments', 0, 'blocks', 0, 'text', 'text'), 'Project issue created'
       fields = card.dig('attachments', 0, 'blocks').flat_map { |block| block.fetch('fields', []) }
@@ -364,9 +364,9 @@ class ProjectConfigurationTest < Minitest::Test
       assert_includes other_card.dig('attachments', 0, 'blocks', 0, 'text', 'text'), 'Global issue created'
 
       ENV.stub(:[], ->(_key) { nil }) do
-        RedmineSlackNotification.stub(:post_message, ->(payload, channel, token) { deliveries << [payload, channel, token] }) do
-          RedmineSlackNotification.notify(card, project: project)
-          RedmineSlackNotification.notify(other_card, project: project('other'))
+        Slackmine.stub(:post_message, ->(payload, channel, token) { deliveries << [payload, channel, token] }) do
+          Slackmine.notify(card, project: project)
+          Slackmine.notify(other_card, project: project('other'))
         end
       end
     end
@@ -375,27 +375,27 @@ class ProjectConfigurationTest < Minitest::Test
   end
 
   def test_nested_project_context_restores_previous_project_even_after_error
-    RedmineSlackNotification.stub(:config, settings) do
-      RedmineSlackNotification.with_project(project) do
+    Slackmine.stub(:config, settings) do
+      Slackmine.with_project(project) do
         assert_raises(RuntimeError) do
-          RedmineSlackNotification.with_project(project('other')) { raise 'stop' }
+          Slackmine.with_project(project('other')) { raise 'stop' }
         end
-        assert_equal 'Project issue created', RedmineSlackNotification::Formatter.message('events', 'issue', 'created')
+        assert_equal 'Project issue created', Slackmine::Formatter.message('events', 'issue', 'created')
       end
-      assert_equal 'Global issue created', RedmineSlackNotification::Formatter.message('events', 'issue', 'created')
+      assert_equal 'Global issue created', Slackmine::Formatter.message('events', 'issue', 'created')
     end
   end
 
   def test_news_comment_diff_heading_uses_project_message
-    RedmineSlackNotification.stub(:config, settings) do
-      card = RedmineSlackNotification::Formatter.generic_payload(
+    Slackmine.stub(:config, settings) do
+      card = Slackmine::Formatter.generic_payload(
         noun: 'News comment', action: 'updated', subject: 'Title', url: 'https://example.com/news/1',
         project: project, actor: nil, body_diff: ['before', 'after'], body_diff_label: :comment
       )
       diff = card.dig('attachments', 0, 'blocks').find { |block| block['type'] == 'markdown' }
       assert_includes diff['text'], 'Project comment diff'
 
-      other_card = RedmineSlackNotification::Formatter.generic_payload(
+      other_card = Slackmine::Formatter.generic_payload(
         noun: 'News comment', action: 'updated', subject: 'Title', url: 'https://example.com/news/1',
         project: project('other'), actor: nil, body_diff: ['before', 'after'], body_diff_label: :comment
       )
@@ -433,7 +433,7 @@ class EventConfigurationTest < Minitest::Test
       previous_private_notes if name == 'private_notes'
     end
 
-    include RedmineSlackNotification::JournalPatch
+    include Slackmine::JournalPatch
   end
 
   def project
@@ -457,37 +457,37 @@ class EventConfigurationTest < Minitest::Test
       'events' => { 'comment_added' => false, 'issue_updated' => true },
       'projects' => { 'agentic' => { 'events' => { 'comment_added' => true, 'issue_updated' => false } } }
     }
-    RedmineSlackNotification.stub(:config, settings) do
-      assert RedmineSlackNotification.event_enabled?(project, 'comment_added')
-      refute RedmineSlackNotification.event_enabled?(project, 'issue_updated')
-      assert RedmineSlackNotification.event_enabled?(project, 'wiki_created')
-      refute RedmineSlackNotification.event_enabled?(OpenStruct.new(identifier: 'other'), 'comment_added')
+    Slackmine.stub(:config, settings) do
+      assert Slackmine.event_enabled?(project, 'comment_added')
+      refute Slackmine.event_enabled?(project, 'issue_updated')
+      assert Slackmine.event_enabled?(project, 'wiki_created')
+      refute Slackmine.event_enabled?(OpenStruct.new(identifier: 'other'), 'comment_added')
     end
   end
 
   def test_issue_updated_disables_relation_events_even_when_explicitly_enabled
-    RedmineSlackNotification.stub(:config, { 'events' => { 'issue_updated' => false } }) do
-      refute RedmineSlackNotification.event_enabled?(project, 'relation_added')
-      refute RedmineSlackNotification.event_enabled?(project, 'relation_removed')
+    Slackmine.stub(:config, { 'events' => { 'issue_updated' => false } }) do
+      refute Slackmine.event_enabled?(project, 'relation_added')
+      refute Slackmine.event_enabled?(project, 'relation_removed')
     end
-    RedmineSlackNotification.stub(:config, { 'events' => { 'issue_updated' => false, 'relation_added' => true } }) do
-      refute RedmineSlackNotification.event_enabled?(project, 'relation_added')
+    Slackmine.stub(:config, { 'events' => { 'issue_updated' => false, 'relation_added' => true } }) do
+      refute Slackmine.event_enabled?(project, 'relation_added')
     end
   end
 
   def test_example_yaml_lists_every_supported_event
-    example = YAML.safe_load(File.read(File.expand_path('../config/redmine_slack_notification.yml.example', __dir__)))
+    example = YAML.safe_load(File.read(File.expand_path('../config/slackmine.yml.example', __dir__)))
     events = example.fetch('events')
     assert_equal true, events.dig('issue', 'updated', 'enabled')
-    assert_equal RedmineSlackNotification::EVENT_KEYS.sort, RedmineSlackNotification::EVENT_PATHS.keys.sort
-    assert_equal RedmineSlackNotification::EVENT_PATHS.length,
-                 RedmineSlackNotification::EVENT_PATHS.values.uniq.length
-    RedmineSlackNotification::EVENT_PATHS.each do |event, path|
+    assert_equal Slackmine::EVENT_KEYS.sort, Slackmine::EVENT_PATHS.keys.sort
+    assert_equal Slackmine::EVENT_PATHS.length,
+                 Slackmine::EVENT_PATHS.values.uniq.length
+    Slackmine::EVENT_PATHS.each do |event, path|
       value = events.dig(*path)
       assert_includes [true, false], value, "Missing nested YAML setting for #{event}: #{path.join('.')}"
     end
-    disabled = RedmineSlackNotification::EVENT_PATHS.select { |_key, path| events.dig(*path) == false }.keys
-    assert_equal RedmineSlackNotification::DEFAULT_DISABLED_EVENTS.sort, disabled.sort
+    disabled = Slackmine::EVENT_PATHS.select { |_key, path| events.dig(*path) == false }.keys
+    assert_equal Slackmine::DEFAULT_DISABLED_EVENTS.sort, disabled.sort
   end
 
   def test_nested_issue_parent_and_detail_switches
@@ -499,18 +499,18 @@ class EventConfigurationTest < Minitest::Test
         }
       }
     }
-    RedmineSlackNotification.stub(:config, settings) do
-      refute RedmineSlackNotification.event_enabled?(project, 'status_changed')
-      refute RedmineSlackNotification.event_enabled?(project, 'issue_updated')
-      assert RedmineSlackNotification.event_enabled?(project, 'comment_added')
-      assert RedmineSlackNotification.event_enabled?(project, 'comment_deleted')
+    Slackmine.stub(:config, settings) do
+      refute Slackmine.event_enabled?(project, 'status_changed')
+      refute Slackmine.event_enabled?(project, 'issue_updated')
+      assert Slackmine.event_enabled?(project, 'comment_added')
+      assert Slackmine.event_enabled?(project, 'comment_deleted')
     end
 
     settings['events']['issue']['updated'] = { 'enabled' => true, 'status_changed' => false, 'other_changed' => false }
-    RedmineSlackNotification.stub(:config, settings) do
-      refute RedmineSlackNotification.event_enabled?(project, 'status_changed')
-      refute RedmineSlackNotification.event_enabled?(project, 'issue_updated')
-      assert RedmineSlackNotification.event_enabled?(project, 'assignee_changed')
+    Slackmine.stub(:config, settings) do
+      refute Slackmine.event_enabled?(project, 'status_changed')
+      refute Slackmine.event_enabled?(project, 'issue_updated')
+      assert Slackmine.event_enabled?(project, 'assignee_changed')
     end
   end
 
@@ -532,31 +532,31 @@ class EventConfigurationTest < Minitest::Test
         } }
       }
     }
-    RedmineSlackNotification.stub(:config, settings) do
-      assert RedmineSlackNotification.event_enabled?(project, 'status_changed')
-      refute RedmineSlackNotification.event_enabled?(project, 'attachment_added')
-      assert RedmineSlackNotification.event_enabled?(project, 'news_updated')
-      refute RedmineSlackNotification.event_enabled?(project, 'news_comment_added')
-      refute RedmineSlackNotification.event_enabled?(project, 'wiki_deleted')
-      refute RedmineSlackNotification.event_enabled?(project, 'time_entry_created')
-      assert RedmineSlackNotification.event_enabled?(project, 'version_deleted')
-      refute RedmineSlackNotification.event_enabled?(project, 'project_updated')
+    Slackmine.stub(:config, settings) do
+      assert Slackmine.event_enabled?(project, 'status_changed')
+      refute Slackmine.event_enabled?(project, 'attachment_added')
+      assert Slackmine.event_enabled?(project, 'news_updated')
+      refute Slackmine.event_enabled?(project, 'news_comment_added')
+      refute Slackmine.event_enabled?(project, 'wiki_deleted')
+      refute Slackmine.event_enabled?(project, 'time_entry_created')
+      assert Slackmine.event_enabled?(project, 'version_deleted')
+      refute Slackmine.event_enabled?(project, 'project_updated')
     end
   end
 
   def test_news_comment_is_independent_of_news_update
     settings = { 'events' => { 'news' => { 'updated' => false, 'comment' => { 'added' => true, 'updated' => true } } } }
-    RedmineSlackNotification.stub(:config, settings) do
-      refute RedmineSlackNotification.event_enabled?(project, 'news_updated')
-      assert RedmineSlackNotification.event_enabled?(project, 'news_comment_added')
-      assert RedmineSlackNotification.event_enabled?(project, 'news_comment_updated')
+    Slackmine.stub(:config, settings) do
+      refute Slackmine.event_enabled?(project, 'news_updated')
+      assert Slackmine.event_enabled?(project, 'news_comment_added')
+      assert Slackmine.event_enabled?(project, 'news_comment_updated')
     end
   end
 
   def test_comment_edit_and_removal_default_to_enabled
-    RedmineSlackNotification.stub(:config, {}) do
+    Slackmine.stub(:config, {}) do
       %w[comment_updated comment_deleted news_comment_updated news_comment_deleted].each do |event|
-        assert RedmineSlackNotification.event_enabled?(project, event), event
+        assert Slackmine.event_enabled?(project, event), event
       end
     end
   end
@@ -564,8 +564,8 @@ class EventConfigurationTest < Minitest::Test
   def test_nested_setting_wins_over_flat_setting_in_the_same_scope
     settings = { 'events' => { 'status_changed' => false,
                                 'issue' => { 'updated' => { 'enabled' => true, 'status_changed' => true } } } }
-    RedmineSlackNotification.stub(:config, settings) do
-      assert RedmineSlackNotification.event_enabled?(project, 'status_changed')
+    Slackmine.stub(:config, settings) do
+      assert Slackmine.event_enabled?(project, 'status_changed')
     end
   end
 
@@ -574,26 +574,26 @@ class EventConfigurationTest < Minitest::Test
       'events' => { 'issue' => { 'updated' => { 'enabled' => false, 'status_changed' => false } } },
       'projects' => { 'agentic' => { 'events' => { 'issue_updated' => true, 'status_changed' => true } } }
     }
-    RedmineSlackNotification.stub(:config, settings) do
-      assert RedmineSlackNotification.event_enabled?(project, 'status_changed')
-      refute RedmineSlackNotification.event_enabled?(OpenStruct.new(identifier: 'other'), 'status_changed')
+    Slackmine.stub(:config, settings) do
+      assert Slackmine.event_enabled?(project, 'status_changed')
+      refute Slackmine.event_enabled?(OpenStruct.new(identifier: 'other'), 'status_changed')
     end
   end
 
   def test_every_nested_event_leaf_can_disable_its_notification
-    RedmineSlackNotification::EVENT_PATHS.each do |event, path|
+    Slackmine::EVENT_PATHS.each do |event, path|
       events = { 'issue' => { 'updated' => { 'enabled' => true } } }
       target = events
       path[0...-1].each { |part| target = target[part] ||= {} }
       target[path.last] = false
-      RedmineSlackNotification.stub(:config, { 'events' => events }) do
-        refute RedmineSlackNotification.event_enabled?(project, event), path.join('.')
+      Slackmine.stub(:config, { 'events' => events }) do
+        refute Slackmine.event_enabled?(project, event), path.join('.')
       end
     end
   end
 
   def test_every_nested_event_leaf_can_be_overridden_for_a_project
-    RedmineSlackNotification::EVENT_PATHS.each do |event, path|
+    Slackmine::EVENT_PATHS.each do |event, path|
       [[false, true], [true, false]].each do |global_value, project_value|
         global_events = {}
         project_events = {}
@@ -604,11 +604,11 @@ class EventConfigurationTest < Minitest::Test
         end
         settings = { 'events' => global_events,
                      'projects' => { 'agentic' => { 'events' => project_events } } }
-        RedmineSlackNotification.stub(:config, settings) do
-          assert_equal project_value, RedmineSlackNotification.event_enabled?(project, event),
+        Slackmine.stub(:config, settings) do
+          assert_equal project_value, Slackmine.event_enabled?(project, event),
                        "Project override failed for #{path.join('.')}"
           assert_equal global_value,
-                       RedmineSlackNotification.event_enabled?(OpenStruct.new(identifier: 'other'), event),
+                       Slackmine.event_enabled?(OpenStruct.new(identifier: 'other'), event),
                        "Global value changed for #{path.join('.')}"
         end
       end
@@ -622,36 +622,36 @@ class EventConfigurationTest < Minitest::Test
         'issue' => { 'updated' => { 'enabled' => true, 'status_changed' => true } }
       } } }
     }
-    RedmineSlackNotification.stub(:config, settings) do
-      assert RedmineSlackNotification.event_enabled?(project, 'status_changed')
-      refute RedmineSlackNotification.event_enabled?(OpenStruct.new(identifier: 'other'), 'status_changed')
+    Slackmine.stub(:config, settings) do
+      assert Slackmine.event_enabled?(project, 'status_changed')
+      refute Slackmine.event_enabled?(OpenStruct.new(identifier: 'other'), 'status_changed')
     end
   end
 
   def test_all_flat_event_keys_remain_supported
-    RedmineSlackNotification::EVENT_KEYS.each do |event|
-      RedmineSlackNotification.stub(:config, { 'events' => { event => false } }) do
-        refute RedmineSlackNotification.event_enabled?(project, event), event
+    Slackmine::EVENT_KEYS.each do |event|
+      Slackmine.stub(:config, { 'events' => { event => false } }) do
+        refute Slackmine.event_enabled?(project, event), event
       end
     end
   end
 
   def test_new_deletion_events_default_to_disabled_and_can_be_overridden
-    RedmineSlackNotification.stub(:config, {}) do
-      RedmineSlackNotification::DEFAULT_DISABLED_EVENTS.each do |event|
-        refute RedmineSlackNotification.event_enabled?(project, event)
+    Slackmine.stub(:config, {}) do
+      Slackmine::DEFAULT_DISABLED_EVENTS.each do |event|
+        refute Slackmine.event_enabled?(project, event)
       end
     end
-    RedmineSlackNotification.stub(:config, { 'projects' => { 'agentic' => { 'events' => { 'wiki_deleted' => true } } } }) do
-      assert RedmineSlackNotification.event_enabled?(project, 'wiki_deleted')
+    Slackmine.stub(:config, { 'projects' => { 'agentic' => { 'events' => { 'wiki_deleted' => true } } } }) do
+      assert Slackmine.event_enabled?(project, 'wiki_deleted')
     end
   end
 
   def test_issue_updated_is_the_parent_switch_for_every_issue_detail
-    details = RedmineSlackNotification::ISSUE_DETAIL_EVENTS.to_h { |event| [event, true] }
-    RedmineSlackNotification.stub(:config, { 'events' => details.merge('issue_updated' => false) }) do
-      RedmineSlackNotification::ISSUE_DETAIL_EVENTS.each do |event|
-        refute RedmineSlackNotification.event_enabled?(project, event), event
+    details = Slackmine::ISSUE_DETAIL_EVENTS.to_h { |event| [event, true] }
+    Slackmine.stub(:config, { 'events' => details.merge('issue_updated' => false) }) do
+      Slackmine::ISSUE_DETAIL_EVENTS.each do |event|
+        refute Slackmine.event_enabled?(project, event), event
       end
     end
   end
@@ -661,9 +661,9 @@ class EventConfigurationTest < Minitest::Test
       'events' => { 'issue_updated' => false, 'assignee_changed' => false },
       'projects' => { 'agentic' => { 'events' => { 'issue_updated' => true, 'status_changed' => true } } }
     }
-    RedmineSlackNotification.stub(:config, settings) do
-      assert RedmineSlackNotification.event_enabled?(project, 'status_changed')
-      refute RedmineSlackNotification.event_enabled?(project, 'assignee_changed')
+    Slackmine.stub(:config, settings) do
+      assert Slackmine.event_enabled?(project, 'status_changed')
+      refute Slackmine.event_enabled?(project, 'assignee_changed')
     end
   end
 
@@ -672,8 +672,8 @@ class EventConfigurationTest < Minitest::Test
       'events' => { 'status_changed' => true },
       'projects' => { 'agentic' => { 'events' => { 'issue_updated' => false } } }
     }
-    RedmineSlackNotification.stub(:config, settings) do
-      refute RedmineSlackNotification.event_enabled?(project, 'status_changed')
+    Slackmine.stub(:config, settings) do
+      refute Slackmine.event_enabled?(project, 'status_changed')
     end
   end
 
@@ -729,11 +729,11 @@ class EventConfigurationTest < Minitest::Test
       details: [category, status], notes: '', expected_payload: :update, expected_details: [status],
       expected_event: 'status_changed', expected_images: [], expected_journal_id: nil
     )
-    RedmineSlackNotification.stub(:config, {
+    Slackmine.stub(:config, {
       'events' => { 'issue' => { 'updated' => { 'enabled' => true, 'other_changed' => false, 'category_changed' => true } } }
     }) do
-      assert RedmineSlackNotification.event_enabled?(project, 'category_changed')
-      refute RedmineSlackNotification.event_enabled?(project, 'issue_updated')
+      assert Slackmine.event_enabled?(project, 'category_changed')
+      refute Slackmine.event_enabled?(project, 'issue_updated')
     end
   end
 
@@ -745,9 +745,9 @@ class EventConfigurationTest < Minitest::Test
     formatter = ->(_issue, **kwargs) { calls << [:payload, kwargs]; :message }
     enqueue = ->(message, **kwargs) { calls << [:enqueue, message, kwargs] }
 
-    RedmineSlackNotification.stub(:config, {}) do
-      RedmineSlackNotification::Formatter.stub(:journal_payload, formatter) do
-        RedmineSlackNotification.stub(:enqueue, enqueue) do
+    Slackmine.stub(:config, {}) do
+      Slackmine::Formatter.stub(:journal_payload, formatter) do
+        Slackmine.stub(:enqueue, enqueue) do
           item.notes = 'Edited comment ![](screenshot.png)'
           item.send(:notify_slack_journal_comment_changed)
           item.notes = ''
@@ -772,22 +772,22 @@ class EventConfigurationTest < Minitest::Test
     item.previous_notes = 'Previous public comment'
     item.notes = ''
     settings = { 'events' => { 'issue' => { 'comment' => { 'deleted' => false } } } }
-    RedmineSlackNotification.stub(:config, settings) do
-      RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'disabled removal was enqueued' }) do
+    Slackmine.stub(:config, settings) do
+      Slackmine.stub(:enqueue, ->(*) { flunk 'disabled removal was enqueued' }) do
         item.send(:notify_slack_journal_comment_changed)
       end
     end
 
     item.previous_private_notes = true
-    RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'private removal was enqueued' }) do
+    Slackmine.stub(:enqueue, ->(*) { flunk 'private removal was enqueued' }) do
       item.send(:notify_slack_journal_comment_changed)
     end
   end
 
   def test_disabled_event_is_not_enqueued
-    RedmineSlackNotification.stub(:config, { 'events' => { 'issue_created' => false } }) do
-      RedmineSlackNotificationJob.stub(:perform_later, ->(*) { flunk 'disabled event was enqueued' }) do
-        RedmineSlackNotification.enqueue({ 'text' => 'issue' }, project: project, event: 'issue_created')
+    Slackmine.stub(:config, { 'events' => { 'issue_created' => false } }) do
+      SlackmineNotificationJob.stub(:perform_later, ->(*) { flunk 'disabled event was enqueued' }) do
+        Slackmine.enqueue({ 'text' => 'issue' }, project: project, event: 'issue_created')
       end
     end
   end
@@ -855,8 +855,8 @@ class EventConfigurationTest < Minitest::Test
     item = journal
     item.notes = ''
     item.details = [OpenStruct.new(property: 'relation', value: 7011)]
-    RedmineSlackNotification.stub(:config, { 'events' => { 'issue_updated' => false, 'relation_added' => true } }) do
-      RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'disabled Issue update was enqueued' }) do
+    Slackmine.stub(:config, { 'events' => { 'issue_updated' => false, 'relation_added' => true } }) do
+      Slackmine.stub(:enqueue, ->(*) { flunk 'disabled Issue update was enqueued' }) do
         item.send(:notify_slack_journal_created)
       end
     end
@@ -866,8 +866,8 @@ class EventConfigurationTest < Minitest::Test
     item = journal
     item.notes = ''
     item.details = [OpenStruct.new(property: 'relation', value: 7011)]
-    RedmineSlackNotification.stub(:config, { 'events' => { 'relation_added' => false } }) do
-      RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'disabled relation was enqueued' }) do
+    Slackmine.stub(:config, { 'events' => { 'relation_added' => false } }) do
+      Slackmine.stub(:enqueue, ->(*) { flunk 'disabled relation was enqueued' }) do
         item.send(:notify_slack_journal_created)
       end
     end
@@ -876,9 +876,9 @@ class EventConfigurationTest < Minitest::Test
   def test_thread_routing_hint_is_only_added_to_comment_only_updates
     captured = []
     settings = { 'slack' => { 'comment_notifications_in_threads' => true } }
-    RedmineSlackNotification.stub(:config, settings) do
-      RedmineSlackNotification::Formatter.stub(:journal_payload, ->(*) { { 'text' => 'Comment' } }) do
-        RedmineSlackNotification.stub(:enqueue, ->(payload, **_options) { captured << payload }) do
+    Slackmine.stub(:config, settings) do
+      Slackmine::Formatter.stub(:journal_payload, ->(*) { { 'text' => 'Comment' } }) do
+        Slackmine.stub(:enqueue, ->(payload, **_options) { captured << payload }) do
           item = journal
           item.details = []
           item.send(:notify_slack_journal_created)
@@ -887,13 +887,13 @@ class EventConfigurationTest < Minitest::Test
         end
       end
     end
-    assert captured[0].key?('_redmine_comment_issue_id')
-    refute captured[1].key?('_redmine_comment_issue_id')
+    assert captured[0].key?('_slackmine_comment_issue_id')
+    refute captured[1].key?('_slackmine_comment_issue_id')
   end
 
   def test_both_disabled_send_nothing
-    RedmineSlackNotification.stub(:config, { 'events' => { 'comment_added' => false, 'issue_updated' => false } }) do
-      RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'disabled journal was enqueued' }) do
+    Slackmine.stub(:config, { 'events' => { 'comment_added' => false, 'issue_updated' => false } }) do
+      Slackmine.stub(:enqueue, ->(*) { flunk 'disabled journal was enqueued' }) do
         journal.send(:notify_slack_journal_created)
       end
     end
@@ -906,10 +906,10 @@ class EventConfigurationTest < Minitest::Test
     comment_payload = ->(_issue, actor:, notes:, details:) { calls << [:comment, details, notes]; :comment }
     update_payload = ->(_issue, actor:, action:, details:) { calls << [:update, details, action]; :update }
     enqueue = ->(payload, **options) { calls << [:enqueue, payload, options] }
-    RedmineSlackNotification.stub(:config, { 'events' => settings }) do
-      RedmineSlackNotification::Formatter.stub(:journal_payload, comment_payload) do
-        RedmineSlackNotification::Formatter.stub(:issue_payload, update_payload) do
-          RedmineSlackNotification.stub(:enqueue, enqueue) do
+    Slackmine.stub(:config, { 'events' => settings }) do
+      Slackmine::Formatter.stub(:journal_payload, comment_payload) do
+        Slackmine::Formatter.stub(:issue_payload, update_payload) do
+          Slackmine.stub(:enqueue, enqueue) do
             item = journal
             item.details = details
             item.notes = notes
@@ -937,13 +937,13 @@ class NewsCommentDeletionTest < Minitest::Test
     comment = OpenStruct.new(commented: news, content: 'after')
     comment.define_singleton_method(:saved_change_to_content?) { true }
     comment.define_singleton_method(:content_before_last_save) { 'before' }
-    comment.extend(RedmineSlackNotification::CommentPatch)
+    comment.extend(Slackmine::CommentPatch)
     captured = []
     formatter = ->(**kwargs) { captured << [:payload, kwargs]; :message }
     enqueue = ->(message, **kwargs) { captured << [:enqueue, message, kwargs] }
 
-    RedmineSlackNotification::Formatter.stub(:generic_payload, formatter) do
-      RedmineSlackNotification.stub(:enqueue, enqueue) do
+    Slackmine::Formatter.stub(:generic_payload, formatter) do
+      Slackmine.stub(:enqueue, enqueue) do
         comment.send(:notify_slack_news_comment_updated)
       end
     end
@@ -959,8 +959,8 @@ class NewsCommentDeletionTest < Minitest::Test
   def test_news_comment_update_without_content_change_is_ignored
     comment = OpenStruct.new
     comment.define_singleton_method(:saved_change_to_content?) { false }
-    comment.extend(RedmineSlackNotification::CommentPatch)
-    RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'unchanged comment was enqueued' }) do
+    comment.extend(Slackmine::CommentPatch)
+    Slackmine.stub(:enqueue, ->(*) { flunk 'unchanged comment was enqueued' }) do
       comment.send(:notify_slack_news_comment_updated)
     end
   end
@@ -968,13 +968,13 @@ class NewsCommentDeletionTest < Minitest::Test
   def test_news_comment_removal_sends_removed_text_as_a_diff
     news = News.new(id: 17, title: 'Release', project: OpenStruct.new(id: 7, identifier: 'agentic'))
     comment = OpenStruct.new(commented: news, content: 'Removed comment')
-    comment.extend(RedmineSlackNotification::CommentPatch)
+    comment.extend(Slackmine::CommentPatch)
     captured = []
     formatter = ->(**kwargs) { captured << [:payload, kwargs]; :message }
     enqueue = ->(message, **kwargs) { captured << [:enqueue, message, kwargs] }
 
-    RedmineSlackNotification::Formatter.stub(:generic_payload, formatter) do
-      RedmineSlackNotification.stub(:enqueue, enqueue) do
+    Slackmine::Formatter.stub(:generic_payload, formatter) do
+      Slackmine.stub(:enqueue, enqueue) do
         comment.send(:notify_slack_news_comment_deleted)
       end
     end
@@ -995,9 +995,9 @@ class DeletionNotificationTest < Minitest::Test
 
   def test_deleted_records_have_independent_events_and_project_links
     cases = [
-      [RedmineSlackNotification::NewsPatch, 'news_deleted', { title: 'News', id: 1, description: 'Body' }, 'News', '/news'],
-      [RedmineSlackNotification::TimeEntryPatch, 'time_entry_deleted', { id: 2, hours: 1, spent_on: '2026-09-28', comments: '' }, 'Time entry', '/time_entries'],
-      [RedmineSlackNotification::VersionPatch, 'version_deleted', { id: 3, name: 'v1', status: 'open', effective_date: nil, description: '' }, 'Version', '/versions']
+      [Slackmine::NewsPatch, 'news_deleted', { title: 'News', id: 1, description: 'Body' }, 'News', '/news'],
+      [Slackmine::TimeEntryPatch, 'time_entry_deleted', { id: 2, hours: 1, spent_on: '2026-09-28', comments: '' }, 'Time entry', '/time_entries'],
+      [Slackmine::VersionPatch, 'version_deleted', { id: 3, name: 'v1', status: 'open', effective_date: nil, description: '' }, 'Version', '/versions']
     ]
     cases.each do |patch, event, attributes, noun, path|
       record = OpenStruct.new(attributes.merge(project: project))
@@ -1005,7 +1005,7 @@ class DeletionNotificationTest < Minitest::Test
       assert_deleted_event(record, :notify_slack_generic, [noun, 'deleted'], event, path)
     end
     page = OpenStruct.new(project: project, title: 'Home')
-    page.extend(RedmineSlackNotification::WikiPagePatch)
+    page.extend(Slackmine::WikiPagePatch)
     assert_deleted_event(page, :notify_slack_wiki_deleted, [], 'wiki_deleted', '/wiki')
   end
 
@@ -1015,8 +1015,8 @@ class DeletionNotificationTest < Minitest::Test
     captured = []
     payload = ->(**kwargs) { captured << [:payload, kwargs]; :message }
     enqueue = ->(message, **kwargs) { captured << [:enqueue, message, kwargs] }
-    RedmineSlackNotification::Formatter.stub(:generic_payload, payload) do
-      RedmineSlackNotification.stub(:enqueue, enqueue) do
+    Slackmine::Formatter.stub(:generic_payload, payload) do
+      Slackmine.stub(:enqueue, enqueue) do
         record.send(method, *args)
       end
     end
@@ -1048,17 +1048,17 @@ class ImageNotificationTest < Minitest::Test
 
   def test_extracts_local_image_reference
     assert_equal ['clipboard-202609281254-s6trp@2x.png'],
-                 RedmineSlackNotification::Formatter.image_references('![](clipboard-202609281254-s6trp@2x.png)')
-    assert_empty RedmineSlackNotification::Formatter.image_references('![](https://example.com/image.png)')
-    assert_equal '![English](english.png)', RedmineSlackNotification::Formatter.mrkdwn('![English](english.png)')
+                 Slackmine::Formatter.image_references('![](clipboard-202609281254-s6trp@2x.png)')
+    assert_empty Slackmine::Formatter.image_references('![](https://example.com/image.png)')
+    assert_equal '![English](english.png)', Slackmine::Formatter.mrkdwn('![English](english.png)')
   end
 
   def test_four_argument_job_keeps_non_image_notifications_compatible_with_old_workers
     project = OpenStruct.new(id: 6)
     queued = nil
-    RedmineSlackNotification.stub(:event_enabled?, true) do
-      RedmineSlackNotificationJob.stub(:perform_later, ->(*args) { queued = args }) do
-        RedmineSlackNotification.enqueue({ 'text' => 'Issue deleted' }, project: project, event: 'issue_deleted')
+    Slackmine.stub(:event_enabled?, true) do
+      SlackmineNotificationJob.stub(:perform_later, ->(*args) { queued = args }) do
+        Slackmine.enqueue({ 'text' => 'Issue deleted' }, project: project, event: 'issue_deleted')
       end
     end
 
@@ -1069,10 +1069,10 @@ class ImageNotificationTest < Minitest::Test
     project = OpenStruct.new(id: 6)
     calls = []
     Project.stub(:find_by, project) do
-      RedmineSlackNotification.stub(:notify, ->(payload, **options) { calls << [payload, options] }) do
-        RedmineSlackNotificationJob.new.perform({ 'text' => 'created' }, 6, ['image.png'], -7105)
-        RedmineSlackNotificationJob.new.perform({ 'text' => 'created' }, 6, ['image.png'], nil, 7105)
-        RedmineSlackNotificationJob.new.perform({ 'text' => 'comment' }, 6, ['image.png'], 99)
+      Slackmine.stub(:notify, ->(payload, **options) { calls << [payload, options] }) do
+        SlackmineNotificationJob.new.perform({ 'text' => 'created' }, 6, ['image.png'], -7105)
+        SlackmineNotificationJob.new.perform({ 'text' => 'created' }, 6, ['image.png'], nil, 7105)
+        SlackmineNotificationJob.new.perform({ 'text' => 'comment' }, 6, ['image.png'], 99)
       end
     end
 
@@ -1092,16 +1092,16 @@ class ImageNotificationTest < Minitest::Test
     issue.define_singleton_method(:description) { "Report\n\n![Attached image](#{name})" }
     issue.define_singleton_method(:author) { OpenStruct.new(name: 'Example Bot') }
     issue.define_singleton_method(:attachments) { [OpenStruct.new(id: 88, filename: name)] }
-    payload = RedmineSlackNotification::Formatter.payload('Issue created', blocks: [
-      RedmineSlackNotification::Formatter.mrkdwn_sections('Content', issue.description).first
+    payload = Slackmine::Formatter.payload('Issue created', blocks: [
+      Slackmine::Formatter.mrkdwn_sections('Content', issue.description).first
     ])
     queued = nil
     posted = nil
 
-    RedmineSlackNotification::Formatter.stub(:issue_payload, payload) do
-      RedmineSlackNotification.stub(:event_enabled?, true) do
-        RedmineSlackNotificationJob.stub(:perform_later, ->(*args) { queued = args }) do
-          issue.extend(RedmineSlackNotification::IssuePatch)
+    Slackmine::Formatter.stub(:issue_payload, payload) do
+      Slackmine.stub(:event_enabled?, true) do
+        SlackmineNotificationJob.stub(:perform_later, ->(*args) { queued = args }) do
+          issue.extend(Slackmine::IssuePatch)
           issue.send(:notify_slack_issue_created)
         end
       end
@@ -1112,11 +1112,11 @@ class ImageNotificationTest < Minitest::Test
     assert_equal(-7105, queued[3])
 
     Issue.stub(:find_by, issue) do
-      RedmineSlackNotification.stub(:bot_token, 'token') do
-        RedmineSlackNotification.stub(:channel_id, 'C123') do
-          RedmineSlackNotification.stub(:upload_image, 'F123') do
-            RedmineSlackNotification.stub(:post_message, ->(message, _channel, _token) { posted = message }) do
-              RedmineSlackNotification.notify(queued[0], project: issue.project, image_names: queued[2],
+      Slackmine.stub(:bot_token, 'token') do
+        Slackmine.stub(:channel_id, 'C123') do
+          Slackmine.stub(:upload_image, 'F123') do
+            Slackmine.stub(:post_message, ->(message, _channel, _token) { posted = message }) do
+              Slackmine.notify(queued[0], project: issue.project, image_names: queued[2],
                                               issue_id: -queued[3])
             end
           end
@@ -1133,8 +1133,8 @@ class ImageNotificationTest < Minitest::Test
 
   def test_ordered_lists_use_markdown_inside_the_colored_attachment
     notes = "1. first\n1. second\n1. third\n\n![](screenshot.png)\n\nDone"
-    blocks = RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', notes)
-    message = RedmineSlackNotification::Formatter.payload('Example Tracker notification', blocks: blocks)
+    blocks = Slackmine::Formatter.mrkdwn_sections('追加コメント', notes)
+    message = Slackmine::Formatter.payload('Example Tracker notification', blocks: blocks)
 
     assert_equal '#6D5DFB', message.dig('attachments', 0, 'color')
     assert_equal [{ 'type' => 'markdown', 'text' => "**追加コメント**\n\n#{notes}" }], message.dig('attachments', 0, 'blocks')
@@ -1143,18 +1143,18 @@ class ImageNotificationTest < Minitest::Test
 
   def test_change_fields_are_split_to_fit_slack_section_limit
     changes = 12.times.map { |index| ["項目#{index}", '変更'] }
-    blocks = RedmineSlackNotification::Formatter.change_field_blocks(changes)
+    blocks = Slackmine::Formatter.change_field_blocks(changes)
     assert_equal [10, 2], blocks.map { |block| block.fetch('fields').length }
     assert_includes blocks.last.fetch('fields').last.fetch('text'), '項目11'
   end
 
   def test_deleted_labels_are_distinct_from_updates
-    assert_equal 'News created', RedmineSlackNotification::Formatter.event_label('News', 'created')
-    assert_equal 'Time entry created', RedmineSlackNotification::Formatter.event_label('Time entry', 'created')
-    assert_equal 'Version created', RedmineSlackNotification::Formatter.event_label('Version', 'created')
-    assert_equal 'News comment added', RedmineSlackNotification::Formatter.event_label('News comment', 'added')
-    assert_equal 'News deleted', RedmineSlackNotification::Formatter.event_label('News', 'deleted')
-    assert_equal '🗑️', RedmineSlackNotification::Formatter.event_icon('deleted', noun: 'Wiki page')
+    assert_equal 'News created', Slackmine::Formatter.event_label('News', 'created')
+    assert_equal 'Time entry created', Slackmine::Formatter.event_label('Time entry', 'created')
+    assert_equal 'Version created', Slackmine::Formatter.event_label('Version', 'created')
+    assert_equal 'News comment added', Slackmine::Formatter.event_label('News comment', 'added')
+    assert_equal 'News deleted', Slackmine::Formatter.event_label('News', 'deleted')
+    assert_equal '🗑️', Slackmine::Formatter.event_icon('deleted', noun: 'Wiki page')
   end
 
   def test_attachment_parent_version_and_custom_field_changes_have_readable_details
@@ -1167,7 +1167,7 @@ class ImageNotificationTest < Minitest::Test
       OpenStruct.new(property: 'cf', prop_key: '42', old_value: value.call('A'), value: value.call('B'))
     ]
     issue = OpenStruct.new(fixed_version: OpenStruct.new(name: '新版'))
-    changes = RedmineSlackNotification::Formatter.change_fields(issue, details)
+    changes = Slackmine::Formatter.change_fields(issue, details)
     assert_equal ['Attachment', 'Attachment', 'Parent issue', 'Target version', '顧客分類'], changes.map(&:first)
     assert_equal ['Added: one.png', 'Added: two.png'], changes.first(2).map(&:last)
     assert_equal 'None → <https://redmine.example.com/issues/7011|#7011>', changes[2][1]
@@ -1177,17 +1177,17 @@ class ImageNotificationTest < Minitest::Test
 
   def test_long_ordered_list_keeps_the_existing_section_format
     notes = "1. first\n" + ('x' * 12_000)
-    assert_equal 'section', RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', notes).first['type']
+    assert_equal 'section', Slackmine::Formatter.mrkdwn_sections('追加コメント', notes).first['type']
   end
 
   def test_uploaded_image_stays_between_markdown_text_blocks
     name = 'screenshot.png'
     attachment = OpenStruct.new(id: 42, filename: name)
     notes = "1. first\n1. second\n\n![](#{name})\n\nDone"
-    message = RedmineSlackNotification::Formatter.payload('Example Tracker notification', blocks: RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', notes))
+    message = Slackmine::Formatter.payload('Example Tracker notification', blocks: Slackmine::Formatter.mrkdwn_sections('追加コメント', notes))
     Journal.stub(:find_by, journal(attachments: [attachment])) do
-      RedmineSlackNotification.stub(:upload_image, 'F123') do
-        RedmineSlackNotification.add_images(message, [name], 1, 'token')
+      Slackmine.stub(:upload_image, 'F123') do
+        Slackmine.add_images(message, [name], 1, 'token')
       end
     end
 
@@ -1201,14 +1201,14 @@ class ImageNotificationTest < Minitest::Test
   def test_image_reference_inside_body_diff_remains_literal
     name = 'screenshot.png'
     attachment = OpenStruct.new(id: 42, filename: name)
-    diff = RedmineSlackNotification::Formatter.body_diff_blocks('説明', '', "![](#{name})").first
-    comment_diff = RedmineSlackNotification::Formatter.body_diff_blocks('コメント', '', "![](#{name})").first
-    comment = RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', "1. See image\n![](#{name})").first
-    message = RedmineSlackNotification::Formatter.payload('Example Tracker notification', blocks: [diff, comment_diff, comment])
+    diff = Slackmine::Formatter.body_diff_blocks('説明', '', "![](#{name})").first
+    comment_diff = Slackmine::Formatter.body_diff_blocks('コメント', '', "![](#{name})").first
+    comment = Slackmine::Formatter.mrkdwn_sections('追加コメント', "1. See image\n![](#{name})").first
+    message = Slackmine::Formatter.payload('Example Tracker notification', blocks: [diff, comment_diff, comment])
 
     Journal.stub(:find_by, journal(attachments: [attachment])) do
-      RedmineSlackNotification.stub(:upload_image, 'F123') do
-        RedmineSlackNotification.add_images(message, [name], 1, 'token')
+      Slackmine.stub(:upload_image, 'F123') do
+        Slackmine.add_images(message, [name], 1, 'token')
       end
     end
 
@@ -1228,9 +1228,9 @@ class ImageNotificationTest < Minitest::Test
 
     [false, true].each do |show_diff|
       message = nil
-      RedmineSlackNotification.stub(:config, { 'slack' => { 'body_diff' => show_diff } }) do
-        RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
-          message = RedmineSlackNotification::Formatter.journal_payload(
+      Slackmine.stub(:config, { 'slack' => { 'body_diff' => show_diff } }) do
+        Slackmine::Formatter.stub(:change_fields, empty_changes) do
+          message = Slackmine::Formatter.journal_payload(
             issue, actor: OpenStruct.new(name: 'Editor'),
             notes: "![](#{name})\ntest", previous_notes: "![](#{name})",
             comment_action: 'updated'
@@ -1238,8 +1238,8 @@ class ImageNotificationTest < Minitest::Test
         end
       end
       Journal.stub(:find_by, journal(attachments: [attachment])) do
-        RedmineSlackNotification.stub(:upload_image, 'F123') do
-          RedmineSlackNotification.add_images(message, [name], 1, 'token')
+        Slackmine.stub(:upload_image, 'F123') do
+          Slackmine.add_images(message, [name], 1, 'token')
         end
       end
 
@@ -1255,13 +1255,13 @@ class ImageNotificationTest < Minitest::Test
     end
   end
 
-  def test_failed_markdown_image_upload_keeps_a_redmine_link
+  def test_failed_markdown_image_upload_keeps_a_slackmine_link
     attachment = OpenStruct.new(id: 42, filename: 'screenshot.png')
     notes = "1. first\n\n![](screenshot.png)"
-    message = RedmineSlackNotification::Formatter.payload('Example Tracker notification', blocks: RedmineSlackNotification::Formatter.mrkdwn_sections('追加コメント', notes))
+    message = Slackmine::Formatter.payload('Example Tracker notification', blocks: Slackmine::Formatter.mrkdwn_sections('追加コメント', notes))
     Journal.stub(:find_by, journal(attachments: [attachment])) do
-      RedmineSlackNotification.stub(:upload_image, nil) do
-        RedmineSlackNotification.add_images(message, [attachment.filename], 1, 'token')
+      Slackmine.stub(:upload_image, nil) do
+        Slackmine.add_images(message, [attachment.filename], 1, 'token')
       end
     end
 
@@ -1272,8 +1272,8 @@ class ImageNotificationTest < Minitest::Test
     attachment = OpenStruct.new(id: 42, filename: 'clipboard-202609281254-s6trp@2x.png')
     message = payload
     Journal.stub(:find_by, journal(attachments: [attachment])) do
-      RedmineSlackNotification.stub(:upload_image, 'F123') do
-        RedmineSlackNotification.add_images(message, [attachment.filename], 1, 'token')
+      Slackmine.stub(:upload_image, 'F123') do
+        Slackmine.add_images(message, [attachment.filename], 1, 'token')
       end
     end
 
@@ -1289,8 +1289,8 @@ class ImageNotificationTest < Minitest::Test
     attachment = OpenStruct.new(id: 42, filename: 'clipboard-202609281254-s6trp@2x.png')
     message = payload
     Journal.stub(:find_by, journal(attachments: [attachment])) do
-      RedmineSlackNotification.stub(:upload_image, nil) do
-        RedmineSlackNotification.add_images(message, [attachment.filename], 1, 'token')
+      Slackmine.stub(:upload_image, nil) do
+        Slackmine.add_images(message, [attachment.filename], 1, 'token')
       end
     end
 
@@ -1309,8 +1309,8 @@ class ImageNotificationTest < Minitest::Test
     }
     file_ids = { 'english.png' => 'FEN', 'japanese.png' => 'FJA', 'chinese.png' => 'FZH' }
     Journal.stub(:find_by, journal(attachments: attachments)) do
-      RedmineSlackNotification.stub(:upload_image, ->(attachment, _token) { file_ids.fetch(attachment.filename) }) do
-        RedmineSlackNotification.add_images(message, names, 1, 'token')
+      Slackmine.stub(:upload_image, ->(attachment, _token) { file_ids.fetch(attachment.filename) }) do
+        Slackmine.add_images(message, names, 1, 'token')
       end
     end
 
@@ -1328,8 +1328,8 @@ class ImageNotificationTest < Minitest::Test
   def test_missing_attachment_links_to_issue_without_upload
     message = payload
     Journal.stub(:find_by, journal) do
-      RedmineSlackNotification.stub(:upload_image, ->(*) { flunk 'missing image was uploaded' }) do
-        RedmineSlackNotification.add_images(message, ['clipboard-202609281254-s6trp@2x.png'], 1, 'token')
+      Slackmine.stub(:upload_image, ->(*) { flunk 'missing image was uploaded' }) do
+        Slackmine.add_images(message, ['clipboard-202609281254-s6trp@2x.png'], 1, 'token')
       end
     end
 
@@ -1339,8 +1339,8 @@ class ImageNotificationTest < Minitest::Test
   def test_private_note_is_not_uploaded
     message = payload
     Journal.stub(:find_by, journal(private_note: true)) do
-      RedmineSlackNotification.stub(:upload_image, ->(*) { flunk 'private image was uploaded' }) do
-        RedmineSlackNotification.add_images(message, ['clipboard-202609281254-s6trp@2x.png'], 1, 'token')
+      Slackmine.stub(:upload_image, ->(*) { flunk 'private image was uploaded' }) do
+        Slackmine.add_images(message, ['clipboard-202609281254-s6trp@2x.png'], 1, 'token')
       end
     end
 
@@ -1359,7 +1359,7 @@ class ImageNotificationTest < Minitest::Test
     end
 
     Net::HTTP.stub(:start, ->(*, &block) { block.call(http) }) do
-      RedmineSlackNotification.slack_api(
+      Slackmine.slack_api(
         'files.getUploadURLExternal',
         { 'filename' => 'clipboard.png', 'length' => 42 },
         'token',
@@ -1375,7 +1375,7 @@ class ImageNotificationTest < Minitest::Test
     message = { 'blocks' => [{ 'type' => 'image', 'slack_file' => { 'id' => 'F123' }, 'alt_text' => 'image' }] }
     attempts = []
     delays = []
-    error = RedmineSlackNotification::SlackApiError.new(
+    error = Slackmine::SlackApiError.new(
       'chat.postMessage', '200',
       { 'error' => 'invalid_blocks', 'response_metadata' => { 'messages' => ['[ERROR] invalid file type'] } }
     )
@@ -1386,9 +1386,9 @@ class ImageNotificationTest < Minitest::Test
       { 'ok' => true }
     end
 
-    RedmineSlackNotification.stub(:slack_api, api) do
-      RedmineSlackNotification.stub(:sleep, ->(seconds) { delays << seconds }) do
-        assert_equal({ 'ok' => true }, RedmineSlackNotification.post_message(message, 'C123', 'token'))
+    Slackmine.stub(:slack_api, api) do
+      Slackmine.stub(:sleep, ->(seconds) { delays << seconds }) do
+        assert_equal({ 'ok' => true }, Slackmine.post_message(message, 'C123', 'token'))
       end
     end
 
@@ -1397,7 +1397,7 @@ class ImageNotificationTest < Minitest::Test
   end
 
   def test_image_message_keeps_the_colored_card_after_file_sharing
-    message = RedmineSlackNotification::Formatter.payload('Example Tracker notification', blocks: [
+    message = Slackmine::Formatter.payload('Example Tracker notification', blocks: [
       { 'type' => 'markdown', 'text' => "**追加コメント**\n\n1. first" },
       { 'type' => 'image', 'slack_file' => { 'id' => 'F123' }, 'alt_text' => 'screenshot' },
       { 'type' => 'markdown', 'text' => 'after image' }
@@ -1408,8 +1408,8 @@ class ImageNotificationTest < Minitest::Test
       method == 'chat.postMessage' ? { 'ok' => true, 'ts' => '123.456' } : { 'ok' => true }
     end
 
-    RedmineSlackNotification.stub(:slack_api, api) do
-      assert_equal({ 'ok' => true, 'ts' => '123.456' }, RedmineSlackNotification.post_message(message, 'C123', 'token'))
+    Slackmine.stub(:slack_api, api) do
+      assert_equal({ 'ok' => true, 'ts' => '123.456' }, Slackmine.post_message(message, 'C123', 'token'))
     end
 
     assert_equal %w[chat.postMessage chat.update], calls.map(&:first)
@@ -1428,36 +1428,36 @@ class ImageNotificationTest < Minitest::Test
   end
 
   def test_image_notification_preserves_explicit_text_and_limits_preview_text
-    message = RedmineSlackNotification::Formatter.payload('Attachment fallback', blocks: [
+    message = Slackmine::Formatter.payload('Attachment fallback', blocks: [
       { 'type' => 'image', 'slack_file' => { 'id' => 'F123' }, 'alt_text' => 'screenshot' }
     ])
     message['text'] = 'Notification summary ' * 200
     calls = []
-    RedmineSlackNotification.stub(:slack_api, ->(method, body, _token) { calls << [method, body]; { 'ok' => true, 'ts' => '1.2' } }) do
-      RedmineSlackNotification.post_message(message, 'C123', 'token')
+    Slackmine.stub(:slack_api, ->(method, body, _token) { calls << [method, body]; { 'ok' => true, 'ts' => '1.2' } }) do
+      Slackmine.post_message(message, 'C123', 'token')
     end
     assert_equal message['text'], calls.first[1]['text']
     assert_equal message['text'][0, 3000], calls.first[1].dig('blocks', 0, 'text', 'text')
   end
 
   def test_message_without_images_keeps_attachment_fallback_without_top_level_text
-    message = RedmineSlackNotification::Formatter.payload('Notification summary', blocks: [
+    message = Slackmine::Formatter.payload('Notification summary', blocks: [
       { 'type' => 'markdown', 'text' => 'Comment' }
     ])
     calls = []
-    RedmineSlackNotification.stub(:slack_api, ->(method, body, _token) { calls << [method, body]; { 'ok' => true } }) do
-      RedmineSlackNotification.post_message(message, 'C123', 'token')
+    Slackmine.stub(:slack_api, ->(method, body, _token) { calls << [method, body]; { 'ok' => true } }) do
+      Slackmine.post_message(message, 'C123', 'token')
     end
     assert_equal [['chat.postMessage', message.merge('channel' => 'C123')]], calls
     refute calls.first[1].key?('text')
   end
 
   def test_retries_attachment_until_new_image_is_ready
-    message = RedmineSlackNotification::Formatter.payload('Example Tracker notification', blocks: [
+    message = Slackmine::Formatter.payload('Example Tracker notification', blocks: [
       { 'type' => 'image', 'slack_file' => { 'id' => 'F123' }, 'alt_text' => 'screenshot' }
     ])
     methods = []
-    error = RedmineSlackNotification::SlackApiError.new(
+    error = Slackmine::SlackApiError.new(
       'chat.postMessage', '200',
       { 'error' => 'invalid_attachments', 'response_metadata' => { 'messages' => ['[ERROR] invalid slack file'] } }
     )
@@ -1468,9 +1468,9 @@ class ImageNotificationTest < Minitest::Test
       method == 'chat.postMessage' ? { 'ok' => true, 'ts' => '123.456' } : { 'ok' => true }
     end
 
-    RedmineSlackNotification.stub(:slack_api, api) do
-      RedmineSlackNotification.stub(:sleep, ->(*) {}) do
-        RedmineSlackNotification.post_message(message, 'C123', 'token')
+    Slackmine.stub(:slack_api, api) do
+      Slackmine.stub(:sleep, ->(*) {}) do
+        Slackmine.post_message(message, 'C123', 'token')
       end
     end
 
@@ -1492,18 +1492,18 @@ class WorkObjectNotificationTest < Minitest::Test
   end
 
   def issue_payload(action = 'created')
-    RedmineSlackNotification::Formatter.issue_payload(@issue, actor: @actor, action: action)
+    Slackmine::Formatter.issue_payload(@issue, actor: @actor, action: action)
   end
 
   def test_preview_is_opt_in_and_removes_duplicate_fields_only_when_enabled
     [nil, false, 'true'].each do |value|
-      RedmineSlackNotification.stub(:config, { 'slack' => { 'work_object_previews' => value } }) do
+      Slackmine.stub(:config, { 'slack' => { 'work_object_previews' => value } }) do
         refute issue_payload.key?('metadata')
         refute issue_payload.key?('text')
       end
     end
-    original = RedmineSlackNotification.stub(:config, @settings.merge('slack' => @settings['slack'].merge('work_object_previews' => false))) { issue_payload }
-    enabled = RedmineSlackNotification.stub(:config, @settings) { issue_payload }
+    original = Slackmine.stub(:config, @settings.merge('slack' => @settings['slack'].merge('work_object_previews' => false))) { issue_payload }
+    enabled = Slackmine.stub(:config, @settings) { issue_payload }
     assert_equal original.dig('attachments', 0, 'fallback'), enabled.dig('attachments', 0, 'fallback')
     assert_equal '', enabled['text']
     refute_includes enabled['attachments'].to_json, '*Status*'
@@ -1516,7 +1516,7 @@ class WorkObjectNotificationTest < Minitest::Test
                'attachments' => [{ 'is_app_unfurl' => true, 'bot_id' => 'B123', 'app_id' => 'ATEST',
                                    'from_url' => 'https://redmine.example.com/issues/7',
                                    'title_link' => 'https://redmine.example.com/issues/7' }] }
-    resolver = RedmineSlackNotification::ThreadComments
+    resolver = Slackmine::ThreadComments
     Issue.stub(:find_by, @issue) do
       assert_equal @issue, resolver.issue_from_parent(parent, 'ATEST', parent['ts'])
       assert_nil resolver.issue_from_parent(parent, 'AOTHER', parent['ts'])
@@ -1544,15 +1544,15 @@ class WorkObjectNotificationTest < Minitest::Test
   def test_thread_parent_resolves_reduced_history_card
     parent = reduced_history_parent
     Issue.stub(:find_by, ->(id:) { id == 7 ? @issue : nil }) do
-      assert_equal @issue, RedmineSlackNotification::ThreadComments.issue_from_parent(parent, 'ATEST', parent['ts'])
+      assert_equal @issue, Slackmine::ThreadComments.issue_from_parent(parent, 'ATEST', parent['ts'])
       parent.delete('app_id')
       parent['bot_profile'] = { 'app_id' => 'ATEST' }
-      assert_equal @issue, RedmineSlackNotification::ThreadComments.issue_from_parent(parent, 'ATEST', parent['ts'])
+      assert_equal @issue, Slackmine::ThreadComments.issue_from_parent(parent, 'ATEST', parent['ts'])
     end
   end
 
   def test_reduced_history_card_rejects_untrusted_parent_and_wrong_url
-    resolver = RedmineSlackNotification::ThreadComments
+    resolver = Slackmine::ThreadComments
     parent = reduced_history_parent
     Issue.stub(:find_by, ->(**) { flunk 'Untrusted parent must not resolve an Issue' }) do
       assert_nil resolver.issue_from_parent(parent, 'AOTHER', parent['ts'])
@@ -1566,7 +1566,7 @@ class WorkObjectNotificationTest < Minitest::Test
   end
 
   def test_reduced_history_card_rejects_ambiguous_or_conflicting_references
-    resolver = RedmineSlackNotification::ThreadComments
+    resolver = Slackmine::ThreadComments
     Issue.stub(:find_by, ->(**) { flunk 'Ambiguous parent must not resolve an Issue' }) do
       parent = reduced_history_parent
       parent['attachments'] << { 'from_url' => 'https://redmine.example.com/issues/8', 'id' => 3 }
@@ -1582,7 +1582,7 @@ class WorkObjectNotificationTest < Minitest::Test
   end
 
   def test_reduced_history_reply_saves_then_posts_feedback_in_same_thread
-    resolver = RedmineSlackNotification::ThreadComments
+    resolver = Slackmine::ThreadComments
     parent = reduced_history_parent
     event = { 'type' => 'message', 'user' => 'U123', 'channel' => 'C123',
               'thread_ts' => parent['ts'], 'ts' => '1001.000002', 'text' => 'Example reply' }
@@ -1592,10 +1592,10 @@ class WorkObjectNotificationTest < Minitest::Test
       resolver.stub(:contexts, [nil]) do
         resolver.stub(:enabled?, true) do
           resolver.stub(:persist_reply, ->(issue, reply, team) { saved << [issue, reply, team]; :saved }) do
-            RedmineSlackNotification.stub(:bot_token, 'test-token') do
-              RedmineSlackNotification.stub(:channel_id, 'C123') do
-                RedmineSlackNotification::WorkObjects.stub(:integration_for, true) do
-                  RedmineSlackNotification.stub(:slack_api, ->(method, body, _token, **_options) {
+            Slackmine.stub(:bot_token, 'test-token') do
+              Slackmine.stub(:channel_id, 'C123') do
+                Slackmine::WorkObjects.stub(:integration_for, true) do
+                  Slackmine.stub(:slack_api, ->(method, body, _token, **_options) {
                     calls << [method, body]
                     method == 'conversations.history' ? { 'messages' => [parent] } : { 'ok' => true }
                   }) { resolver.process('ATEST', 'T123', event) }
@@ -1615,13 +1615,13 @@ class WorkObjectNotificationTest < Minitest::Test
   end
 
   def test_compaction_preserves_changes_and_nonduplicated_metadata
-    formatter = RedmineSlackNotification::Formatter
+    formatter = Slackmine::Formatter
     blocks = [
       { 'type' => 'section', 'fields' => [{ 'text' => "*Status*\nOpen → Closed" }] },
       formatter.section_text('*Metadata*'),
       { 'type' => 'section', 'fields' => [{ 'text' => "*Status*\nClosed" }, { 'text' => "*Start date*\n2026-10-01" }] }
     ]
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       result = formatter.compact_work_object_notification({ 'attachments' => [{ 'blocks' => blocks }] }, @issue, { 'status' => {} }, [])
       output = result.to_json
       assert_includes output, 'Open → Closed'
@@ -1634,8 +1634,8 @@ class WorkObjectNotificationTest < Minitest::Test
   end
 
   def test_example_documents_all_message_defaults
-    example = YAML.safe_load(File.read(File.expand_path('../config/redmine_slack_notification.yml.example', __dir__)))
-    RedmineSlackNotification::Formatter::DEFAULT_MESSAGES.each do |group, entries|
+    example = YAML.safe_load(File.read(File.expand_path('../config/slackmine.yml.example', __dir__)))
+    Slackmine::Formatter::DEFAULT_MESSAGES.each do |group, entries|
       entries.each do |key, value|
         if value.is_a?(Hash)
           value.each_key { |nested| assert example.dig('messages', group, key).key?(nested), "#{group}.#{key}.#{nested}" }
@@ -1648,9 +1648,9 @@ class WorkObjectNotificationTest < Minitest::Test
 
   def test_work_object_type_label_is_independent_of_tracker
     @issue.tracker.name = 'Support'
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       assert_equal 'Issue', issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'attributes', 'display_type')
-      assert_equal 'Issue', RedmineSlackNotification::Formatter.issue_work_object_details(@issue).dig('entity_payload', 'attributes', 'display_type')
+      assert_equal 'Issue', Slackmine::Formatter.issue_work_object_details(@issue).dig('entity_payload', 'attributes', 'display_type')
       @settings['messages'] = { 'work_objects' => { 'display_type' => 'Ticket' } }
       assert_equal 'Ticket', issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'attributes', 'display_type')
     end
@@ -1659,10 +1659,10 @@ class WorkObjectNotificationTest < Minitest::Test
   def test_product_name_is_configurable_for_previews_and_details_with_project_override
     @settings['messages'] = { 'work_objects' => { 'product_name' => 'Example Tracker' } }
     @settings['projects'] = { 'agentic' => { 'messages' => { 'work_objects' => { 'product_name' => 'W.A.C' } } } }
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       assert_equal 'W.A.C', issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'attributes', 'product_name')
-      RedmineSlackNotification.with_project(@project) do
-        details = RedmineSlackNotification::Formatter.issue_work_object_details(@issue)
+      Slackmine.with_project(@project) do
+        details = Slackmine::Formatter.issue_work_object_details(@issue)
         assert_equal 'W.A.C', details.dig('entity_payload', 'attributes', 'product_name')
       end
       @settings.delete('projects')
@@ -1674,21 +1674,21 @@ class WorkObjectNotificationTest < Minitest::Test
 
   def test_thread_comment_body_omits_issue_card_and_headings_but_keeps_formatting
     @settings['slack']['comment_notifications_in_threads'] = true
-    RedmineSlackNotification.stub(:config, @settings) do
-      result = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: 'Hello **team**')
-      compact = result.fetch('_redmine_thread_comment_payload')
+    Slackmine.stub(:config, @settings) do
+      result = Slackmine::Formatter.journal_payload(@issue, actor: @actor, notes: 'Hello **team**')
+      compact = result.fetch('_slackmine_thread_comment_payload')
       assert_equal 'Redmine <https://redmine.example.com/issues/7|#7>: New comment', compact['text']
       assert_equal 'Hello *team*', compact.dig('attachments', 0, 'blocks', 0, 'text', 'text')
       refute compact.key?('metadata')
       refute compact.dig('attachments', 0).key?('color')
-      edited = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: 'New',
+      edited = Slackmine::Formatter.journal_payload(@issue, actor: @actor, notes: 'New',
         previous_notes: 'Old', comment_action: 'updated')
-      assert edited.fetch('_redmine_thread_comment_payload').dig('attachments', 0, 'blocks').any?
-      assert_equal 'Redmine <https://redmine.example.com/issues/7|#7>: Comment updated', edited.fetch('_redmine_thread_comment_payload')['text']
-      deleted = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: '',
+      assert edited.fetch('_slackmine_thread_comment_payload').dig('attachments', 0, 'blocks').any?
+      assert_equal 'Redmine <https://redmine.example.com/issues/7|#7>: Comment updated', edited.fetch('_slackmine_thread_comment_payload')['text']
+      deleted = Slackmine::Formatter.journal_payload(@issue, actor: @actor, notes: '',
         previous_notes: 'Old', comment_action: 'deleted')
-      assert_equal 'Redmine <https://redmine.example.com/issues/7|#7>: Comment deleted', deleted.fetch('_redmine_thread_comment_payload')['text']
-      assert deleted.fetch('_redmine_thread_comment_payload').dig('attachments', 0, 'blocks').any?
+      assert_equal 'Redmine <https://redmine.example.com/issues/7|#7>: Comment deleted', deleted.fetch('_slackmine_thread_comment_payload')['text']
+      assert deleted.fetch('_slackmine_thread_comment_payload').dig('attachments', 0, 'blocks').any?
       assert result.key?('metadata'), 'Fallback retains the full notification'
     end
   end
@@ -1699,25 +1699,25 @@ class WorkObjectNotificationTest < Minitest::Test
     @settings['projects'] = { 'agentic' => { 'messages' => { 'thread_notifications' => {
       'added_header' => '%{product_name} #%{id} の新規コメント · %{actor}: %{subject}'
     } } } }
-    RedmineSlackNotification.stub(:config, @settings) do
-      result = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: 'Body')
-      assert_equal 'Example Tracker <https://redmine.example.com/issues/7|#7> の新規コメント · Alice: Fix A &amp; B', result.dig('_redmine_thread_comment_payload', 'text')
+    Slackmine.stub(:config, @settings) do
+      result = Slackmine::Formatter.journal_payload(@issue, actor: @actor, notes: 'Body')
+      assert_equal 'Example Tracker <https://redmine.example.com/issues/7|#7> の新規コメント · Alice: Fix A &amp; B', result.dig('_slackmine_thread_comment_payload', 'text')
       @settings['projects']['agentic']['messages']['thread_notifications']['added_header'] = '%{unknown}'
-      result = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: 'Body')
-      assert_equal 'Example Tracker <https://redmine.example.com/issues/7|#7>: New comment', result.dig('_redmine_thread_comment_payload', 'text')
+      result = Slackmine::Formatter.journal_payload(@issue, actor: @actor, notes: 'Body')
+      assert_equal 'Example Tracker <https://redmine.example.com/issues/7|#7>: New comment', result.dig('_slackmine_thread_comment_payload', 'text')
     end
   end
 
   def test_task_schema_and_identity_are_shared_by_creation_updates_and_comments
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       created = issue_payload
       updated = issue_payload('updated')
-      comment = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: 'A comment')
+      comment = Slackmine::Formatter.journal_payload(@issue, actor: @actor, notes: 'A comment')
       entities = [created, updated, comment].map { |message| message.dig('metadata', 'entities', 0) }
       entities.each do |entity|
         assert_equal 'slack#/entities/task', entity['entity_type']
         assert_equal 'https://redmine.example.com/issues/7', entity['url']
-        assert_equal({ 'id' => Digest::SHA256.hexdigest(entity['url']), 'type' => 'redmine_issue' }, entity['external_ref'])
+        assert_equal({ 'id' => Digest::SHA256.hexdigest(entity['url']), 'type' => 'slackmine_issue' }, entity['external_ref'])
         assert_match(/\A[0-9a-zA-Z\-_:!\/=]+\z/, entity.dig('external_ref', 'id'))
         assert_equal 'Fix A & B', entity.dig('entity_payload', 'attributes', 'title', 'text')
         assert_equal '#7', entity.dig('entity_payload', 'attributes', 'display_id')
@@ -1736,14 +1736,14 @@ class WorkObjectNotificationTest < Minitest::Test
                                                     'due_date' => false, 'assignee' => false } }
     @settings['slack']['work_object_actions'] = true
     @issue.updated_on = Time.utc(2026, 10, 4, 3, 0)
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
       assert_equal @issue.updated_on.to_i, entity.dig('attributes', 'metadata_last_modified')
       assert_equal 'In progress', entity.dig('fields', 'status', 'value')
       assert_equal 'High', entity.dig('fields', 'priority', 'value')
       assert_equal '2026-10-05', entity.dig('fields', 'due_date', 'value')
       assert_equal 'Alice', entity.dig('fields', 'assignee', 'user', 'text')
-      assert_equal %w[redmine_add_comment redmine_open_issue], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
+      assert_equal %w[slackmine_add_comment slackmine_open_issue], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
       assert_equal 'https://redmine.example.com/issues/7', entity.dig('actions', 'primary_actions', 1, 'url')
       assert_equal 'Open Redmine', entity.dig('actions', 'primary_actions', 1, 'text')
       @settings['slack']['work_object_actions'] = false
@@ -1758,11 +1758,11 @@ class WorkObjectNotificationTest < Minitest::Test
     @settings['slack']['metadata'] = { 'issue' => { 'status' => false, 'priority' => false,
                                                     'due_date' => false, 'assignee' => false } }
     @settings['slack']['work_object_actions'] = true
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
       assert_equal 'Alice', entity.dig('fields', 'assignee', 'user', 'text')
       assert_equal 'In progress', entity.dig('fields', 'status', 'value')
-      assert_equal %w[redmine_add_comment redmine_open_issue], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
+      assert_equal %w[slackmine_add_comment slackmine_open_issue], entity.dig('actions', 'primary_actions').map { |action| action['action_id'] }
 
       @settings['projects'] = { 'agentic' => { 'slack' => { 'work_object_actions' => false } } }
       hidden = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
@@ -1775,7 +1775,7 @@ class WorkObjectNotificationTest < Minitest::Test
     @settings['slack']['work_object_actions'] = true
     @settings['slack']['metadata'] = { 'issue' => { 'category' => false } }
     @issue.category = OpenStruct.new(name: 'Support')
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
       assert_equal 'Support', entity['custom_fields'].find { |field| field['key'] == 'category' }['value']
       assert_includes entity['display_order'], 'category'
@@ -1793,7 +1793,7 @@ class WorkObjectNotificationTest < Minitest::Test
     @issue.estimated_hours = 8
     @issue.category = OpenStruct.new(name: 'Support')
     @issue.done_ratio = 65
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
       assert_empty entity['fields']
       assert_nil entity['custom_fields']
@@ -1839,8 +1839,8 @@ class WorkObjectNotificationTest < Minitest::Test
       OpenStruct.new(id: 3, private_notes: false, notes: '  ', user: @actor, created_on: stamp + 2)
     ])
     @settings['slack']['work_object_fields'] = { 'last_comment' => true }
-    formatter = RedmineSlackNotification::Formatter
-    RedmineSlackNotification.stub(:config, @settings) do
+    formatter = Slackmine::Formatter
+    Slackmine.stub(:config, @settings) do
       payload = formatter.journal_payload(@issue, actor: @actor, notes: 'Public update')
       comment = payload.dig('metadata', 'entities', 0, 'entity_payload', 'custom_fields').find { |field| field['key'] == 'last_comment' }
       assert_equal "Alice · 2026-10-04T05:00:00Z\nPublic update", comment['value']
@@ -1869,8 +1869,8 @@ class WorkObjectNotificationTest < Minitest::Test
     @issue.category = OpenStruct.new(name: 'Support')
     @issue.done_ratio = 65
     journal = OpenStruct.new(notes: 'Latest note', user: @actor, created_on: Time.utc(2026, 10, 4))
-    RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackNotification::Formatter.stub(:last_public_comment, journal) do
+    Slackmine.stub(:config, @settings) do
+      Slackmine::Formatter.stub(:last_public_comment, journal) do
         [true, false].each do |actions|
           @settings['slack']['work_object_actions'] = actions
           entity = issue_payload.dig('metadata', 'entities', 0, 'entity_payload')
@@ -1889,7 +1889,7 @@ class WorkObjectNotificationTest < Minitest::Test
     @settings['projects'] = { 'agentic' => { 'slack' => { 'work_object_fields' => {
       'priority' => true, 'author' => true, 'description' => true, 'category' => false
     } } } }
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       entity = issue_payload.dig('metadata', 'entities', 0, 'entity_payload')
       assert_equal %w[priority created_by description status], entity['display_order']
     end
@@ -1897,7 +1897,7 @@ class WorkObjectNotificationTest < Minitest::Test
 
   def test_card_description_is_optional_and_truncated
     @settings['slack']['work_object_fields'] = { 'description' => true }
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       @issue.description = 'x' * 1001
       field = issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'fields', 'description')
       assert_equal 'x' * 1000 + '…', field['value']
@@ -1909,7 +1909,7 @@ class WorkObjectNotificationTest < Minitest::Test
 
   def test_work_object_progress_displays_exact_percentage
     @settings['slack']['work_object_actions'] = true
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       { 0 => '0%', 65 => '65%', 100 => '100%' }.each do |percent, meter|
         @issue.done_ratio = percent
         entity = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload')
@@ -1922,7 +1922,7 @@ class WorkObjectNotificationTest < Minitest::Test
   def test_action_card_shows_unassigned_assignee
     @issue.assigned_to = nil
     @settings['slack']['work_object_actions'] = true
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       fields = issue_payload('updated').dig('metadata', 'entities', 0, 'entity_payload', 'fields')
       assert_equal({ 'text' => 'Unassigned' }, fields.dig('assignee', 'user'))
     end
@@ -1937,9 +1937,9 @@ class WorkObjectNotificationTest < Minitest::Test
     @issue.author = user
     @settings['users'] = { 'alice' => 'U123ABC456' }
 
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       preview = issue_payload.dig('metadata', 'entities', 0, 'entity_payload', 'fields')
-      details = RedmineSlackNotification::Formatter.issue_work_object_details(@issue).dig('entity_payload', 'fields')
+      details = Slackmine::Formatter.issue_work_object_details(@issue).dig('entity_payload', 'fields')
       [preview, details].each do |fields|
         %w[assignee created_by].each do |key|
           assert_equal({ 'user_id' => 'U123ABC456' }, fields.dig(key, 'user'))
@@ -1947,15 +1947,15 @@ class WorkObjectNotificationTest < Minitest::Test
       end
 
       @settings['users'].clear
-      fallback = RedmineSlackNotification::Formatter.issue_work_object_details(@issue).dig('entity_payload', 'fields')
+      fallback = Slackmine::Formatter.issue_work_object_details(@issue).dig('entity_payload', 'fields')
       assert_equal({ 'text' => 'Alice' }, fallback.dig('assignee', 'user'))
     end
   end
 
-  def test_work_object_id_distinguishes_redmine_hosts_and_issues
-    RedmineSlackNotification.stub(:config, @settings) do
+  def test_work_object_id_distinguishes_slackmine_hosts_and_issues
+    Slackmine.stub(:config, @settings) do
       original = issue_payload.dig('metadata', 'entities', 0, 'external_ref', 'id')
-      Setting.stub(:host_name, 'another.example.com/redmine') do
+      Setting.stub(:host_name, 'another.example.com/slackmine') do
         other_host = issue_payload.dig('metadata', 'entities', 0, 'external_ref', 'id')
         refute_equal original, other_host
         assert_match(/\A[0-9a-zA-Z\-_:!\/=]+\z/, other_host)
@@ -1970,7 +1970,7 @@ class WorkObjectNotificationTest < Minitest::Test
       settings = { 'slack' => { 'work_object_previews' => !value }, 'projects' => {
         'agentic' => { 'slack' => { 'work_object_previews' => value } }
       } }
-      RedmineSlackNotification.stub(:config, settings) do
+      Slackmine.stub(:config, settings) do
         assert_equal value, issue_payload.key?('metadata')
       end
     end
@@ -1978,7 +1978,7 @@ class WorkObjectNotificationTest < Minitest::Test
 
   def test_omitted_card_fields_are_hidden_even_with_notification_metadata
     @settings['slack'].delete('work_object_fields')
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       entity = issue_payload.dig('metadata', 'entities', 0, 'entity_payload')
       assert_empty entity['fields']
       refute entity.key?('custom_fields')
@@ -1989,7 +1989,7 @@ class WorkObjectNotificationTest < Minitest::Test
     @settings['projects'] = { 'agentic' => { 'slack' => { 'work_object_fields' => {
       'status' => false, 'project' => false, 'priority' => false
     } } } }
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       entity = issue_payload.dig('metadata', 'entities', 0, 'entity_payload')
       refute entity['fields'].key?('status')
       refute entity['fields'].key?('priority')
@@ -1999,17 +1999,17 @@ class WorkObjectNotificationTest < Minitest::Test
   end
 
   def test_deleted_and_private_issues_have_no_work_object
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       refute issue_payload('deleted').key?('metadata')
       @issue.define_singleton_method(:is_private?) { true }
       refute issue_payload.key?('metadata')
-      comment = RedmineSlackNotification::Formatter.journal_payload(@issue, actor: @actor, notes: 'Private')
+      comment = Slackmine::Formatter.journal_payload(@issue, actor: @actor, notes: 'Private')
       refute comment.key?('metadata')
     end
   end
 
   def test_preview_reaches_slack_and_survives_image_cleanup
-    message = RedmineSlackNotification.stub(:config, @settings) { issue_payload }
+    message = Slackmine.stub(:config, @settings) { issue_payload }
     message['attachments'][0]['blocks'] << { 'type' => 'image', 'slack_file' => { 'id' => 'F123' }, 'alt_text' => 'image' }
     calls = []
     api = lambda do |method, body, _token, **options|
@@ -2017,7 +2017,7 @@ class WorkObjectNotificationTest < Minitest::Test
       calls << [method, body]
       { 'ok' => true, 'ts' => '123.456' }
     end
-    RedmineSlackNotification.stub(:slack_api, api) { RedmineSlackNotification.post_message(message, 'C123', 'token') }
+    Slackmine.stub(:slack_api, api) { Slackmine.post_message(message, 'C123', 'token') }
     assert_equal %w[chat.postMessage chat.update], calls.map(&:first)
     calls.each do |_method, body|
       assert_equal message['metadata'], body['metadata']
@@ -2028,15 +2028,15 @@ class WorkObjectNotificationTest < Minitest::Test
   end
 
   def test_non_issue_notifications_remain_unchanged
-    RedmineSlackNotification.stub(:config, @settings) do
-      message = RedmineSlackNotification::Formatter.generic_payload(project: @project, noun: 'News', action: 'created',
+    Slackmine.stub(:config, @settings) do
+      message = Slackmine::Formatter.generic_payload(project: @project, noun: 'News', action: 'created',
                                                                    subject: 'News', url: 'https://redmine.example.com/news/1', actor: @actor)
       refute message.key?('metadata')
     end
   end
 
   def test_work_object_is_sent_as_a_json_encoded_form_without_losing_attachments
-    message = RedmineSlackNotification.stub(:config, @settings) { issue_payload }
+    message = Slackmine.stub(:config, @settings) { issue_payload }
     response = Net::HTTPOK.new('1.1', '200', 'OK')
     response.define_singleton_method(:body) { '{"ok":true,"ts":"123.456"}' }
     http = Object.new
@@ -2046,7 +2046,7 @@ class WorkObjectNotificationTest < Minitest::Test
       response
     end
     Net::HTTP.stub(:start, ->(*, &block) { block.call(http) }) do
-      RedmineSlackNotification.post_message(message, 'C123', 'token')
+      Slackmine.post_message(message, 'C123', 'token')
     end
     assert_equal 'application/x-www-form-urlencoded', captured['Content-Type']
     form = URI.decode_www_form(captured.body).to_h
@@ -2058,7 +2058,7 @@ class WorkObjectNotificationTest < Minitest::Test
 end
 
 class WorkObjectDetailsTest < Minitest::Test
-  WORK = RedmineSlackNotification::WorkObjects
+  WORK = Slackmine::WorkObjects
 
   def setup
     @project = OpenStruct.new(identifier: 'agentic', name: 'Agentic', active?: true)
@@ -2073,14 +2073,14 @@ class WorkObjectDetailsTest < Minitest::Test
                   'users' => { 'alice' => 'U123' } }
     @url = 'https://redmine.example.com/issues/7'
     @event = { 'type' => 'entity_details_requested', 'trigger_id' => 'trigger', 'user' => 'U123',
-               'entity_url' => @url, 'external_ref' => { 'id' => Digest::SHA256.hexdigest(@url), 'type' => 'redmine_issue' } }
+               'entity_url' => @url, 'external_ref' => { 'id' => Digest::SHA256.hexdigest(@url), 'type' => 'slackmine_issue' } }
   end
 
   def test_signature_requires_unmodified_body_and_fresh_timestamp
     body = '{"type":"url_verification","challenge":"test"}'
     timestamp = '1000'
     signature = 'v0=' + OpenSSL::HMAC.hexdigest('SHA256', 'test-secret', "v0:#{timestamp}:#{body}")
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       assert WORK.verified_integration(body, timestamp, signature, now: 1000)
       refute WORK.verified_integration(body + ' ', timestamp, signature, now: 1000)
       refute WORK.verified_integration(body, timestamp, signature, now: 1301)
@@ -2094,17 +2094,17 @@ class WorkObjectDetailsTest < Minitest::Test
   def test_project_integrations_with_same_secret_are_routed_to_the_correct_app
     @settings['projects'] = { 'agentic' => { 'slack' => { 'events' => { 'app_id' => 'ASECOND' } } } }
     signature = 'v0=' + OpenSSL::HMAC.hexdigest('SHA256', 'test-secret', 'v0:1000:body')
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       assert_equal 'ASECOND', WORK.verified_integration('body', '1000', signature, now: 1000, app_id: 'ASECOND')['app_id']
     end
   end
 
   def test_missing_event_configuration_and_invalid_project_overrides_are_ignored
-    RedmineSlackNotification.stub(:config, { 'projects' => { 'invalid' => false } }) do
+    Slackmine.stub(:config, { 'projects' => { 'invalid' => false } }) do
       assert_empty WORK.integrations
     end
     @settings['projects'] = { 'invalid' => false }
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       assert_equal 1, WORK.integrations.length
     end
   end
@@ -2113,7 +2113,7 @@ class WorkObjectDetailsTest < Minitest::Test
     previous = ENV['SLACK_SIGNING_SECRET']
     ENV['SLACK_SIGNING_SECRET'] = 'environment-test-secret'
     @settings['slack']['events'].delete('signing_secret')
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       assert_equal 'environment-test-secret', WORK.integrations.first['signing_secret']
     end
   ensure
@@ -2122,10 +2122,10 @@ class WorkObjectDetailsTest < Minitest::Test
 
   def capture_details
     calls = []
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       Issue.stub(:find_by, @issue) do
         User.stub(:find_by, @user) do
-          RedmineSlackNotification.stub(:slack_api, ->(method, body, token, **options) {
+          Slackmine.stub(:slack_api, ->(method, body, token, **options) {
             calls << [method, body, token, options]
             { 'ok' => true }
           }) { WORK.present_details('ATEST', 'TTEST', @event) }
@@ -2159,10 +2159,10 @@ class WorkObjectDetailsTest < Minitest::Test
               'links' => [{ 'url' => @url }, { 'url' => @url },
                           { 'url' => 'https://other.example.com/issues/7' }] }
     calls = []
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       Issue.stub(:find_by, @issue) do
         User.stub(:find_by, @user) do
-          RedmineSlackNotification.stub(:slack_api, ->(*args, **options) {
+          Slackmine.stub(:slack_api, ->(*args, **options) {
             calls << [*args, options]
             { 'ok' => true }
           }) { WORK.unfurl_links('ATEST', 'TTEST', event) }
@@ -2179,17 +2179,17 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal 1, entities.length
     assert_equal @url, entities.first['app_unfurl_url']
     assert_equal 'Current title', entities.first.dig('entity_payload', 'attributes', 'title', 'text')
-    assert_equal %w[redmine_add_comment redmine_open_issue], entities.first.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
+    assert_equal %w[slackmine_add_comment slackmine_open_issue], entities.first.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
   end
 
   def test_link_unfurl_uses_message_target_and_rejects_inaccessible_issues
     event = { 'type' => 'link_shared', 'user' => 'U123', 'channel' => 'C123',
               'message_ts' => '123.456', 'links' => [{ 'url' => @url }] }
     calls = []
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       Issue.stub(:find_by, @issue) do
         User.stub(:find_by, @user) do
-          RedmineSlackNotification.stub(:slack_api, ->(*args, **options) {
+          Slackmine.stub(:slack_api, ->(*args, **options) {
             calls << [*args, options]
             { 'ok' => true }
           }) do
@@ -2263,21 +2263,21 @@ class WorkObjectDetailsTest < Minitest::Test
   end
 
   def test_deleted_issue_does_not_raise_or_send_content
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       Issue.stub(:find_by, nil) do
-        RedmineSlackNotification.stub(:slack_api, ->(*) { flunk 'Unexpected Slack request' }) do
+        Slackmine.stub(:slack_api, ->(*) { flunk 'Unexpected Slack request' }) do
           assert_nil WORK.present_details('ATEST', 'TTEST', @event)
         end
       end
     end
   end
 
-  def test_missing_and_ambiguous_redmine_user_mappings_are_denied
-    RedmineSlackNotification.stub(:config, @settings) do
+  def test_missing_and_ambiguous_slackmine_user_mappings_are_denied
+    Slackmine.stub(:config, @settings) do
       User.stub(:find_by, nil) { assert_nil WORK.viewer_for('U123') }
     end
     @settings['users']['another'] = 'U123'
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       User.stub(:find_by, ->(**keys) { keys[:login] == 'alice' ? @user : OpenStruct.new(id: 4, active?: true) }) do
         assert_nil WORK.viewer_for('U123')
       end
@@ -2305,7 +2305,7 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal '4', fields.dig('priority', 'edit', 'select', 'current_value')
     assert_equal true, fields.dig('due_date', 'edit', 'enabled')
     metadata = capture_details.first[1]['metadata']
-    assert_equal %w[redmine_edit_issue redmine_assign_to_me], metadata.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
+    assert_equal %w[slackmine_edit_issue slackmine_assign_to_me], metadata.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
     assert_equal 'new_comment', metadata.dig('entity_payload', 'custom_fields', 1, 'key')
     @settings['slack']['work_object_actions'] = false
     refute capture_details.first[1]['metadata'].dig('entity_payload', 'actions')
@@ -2314,7 +2314,7 @@ class WorkObjectDetailsTest < Minitest::Test
   def test_global_actions_enable_details_for_another_issue
     @settings['slack']['work_object_actions'] = true
     @issue.id = 8
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       assert WORK.actions_enabled?(@issue)
     end
   end
@@ -2363,10 +2363,10 @@ class WorkObjectDetailsTest < Minitest::Test
 
   def capture_interaction(payload)
     calls = []
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       Issue.stub(:find_by, @issue) do
         User.stub(:find_by, @user) do
-          RedmineSlackNotification.stub(:slack_api, ->(method, body, token, **options) {
+          Slackmine.stub(:slack_api, ->(method, body, token, **options) {
             calls << [method, body, token, options]
             method == 'conversations.replies' ? { 'messages' => [{ 'ts' => '123.456', 'text' => 'Original notification' }] } : { 'ok' => true }
           }) { WORK.process_interaction('ATEST', 'TTEST', payload) }
@@ -2378,7 +2378,7 @@ class WorkObjectDetailsTest < Minitest::Test
 
   def test_assign_status_and_comment_update_requires_enabled_actions
     prepare_action_issue
-    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_assign_to_me' }])
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_assign_to_me' }])
     calls = capture_interaction(button)
     assert_equal 3, @issue.assigned_to_id
     assert_equal [:journal, :attributes], @issue.events
@@ -2408,7 +2408,7 @@ class WorkObjectDetailsTest < Minitest::Test
     }
     metadata = capture_details.first[1]['metadata']
     assert_equal '課題を編集', metadata.dig('entity_payload', 'actions', 'primary_actions', 0, 'text')
-    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_edit_issue' }])
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_edit_issue' }])
     modal = capture_interaction(button).first[1]['view']
     assert_equal '編集 #7', modal.dig('title', 'text')
     assert_equal '保存', modal.dig('submit', 'text')
@@ -2421,10 +2421,10 @@ class WorkObjectDetailsTest < Minitest::Test
   def test_card_comment_action_requires_only_comment_permission_and_saves_only_notes
     prepare_action_issue
     @issue.define_singleton_method(:attributes_editable?) { |_viewer| false }
-    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_add_comment' }])
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_add_comment' }])
     button['container']['type'] = 'message_attachment'
     view = capture_interaction(button).first[1]['view']
-    assert_equal 'redmine_add_comment', view['callback_id']
+    assert_equal 'slackmine_add_comment', view['callback_id']
     assert_equal ['new_comment'], view['blocks'].map { |block| block['block_id'] }
     assert_equal false, view['blocks'].first['optional']
     edit = action_payload('view_submission', 'view')
@@ -2448,13 +2448,13 @@ class WorkObjectDetailsTest < Minitest::Test
       'change_assignee' => true, 'assign_to_me' => true, 'log_time' => true, 'start_work' => true, 'watch' => false
     }
     @settings['slack']['work_object_start_status_id'] = 3
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       actions = WORK.configured_actions(@issue)
-      assert_equal %w[redmine_open_issue redmine_add_comment], actions['primary_actions'].map { |a| a['action_id'] }
-      assert_equal %w[redmine_edit_issue redmine_edit_assignee redmine_assign_to_me redmine_log_time redmine_start_work], actions['overflow_actions'].map { |a| a['action_id'] }
+      assert_equal %w[slackmine_open_issue slackmine_add_comment], actions['primary_actions'].map { |a| a['action_id'] }
+      assert_equal %w[slackmine_edit_issue slackmine_edit_assignee slackmine_assign_to_me slackmine_log_time slackmine_start_work], actions['overflow_actions'].map { |a| a['action_id'] }
       assert_equal @url + '/time_entries/new', actions['overflow_actions'][3]['url']
       @settings['projects'] = { 'agentic' => { 'slack' => { 'work_object_buttons' => { 'add_comment' => true, 'open_issue' => false } } } }
-      assert_equal 'redmine_add_comment', WORK.configured_actions(@issue)['primary_actions'].first['action_id']
+      assert_equal 'slackmine_add_comment', WORK.configured_actions(@issue)['primary_actions'].first['action_id']
     end
   end
 
@@ -2462,7 +2462,7 @@ class WorkObjectDetailsTest < Minitest::Test
     prepare_action_issue
     @settings['slack']['work_object_buttons'] = { 'start_work' => true }
     @settings['slack']['work_object_start_status_id'] = 3
-    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_start_work' }])
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_start_work' }])
     capture_interaction(button)
     assert_equal 3, @issue.status_id
     refute capture_details.first[1].dig('metadata', 'entity_payload', 'actions', 'primary_actions').any?
@@ -2481,7 +2481,7 @@ class WorkObjectDetailsTest < Minitest::Test
     @settings['slack']['work_object_buttons'] = { 'complete_work' => true }
     refute capture_details.first[1].dig('metadata', 'entity_payload', 'actions', 'primary_actions').any?
     @settings['slack']['work_object_complete_status_id'] = 3
-    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_complete_work' }])
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_complete_work' }])
     capture_interaction(button)
     assert_equal 3, @issue.status_id
     refute capture_details.first[1].dig('metadata', 'entity_payload', 'actions', 'primary_actions').any?
@@ -2500,8 +2500,8 @@ class WorkObjectDetailsTest < Minitest::Test
     @settings['slack']['work_object_buttons'] = { 'complete_work' => true, 'start_work' => true }
     @settings['slack']['work_object_start_status_id'] = 3
     @settings['slack']['work_object_complete_status_id'] = 5
-    RedmineSlackNotification.stub(:config, @settings) do
-      [[1, 'redmine_start_work'], [3, 'redmine_complete_work'], [5, nil]].each do |status, expected|
+    Slackmine.stub(:config, @settings) do
+      [[1, 'slackmine_start_work'], [3, 'slackmine_complete_work'], [5, nil]].each do |status, expected|
         @issue.status_id = status
         actions = WORK.configured_actions(@issue)
         assert_equal [expected].compact, actions.fetch('primary_actions').map { |action| action['action_id'] }
@@ -2521,17 +2521,17 @@ class WorkObjectDetailsTest < Minitest::Test
     @issue.define_singleton_method(:watched_by?) { |_viewer| @watching == true }
     @issue.define_singleton_method(:valid_watcher?) { |_viewer| true }
     @issue.define_singleton_method(:set_watcher) { |_viewer, enabled| @watching = enabled }
-    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_watch' }])
-    RedmineSlackNotification.stub(:config, @settings) { assert_equal :saved, WORK.update_watch(@issue, @user, true) }
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_watch' }])
+    Slackmine.stub(:config, @settings) { assert_equal :saved, WORK.update_watch(@issue, @user, true) }
     assert @issue.watched_by?(@user)
     actions = capture_details.first[1].dig('metadata', 'entity_payload', 'actions', 'primary_actions')
-    assert_equal ['redmine_unwatch'], actions.map { |a| a['action_id'] }
-    RedmineSlackNotification.stub(:config, @settings) { assert_equal :unchanged, WORK.update_watch(@issue, @user, true) }
+    assert_equal ['slackmine_unwatch'], actions.map { |a| a['action_id'] }
+    Slackmine.stub(:config, @settings) { assert_equal :unchanged, WORK.update_watch(@issue, @user, true) }
     assert @issue.watched_by?(@user)
-    RedmineSlackNotification.stub(:config, @settings) { assert_equal :saved, WORK.update_watch(@issue, @user, false) }
+    Slackmine.stub(:config, @settings) { assert_equal :saved, WORK.update_watch(@issue, @user, false) }
     refute @issue.watched_by?(@user)
     @issue.define_singleton_method(:valid_watcher?) { |_viewer| false }
-    RedmineSlackNotification.stub(:config, @settings) { assert_equal :restricted, WORK.update_watch(@issue, @user, true) }
+    Slackmine.stub(:config, @settings) { assert_equal :restricted, WORK.update_watch(@issue, @user, true) }
     refute @issue.watched_by?(@user)
     @issue.define_singleton_method(:visible?) { |_viewer| false }
     assert_empty capture_interaction(button)
@@ -2543,7 +2543,7 @@ class WorkObjectDetailsTest < Minitest::Test
     @issue.define_singleton_method(:watched_by?) { |_viewer| @watching == true }
     @issue.define_singleton_method(:valid_watcher?) { |_viewer| true }
     @issue.define_singleton_method(:set_watcher) { |_viewer, enabled| @watching = enabled }
-    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_watch' }])
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_watch' }])
     button['container']['type'] = 'message_attachment'
     calls = capture_interaction(button)
     assert_equal 'views.open', calls.first[0]
@@ -2573,7 +2573,7 @@ class WorkObjectDetailsTest < Minitest::Test
     @issue.define_singleton_method(:watched_by?) { |_viewer| @watching == true }
     @issue.define_singleton_method(:valid_watcher?) { |_viewer| true }
     @issue.define_singleton_method(:set_watcher) { |_viewer, enabled| @watching = enabled }
-    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_watch' }])
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_watch' }])
     @issue.instance_variable_set(:@watching, true)
     form = capture_interaction(button).first[1]['view']
     assert_equal 'Unwatch', form.dig('submit', 'text')
@@ -2582,7 +2582,7 @@ class WorkObjectDetailsTest < Minitest::Test
     submit['view'] = form
     capture_interaction(submit)
     refute @issue.watched_by?(@user)
-    button['actions'][0]['action_id'] = 'redmine_unwatch'
+    button['actions'][0]['action_id'] = 'slackmine_unwatch'
     form = capture_interaction(button).first[1]['view']
     assert_equal 'Watch', form.dig('submit', 'text')
     refute @issue.watched_by?(@user)
@@ -2648,17 +2648,17 @@ class WorkObjectDetailsTest < Minitest::Test
     @issue.description = 'Original'
     @issue.define_singleton_method(:safe_attribute?) { |attribute, _viewer| attribute != 'description' }
     refute capture_details.first[1].dig('metadata', 'entity_payload', 'fields', 'description').key?('edit')
-    RedmineSlackNotification.stub(:config, @settings) { assert_equal :restricted, WORK.update_issue(@issue, @user, description: 'Forbidden') }
+    Slackmine.stub(:config, @settings) { assert_equal :restricted, WORK.update_issue(@issue, @user, description: 'Forbidden') }
     assert_equal 'Original', @issue.description
     @issue.define_singleton_method(:safe_attribute?) { |*| true }
     @issue.description = 'あ' * 3001
     refute capture_details.first[1].dig('metadata', 'entity_payload', 'fields', 'description').key?('edit')
     refute WORK.edit_modal(@issue, @user, {})['blocks'].any? { |block| block['block_id'] == 'description' }
-    RedmineSlackNotification.stub(:config, @settings) { assert_equal :restricted, WORK.update_issue(@issue, @user, description: 'Shortened') }
+    Slackmine.stub(:config, @settings) { assert_equal :restricted, WORK.update_issue(@issue, @user, description: 'Shortened') }
     assert_equal 3001, @issue.description.length
     assert_empty @issue.events
     @issue.description = 'Original'
-    RedmineSlackNotification.stub(:config, @settings) { assert_equal :restricted, WORK.update_issue(@issue, @user, description: 'a' * 3001) }
+    Slackmine.stub(:config, @settings) { assert_equal :restricted, WORK.update_issue(@issue, @user, description: 'a' * 3001) }
     assert_equal 'Original', @issue.description
   end
 
@@ -2671,7 +2671,7 @@ class WorkObjectDetailsTest < Minitest::Test
     submission['view'] = form
     capture_interaction(submission)
     assert_equal 'Modal update', @issue.description
-    form['callback_id'] = 'redmine_add_comment'
+    form['callback_id'] = 'slackmine_add_comment'
     form['state']['values'] = { 'description' => { 'description' => { 'value' => 'Must not change' } },
                               'new_comment' => { 'new_comment' => { 'value' => 'Only a comment' } } }
     capture_interaction(submission)
@@ -2681,10 +2681,10 @@ class WorkObjectDetailsTest < Minitest::Test
 
   def test_detail_edit_action_opens_the_issue_modal
     prepare_action_issue
-    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_edit_issue' }])
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_edit_issue' }])
     calls = capture_interaction(button)
     assert_equal 'views.open', calls.first[0]
-    assert_equal 'redmine_edit_issue', calls.first[1].dig('view', 'callback_id')
+    assert_equal 'slackmine_edit_issue', calls.first[1].dig('view', 'callback_id')
     refute_empty calls.first[1].dig('view', 'blocks')
     @issue.define_singleton_method(:attributes_editable?) { |_viewer| false }
     assert_empty capture_interaction(button)
@@ -2694,15 +2694,15 @@ class WorkObjectDetailsTest < Minitest::Test
     prepare_action_issue
     @issue.assigned_to_id = @user.id
     metadata = capture_details.first[1]['metadata']
-    assert_equal ['redmine_edit_issue'], metadata.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
-    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_assign_to_me' }])
+    assert_equal ['slackmine_edit_issue'], metadata.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_assign_to_me' }])
     capture_interaction(button)
     assert_empty @issue.events
     assert_equal @user.id, @issue.assigned_to_id
 
     @issue.assigned_to_id = nil
     metadata = capture_details.first[1]['metadata']
-    assert_equal %w[redmine_edit_issue redmine_assign_to_me], metadata.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
+    assert_equal %w[slackmine_edit_issue slackmine_assign_to_me], metadata.dig('entity_payload', 'actions', 'primary_actions').map { |action| action['action_id'] }
   end
 
   def test_assignee_picker_and_details_allow_unassignment_and_recheck_permissions
@@ -2713,7 +2713,7 @@ class WorkObjectDetailsTest < Minitest::Test
     refute fields['assignee'].key?('user')
     assert_equal @user.id.to_s, fields.dig('assignee', 'edit', 'select', 'current_value')
     assert_equal ['none', @user.id.to_s], fields.dig('assignee', 'edit', 'select', 'static_options').map { |o| o['value'] }
-    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_edit_assignee' }])
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_edit_assignee' }])
     button['container'].merge!('type' => 'message_attachment', 'channel_id' => 'C123', 'message_ts' => '123.456')
     calls = capture_interaction(button)
     assert_equal 'views.open', calls.first[0]
@@ -2755,17 +2755,17 @@ class WorkObjectDetailsTest < Minitest::Test
   def test_main_card_opens_modal_and_saves_priority_due_date_and_status
     @settings['slack']['work_object_fields'] = { 'priority' => true }
     prepare_action_issue
-    click = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_edit_issue' }])
+    click = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_edit_issue' }])
     click['container'].merge!('type' => 'message_attachment', 'channel_id' => 'C123', 'message_ts' => '123.456')
     calls = capture_interaction(click)
     assert_equal 'views.open', calls.first[0]
     modal = calls.first[1]['view']
-    assert_equal 'redmine_edit_issue', modal['callback_id']
+    assert_equal 'slackmine_edit_issue', modal['callback_id']
     assert_equal '2026-10-10', modal['blocks'].find { |block| block['block_id'] == 'due_date' }.dig('element', 'initial_date')
     assert_equal '4', modal['blocks'].find { |block| block['block_id'] == 'priority' }.dig('element', 'initial_option', 'value')
 
     edit = action_payload('view_submission', 'view')
-    edit['view'] = { 'type' => 'modal', 'callback_id' => 'redmine_edit_issue',
+    edit['view'] = { 'type' => 'modal', 'callback_id' => 'slackmine_edit_issue',
                      'private_metadata' => modal['private_metadata'], 'state' => { 'values' => {
                        'status' => { 'status' => { 'selected_option' => { 'value' => '3' } } },
                        'priority' => { 'priority' => { 'selected_option' => { 'value' => '5' } } },
@@ -2787,7 +2787,7 @@ class WorkObjectDetailsTest < Minitest::Test
     prepare_action_issue
     @issue.assigned_to_id = @user.id
     click = action_payload('block_actions', 'container', 'actions' => [
-      { 'action_id' => 'redmine_edit_issue', 'value' => 'redmine_issue:7' }
+      { 'action_id' => 'slackmine_edit_issue', 'value' => 'slackmine_issue:7' }
     ])
     click['container'] = { 'type' => 'message_attachment', 'is_ephemeral' => true,
                            'channel_id' => 'D123', 'message_ts' => '123.456' }
@@ -2812,12 +2812,12 @@ class WorkObjectDetailsTest < Minitest::Test
   def test_ephemeral_button_identity_requires_valid_value_and_existing_authorization
     prepare_action_issue
     click = action_payload('block_actions', 'container', 'actions' => [
-      { 'action_id' => 'redmine_edit_issue', 'value' => 'redmine_issue:7' }
+      { 'action_id' => 'slackmine_edit_issue', 'value' => 'slackmine_issue:7' }
     ])
     click['container'] = { 'type' => 'message_attachment', 'is_ephemeral' => true }
-    click['actions'].first['value'] = 'redmine_issue:7 trailing'
+    click['actions'].first['value'] = 'slackmine_issue:7 trailing'
     assert_empty capture_interaction(click)
-    click['actions'].first['value'] = 'redmine_issue:7'
+    click['actions'].first['value'] = 'slackmine_issue:7'
     click['container']['is_ephemeral'] = false
     assert_empty capture_interaction(click)
     click['container']['is_ephemeral'] = true
@@ -2834,9 +2834,9 @@ class WorkObjectDetailsTest < Minitest::Test
 
   def test_work_object_buttons_carry_identity_for_ephemeral_interactions
     prepare_action_issue
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       actions = WORK.configured_actions(@issue)['primary_actions']
-      assert_equal ['redmine_issue:7'], actions.map { |action| action['value'] }.uniq
+      assert_equal ['slackmine_issue:7'], actions.map { |action| action['value'] }.uniq
     end
   end
 
@@ -2844,7 +2844,7 @@ class WorkObjectDetailsTest < Minitest::Test
     prepare_action_issue
     @issue.assigned_to_id = nil
     @issue.assigned_to = nil
-    click = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_edit_issue' }])
+    click = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_edit_issue' }])
     click['container'].merge!('type' => 'message_attachment', 'channel_id' => 'C123', 'message_ts' => '123.456')
     modal = capture_interaction(click).first[1]['view']
     assignee = modal['blocks'].find { |block| block['block_id'] == 'assignee' }
@@ -2852,7 +2852,7 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal 'none', assignee.dig('element', 'initial_option', 'value')
 
     edit = action_payload('view_submission', 'view')
-    edit['view'] = { 'type' => 'modal', 'callback_id' => 'redmine_edit_issue',
+    edit['view'] = { 'type' => 'modal', 'callback_id' => 'slackmine_edit_issue',
                      'private_metadata' => modal['private_metadata'],
                      'state' => { 'values' => { 'assignee' => { 'assignee' => {
                        'selected_option' => { 'value' => '3' }
@@ -2867,7 +2867,7 @@ class WorkObjectDetailsTest < Minitest::Test
 
   def test_main_card_assignment_refreshes_card_without_opening_detail_pane
     prepare_action_issue
-    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_assign_to_me' }])
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_assign_to_me' }])
     button['container'].merge!('type' => 'message_attachment', 'channel_id' => 'C123', 'message_ts' => '123.456')
     calls = capture_interaction(button)
     assert_equal 3, @issue.assigned_to_id
@@ -2877,14 +2877,14 @@ class WorkObjectDetailsTest < Minitest::Test
   def test_failed_card_refresh_does_not_retry_saved_comment
     prepare_action_issue
     edit = action_payload('view_submission', 'view')
-    edit['view'] = { 'type' => 'modal', 'callback_id' => 'redmine_edit_issue',
+    edit['view'] = { 'type' => 'modal', 'callback_id' => 'slackmine_edit_issue',
                      'private_metadata' => JSON.generate(@event.slice('entity_url', 'external_ref').merge(
                        'channel_id' => 'C123', 'message_ts' => '123.456')),
                      'state' => { 'values' => { 'new_comment' => { 'new_comment' => { 'value' => 'Once' } } } } }
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       Issue.stub(:find_by, @issue) do
         User.stub(:find_by, @user) do
-          RedmineSlackNotification.stub(:slack_api, ->(method, *) {
+          Slackmine.stub(:slack_api, ->(method, *) {
             method == 'conversations.replies' ? { 'messages' => [{ 'ts' => '123.456', 'text' => 'Original notification' }] } : raise(StandardError, 'refresh failed')
           }) do
             WORK.process_interaction('ATEST', 'TTEST', edit)
@@ -2897,7 +2897,7 @@ class WorkObjectDetailsTest < Minitest::Test
 
   def test_invalid_priority_and_date_do_not_write
     prepare_action_issue
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       assert_equal :restricted, WORK.update_issue(@issue, @user, priority_id: '999')
       assert_equal :restricted, WORK.update_issue(@issue, @user, due_date: '2026-02-30')
       assert_equal 4, @issue.priority_id
@@ -2934,9 +2934,9 @@ class NotificationDisplaySettingsTest < Minitest::Test
       'custom_fields' => { 'default' => false, '42' => true }
     } } } }
 
-    RedmineSlackNotification.stub(:config, settings) do
-      RedmineSlackNotification::Formatter.stub(:change_fields, no_changes) do
-        blocks = RedmineSlackNotification::Formatter.issue_payload(issue, actor: OpenStruct.new(name: 'Alice'), action: 'created')
+    Slackmine.stub(:config, settings) do
+      Slackmine::Formatter.stub(:change_fields, no_changes) do
+        blocks = Slackmine::Formatter.issue_payload(issue, actor: OpenStruct.new(name: 'Alice'), action: 'created')
                                             .dig('attachments', 0, 'blocks')
         fields = blocks.flat_map { |block| block.fetch('fields', []) }.map { |entry| entry.fetch('text') }
         assert fields.any? { |value| value == "*Target version*\nRelease 2" }
@@ -2954,9 +2954,9 @@ class NotificationDisplaySettingsTest < Minitest::Test
     no_changes = []
     no_changes.define_singleton_method(:present?) { false }
 
-    RedmineSlackNotification.stub(:config, {}) do
-      RedmineSlackNotification::Formatter.stub(:change_fields, no_changes) do
-        fields = RedmineSlackNotification::Formatter.issue_payload(
+    Slackmine.stub(:config, {}) do
+      Slackmine::Formatter.stub(:change_fields, no_changes) do
+        fields = Slackmine::Formatter.issue_payload(
           issue, actor: OpenStruct.new(name: 'Alice'), action: 'created'
         ).dig('attachments', 0, 'blocks').flat_map { |block| block.fetch('fields', []) }
         assert_equal 5, fields.length
@@ -2977,9 +2977,9 @@ class NotificationDisplaySettingsTest < Minitest::Test
       'custom_fields' => { 'default' => false, '42' => true }
     } } } }
 
-    RedmineSlackNotification.stub(:config, settings) do
+    Slackmine.stub(:config, settings) do
       %w[created updated].each do |action|
-        fields = RedmineSlackNotification::Formatter.issue_payload(
+        fields = Slackmine::Formatter.issue_payload(
           issue, actor: nil, action: action
         ).dig('attachments', 0, 'blocks').flat_map { |block| block.fetch('fields', []) }
         assert_equal ["*Status*\nNot set", "*Target version*\nNot set", "*Customer*\nNot set"],
@@ -3002,9 +3002,9 @@ class NotificationDisplaySettingsTest < Minitest::Test
       'project' => false, 'status' => true, 'target_version' => true
     } } } }
 
-    RedmineSlackNotification.stub(:config, settings) do
+    Slackmine.stub(:config, settings) do
       heading = ->(block) { block['text']['text'] if block['text'].is_a?(Hash) }
-      payload = RedmineSlackNotification::Formatter.issue_payload(
+      payload = Slackmine::Formatter.issue_payload(
         issue, actor: OpenStruct.new(name: 'Alice'), action: 'updated', details: details
       )
       blocks = payload.dig('attachments', 0, 'blocks')
@@ -3016,7 +3016,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
       assert blocks.any? { |block| heading.call(block) == '*Metadata*' }
       assert blocks.any? { |block| heading.call(block) == '*Changes*' }
 
-      combined = RedmineSlackNotification::Formatter.journal_payload(
+      combined = Slackmine::Formatter.journal_payload(
         issue, actor: OpenStruct.new(name: 'Alice'), notes: 'Comment', details: details
       ).dig('attachments', 0, 'blocks')
       assert combined.any? { |block| heading.call(block) == '*Metadata*' }
@@ -3029,10 +3029,10 @@ class NotificationDisplaySettingsTest < Minitest::Test
       'created' => { 'project' => true, 'status' => false },
       'updated' => { 'project' => false, 'status' => true }
     } } } }
-    RedmineSlackNotification.stub(:config, settings) do
-      assert RedmineSlackNotification::Formatter.metadata_enabled?('issue', 'project', action: 'created')
-      refute RedmineSlackNotification::Formatter.metadata_enabled?('issue', 'project', action: 'updated')
-      assert RedmineSlackNotification::Formatter.metadata_enabled?('issue', 'status', action: 'updated')
+    Slackmine.stub(:config, settings) do
+      assert Slackmine::Formatter.metadata_enabled?('issue', 'project', action: 'created')
+      refute Slackmine::Formatter.metadata_enabled?('issue', 'project', action: 'updated')
+      assert Slackmine::Formatter.metadata_enabled?('issue', 'status', action: 'updated')
     end
   end
 
@@ -3049,10 +3049,10 @@ class NotificationDisplaySettingsTest < Minitest::Test
     settings = { 'slack' => { 'issue_changes_when_hidden' => false,
                               'metadata' => { 'issue' => { 'target_version' => true, 'status' => false } } } }
 
-    RedmineSlackNotification.stub(:config, settings) do
+    Slackmine.stub(:config, settings) do
       heading = ->(block) { block['text']['text'] if block['text'].is_a?(Hash) }
-      [RedmineSlackNotification::Formatter.issue_payload(issue, actor: nil, action: 'updated', details: details),
-       RedmineSlackNotification::Formatter.journal_payload(issue, actor: nil, notes: 'Comment', details: details)].each do |payload|
+      [Slackmine::Formatter.issue_payload(issue, actor: nil, action: 'updated', details: details),
+       Slackmine::Formatter.journal_payload(issue, actor: nil, notes: 'Comment', details: details)].each do |payload|
         blocks = payload.dig('attachments', 0, 'blocks')
         assert blocks.flat_map { |block| block.fetch('fields', []) }
                      .any? { |field| field['text'] == "*Target version*\nRelease 2" }
@@ -3062,7 +3062,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
         assert change_fields.any? { |field| field.start_with?('*Target version*') && field.include?('→') }
         refute change_fields.any? { |field| field.start_with?('*Status*') }
       end
-      combined_blocks = RedmineSlackNotification::Formatter.journal_payload(
+      combined_blocks = Slackmine::Formatter.journal_payload(
         issue, actor: nil, notes: 'Comment', details: details
       ).dig('attachments', 0, 'blocks')
       assert combined_blocks.any? { |block| heading.call(block).to_s.include?('Comment') }
@@ -3087,15 +3087,15 @@ class NotificationDisplaySettingsTest < Minitest::Test
              .map { |entry| entry.fetch('text') }
     end
 
-    RedmineSlackNotification.stub(:config, settings) do
-      RedmineSlackNotification::Formatter.stub(:change_fields, no_changes) do
-        fields = metadata.call(RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'created'))
+    Slackmine.stub(:config, settings) do
+      Slackmine::Formatter.stub(:change_fields, no_changes) do
+        fields = metadata.call(Slackmine::Formatter.issue_payload(issue, actor: actor, action: 'created'))
         refute fields.any? { |value| value.start_with?('*Project*') }
         assert fields.any? { |value| value.start_with?('*Tracker*') }
       end
 
       wiki = OpenStruct.new(page: OpenStruct.new(title: 'Home'), comments: '')
-      fields = metadata.call(RedmineSlackNotification::Formatter.wiki_payload(wiki, project, actor: actor, action: 'updated'))
+      fields = metadata.call(Slackmine::Formatter.wiki_payload(wiki, project, actor: actor, action: 'updated'))
       refute fields.any? { |value| value.start_with?('*Changed location*') }
       assert fields.any? { |value| value.start_with?('*Project*') }
 
@@ -3107,7 +3107,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
         'Project' => { hidden: '*Updated by*', visible: '*Project*' }
       }
       cases.each do |noun, checks|
-        fields = metadata.call(RedmineSlackNotification::Formatter.generic_payload(
+        fields = metadata.call(Slackmine::Formatter.generic_payload(
           noun: noun, action: 'updated', subject: noun, url: 'https://example.com',
           project: project, actor: actor, fields: checks.fetch(:fields, [])
         ))
@@ -3124,9 +3124,9 @@ class NotificationDisplaySettingsTest < Minitest::Test
       'news' => false, 'project' => { 'project' => false, 'updater' => false }
     } } }
 
-    RedmineSlackNotification.stub(:config, settings) do
+    Slackmine.stub(:config, settings) do
       %w[News Project].each do |noun|
-        blocks = RedmineSlackNotification::Formatter.generic_payload(
+        blocks = Slackmine::Formatter.generic_payload(
           noun: noun, action: 'updated', subject: noun, url: 'https://example.com',
           project: project, actor: actor
         ).dig('attachments', 0, 'blocks')
@@ -3144,10 +3144,10 @@ class NotificationDisplaySettingsTest < Minitest::Test
     empty_changes = []
     empty_changes.define_singleton_method(:present?) { false }
 
-    RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
-      updated = RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'updated')
-      created = RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'created')
-      combined = RedmineSlackNotification::Formatter.journal_payload(
+    Slackmine::Formatter.stub(:change_fields, empty_changes) do
+      updated = Slackmine::Formatter.issue_payload(issue, actor: actor, action: 'updated')
+      created = Slackmine::Formatter.issue_payload(issue, actor: actor, action: 'created')
+      combined = Slackmine::Formatter.journal_payload(
         issue, actor: actor, notes: '', details: [OpenStruct.new(property: 'attr', prop_key: 'status_id')]
       )
       assert_equal '🔄 Alice *Issue updated*', updated.dig('attachments', 0, 'blocks', 0, 'text', 'text')
@@ -3155,11 +3155,11 @@ class NotificationDisplaySettingsTest < Minitest::Test
       assert_equal '🆕 *Issue created*', created.dig('attachments', 0, 'blocks', 0, 'text', 'text')
     end
 
-    RedmineSlackNotification.stub(:config, { 'messages' => { 'templates' => {
+    Slackmine.stub(:config, { 'messages' => { 'templates' => {
       'issue_updated_header' => '*%{event}* by %{actor}'
     } } }) do
-      RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
-        customized = RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'updated')
+      Slackmine::Formatter.stub(:change_fields, empty_changes) do
+        customized = Slackmine::Formatter.issue_payload(issue, actor: actor, action: 'updated')
         assert_equal '🔄 *Issue updated* by Alice', customized.dig('attachments', 0, 'blocks', 0, 'text', 'text')
       end
     end
@@ -3170,24 +3170,24 @@ class NotificationDisplaySettingsTest < Minitest::Test
     issue = OpenStruct.new(id: 7, subject: 'Subject', description: '', project: project,
                            tracker: OpenStruct.new(name: 'Task'))
     actor = OpenStruct.new(name: 'Alice')
-    changes = [[RedmineSlackNotification::Formatter.field_label('status'), 'Open → Closed']]
+    changes = [[Slackmine::Formatter.field_label('status'), 'Open → Closed']]
     changes.define_singleton_method(:present?) { true }
     no_changes = []
     no_changes.define_singleton_method(:present?) { false }
 
-    RedmineSlackNotification::Formatter.stub(:change_fields, no_changes) do
-      created = RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'created')
-      removed = RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'deleted')
-      comment_only = RedmineSlackNotification::Formatter.journal_payload(issue, actor: actor, notes: 'Comment')
+    Slackmine::Formatter.stub(:change_fields, no_changes) do
+      created = Slackmine::Formatter.issue_payload(issue, actor: actor, action: 'created')
+      removed = Slackmine::Formatter.issue_payload(issue, actor: actor, action: 'deleted')
+      comment_only = Slackmine::Formatter.journal_payload(issue, actor: actor, notes: 'Comment')
       assert created.dig('attachments', 0, 'blocks').any? { |block| block.dig('text', 'text') == '*Metadata*' }
       [removed, comment_only].each do |message|
         refute message.dig('attachments', 0, 'blocks').any? { |block| block.dig('text', 'text') == '*Metadata*' }
       end
     end
 
-    RedmineSlackNotification::Formatter.stub(:change_fields, changes) do
-      updated = RedmineSlackNotification::Formatter.issue_payload(issue, actor: actor, action: 'updated')
-      commented = RedmineSlackNotification::Formatter.journal_payload(
+    Slackmine::Formatter.stub(:change_fields, changes) do
+      updated = Slackmine::Formatter.issue_payload(issue, actor: actor, action: 'updated')
+      commented = Slackmine::Formatter.journal_payload(
         issue, actor: actor, notes: 'Comment', details: [OpenStruct.new(property: 'attr', prop_key: 'status_id')]
       )
       [updated, commented].each do |message|
@@ -3210,8 +3210,8 @@ class NotificationDisplaySettingsTest < Minitest::Test
       }
     }
     project = OpenStruct.new(name: 'Agentic')
-    RedmineSlackNotification.stub(:config, settings) do
-      payload = RedmineSlackNotification::Formatter.generic_payload(
+    Slackmine.stub(:config, settings) do
+      payload = Slackmine::Formatter.generic_payload(
         noun: 'News', action: 'updated', subject: 'Headline', url: 'https://example.com/news/1',
         project: project, actor: OpenStruct.new(name: 'Alice'), summary: 'Changed text'
       )
@@ -3228,9 +3228,9 @@ class NotificationDisplaySettingsTest < Minitest::Test
   end
 
   def test_invalid_color_and_incomplete_templates_use_safe_defaults
-    RedmineSlackNotification.stub(:config, { 'slack' => { 'attachment_color' => 'blue' },
+    Slackmine.stub(:config, { 'slack' => { 'attachment_color' => 'blue' },
                                           'messages' => { 'templates' => { 'generic_fallback' => '%{missing}' } } }) do
-      payload = RedmineSlackNotification::Formatter.generic_payload(
+      payload = Slackmine::Formatter.generic_payload(
         noun: 'Project', action: 'updated', subject: 'Agentic', url: 'https://example.com/projects/agentic',
         project: OpenStruct.new(name: 'Agentic'), actor: OpenStruct.new(name: 'Alice')
       )
@@ -3244,20 +3244,20 @@ class NotificationDisplaySettingsTest < Minitest::Test
                                  'sections' => { 'comment' => 'Note' },
                                  'images' => { 'link_label' => 'Picture: %{name}' } } }
     attachment = OpenStruct.new(id: 42, filename: 'screenshot.png')
-    RedmineSlackNotification.stub(:config, settings) do
-      block = RedmineSlackNotification::Formatter.body_diff_blocks('Note', '', '![](screenshot.png)').first
-      payload = RedmineSlackNotification::Formatter.payload('fallback', blocks: [block])
+    Slackmine.stub(:config, settings) do
+      block = Slackmine::Formatter.body_diff_blocks('Note', '', '![](screenshot.png)').first
+      payload = Slackmine::Formatter.payload('fallback', blocks: [block])
       Journal.stub(:find_by, OpenStruct.new(journalized: Issue.new(1), private_notes?: false, attachments: [attachment])) do
-        RedmineSlackNotification.stub(:upload_image, ->(*) { flunk 'diff image was uploaded' }) do
-          RedmineSlackNotification.add_images(payload, ['screenshot.png'], 1, 'token')
+        Slackmine.stub(:upload_image, ->(*) { flunk 'diff image was uploaded' }) do
+          Slackmine.add_images(payload, ['screenshot.png'], 1, 'token')
         end
       end
       assert_includes payload.dig('attachments', 0, 'blocks', 0, 'text'), '**Changes in Note**'
 
-      image_payload = RedmineSlackNotification::Formatter.payload('fallback', blocks: [RedmineSlackNotification::Formatter.section_text('![](screenshot.png)')])
+      image_payload = Slackmine::Formatter.payload('fallback', blocks: [Slackmine::Formatter.section_text('![](screenshot.png)')])
       Journal.stub(:find_by, OpenStruct.new(journalized: Issue.new(1), private_notes?: false, attachments: [attachment])) do
-        RedmineSlackNotification.stub(:upload_image, nil) do
-          RedmineSlackNotification.add_images(image_payload, ['screenshot.png'], 1, 'token')
+        Slackmine.stub(:upload_image, nil) do
+          Slackmine.add_images(image_payload, ['screenshot.png'], 1, 'token')
         end
       end
       assert_includes image_payload.dig('attachments', 0, 'blocks', 0, 'text', 'text'), 'Picture: screenshot.png'
@@ -3276,10 +3276,10 @@ class NotificationDisplaySettingsTest < Minitest::Test
     issue = OpenStruct.new(id: 7, subject: 'Subject', project: project, tracker: OpenStruct.new(name: 'Task'))
     empty_changes = []
     empty_changes.define_singleton_method(:present?) { false }
-    RedmineSlackNotification.stub(:config, settings) do
-      assert_equal 'Ticket opened', RedmineSlackNotification::Formatter.event_label('Issue', 'created')
-      RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
-        card = RedmineSlackNotification::Formatter.journal_payload(
+    Slackmine.stub(:config, settings) do
+      assert_equal 'Ticket opened', Slackmine::Formatter.event_label('Issue', 'created')
+      Slackmine::Formatter.stub(:change_fields, empty_changes) do
+        card = Slackmine::Formatter.journal_payload(
           issue, actor: OpenStruct.new(name: 'Editor'), notes: '', comment_action: 'deleted', previous_notes: 'old note'
         ).dig('attachments', 0)
         assert_includes card.dig('blocks', 0, 'text', 'text'), 'Note removed'
@@ -3287,15 +3287,15 @@ class NotificationDisplaySettingsTest < Minitest::Test
         refute card['blocks'].any? { |block| block['type'] == 'section' && block.dig('text', 'text') == '*Properties*' }
       end
       wiki = OpenStruct.new(page: OpenStruct.new(title: 'Home'), comments: '')
-      wiki_card = RedmineSlackNotification::Formatter.wiki_payload(wiki, project, actor: OpenStruct.new(name: 'Editor'), action: 'updated').dig('attachments', 0)
+      wiki_card = Slackmine::Formatter.wiki_payload(wiki, project, actor: OpenStruct.new(name: 'Editor'), action: 'updated').dig('attachments', 0)
       assert_includes wiki_card.dig('blocks', 0, 'text', 'text'), 'Page revised'
 
-      image_payload = RedmineSlackNotification::Formatter.payload('fallback', blocks: [
+      image_payload = Slackmine::Formatter.payload('fallback', blocks: [
         { 'type' => 'image', 'slack_file' => { 'id' => 'F1' }, 'alt_text' => 'Screenshot' }
       ])
       calls = []
-      RedmineSlackNotification.stub(:slack_api, ->(method, body, _token) { calls << [method, body]; { 'ok' => true, 'ts' => '1.2' } }) do
-        RedmineSlackNotification.post_message(image_payload, 'C1', 'token')
+      Slackmine.stub(:slack_api, ->(method, body, _token) { calls << [method, body]; { 'ok' => true, 'ts' => '1.2' } }) do
+        Slackmine.post_message(image_payload, 'C1', 'token')
       end
       assert_equal 'fallback', calls.first[1]['text']
       assert_equal 'fallback', calls.first[1].dig('blocks', 0, 'text', 'text')
@@ -3310,13 +3310,13 @@ class BodyDiffNotificationTest < Minitest::Test
   end
 
   def test_yaml_body_diff_setting_defaults_to_true_and_false_disables_it
-    RedmineSlackNotification.stub(:config, {}) do
-      assert RedmineSlackNotification.body_diff_enabled?
+    Slackmine.stub(:config, {}) do
+      assert Slackmine.body_diff_enabled?
     end
-    RedmineSlackNotification.stub(:config, { 'slack' => { 'body_diff' => false } }) do
-      refute RedmineSlackNotification.body_diff_enabled?
-      refute RedmineSlackNotification.body_diff_enabled?(:issue_comment)
-      refute RedmineSlackNotification.body_diff_enabled?(:news_description)
+    Slackmine.stub(:config, { 'slack' => { 'body_diff' => false } }) do
+      refute Slackmine.body_diff_enabled?
+      refute Slackmine.body_diff_enabled?(:issue_comment)
+      refute Slackmine.body_diff_enabled?(:news_description)
     end
   end
 
@@ -3326,17 +3326,17 @@ class BodyDiffNotificationTest < Minitest::Test
       'wiki' => { 'body' => false },
       'news' => { 'description' => false, 'comment' => true }
     } } }
-    RedmineSlackNotification.stub(:config, settings) do
-      assert RedmineSlackNotification.body_diff_enabled?(:issue_description)
-      refute RedmineSlackNotification.body_diff_enabled?(:issue_comment)
-      refute RedmineSlackNotification.body_diff_enabled?(:wiki_body)
-      refute RedmineSlackNotification.body_diff_enabled?(:news_description)
-      assert RedmineSlackNotification.body_diff_enabled?(:news_comment)
+    Slackmine.stub(:config, settings) do
+      assert Slackmine.body_diff_enabled?(:issue_description)
+      refute Slackmine.body_diff_enabled?(:issue_comment)
+      refute Slackmine.body_diff_enabled?(:wiki_body)
+      refute Slackmine.body_diff_enabled?(:news_description)
+      assert Slackmine.body_diff_enabled?(:news_comment)
     end
-    RedmineSlackNotification.stub(:config, { 'slack' => { 'body_diff' => { 'news' => false } } }) do
-      refute RedmineSlackNotification.body_diff_enabled?(:news_description)
-      refute RedmineSlackNotification.body_diff_enabled?(:news_comment)
-      assert RedmineSlackNotification.body_diff_enabled?(:issue_comment)
+    Slackmine.stub(:config, { 'slack' => { 'body_diff' => { 'news' => false } } }) do
+      refute Slackmine.body_diff_enabled?(:news_description)
+      refute Slackmine.body_diff_enabled?(:news_comment)
+      assert Slackmine.body_diff_enabled?(:issue_comment)
     end
   end
 
@@ -3346,9 +3346,9 @@ class BodyDiffNotificationTest < Minitest::Test
     empty_changes = []
     empty_changes.define_singleton_method(:present?) { false }
     settings = { 'slack' => { 'body_diff' => { 'issue' => { 'description' => true, 'comment' => false } } } }
-    RedmineSlackNotification.stub(:config, settings) do
-      RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
-        blocks = RedmineSlackNotification::Formatter.journal_payload(
+    Slackmine.stub(:config, settings) do
+      Slackmine::Formatter.stub(:change_fields, empty_changes) do
+        blocks = Slackmine::Formatter.journal_payload(
           issue, actor: OpenStruct.new(name: 'Editor'), notes: 'new note ![](screenshot.png)',
           details: [detail], comment_action: 'updated', previous_notes: 'old note'
         ).dig('attachments', 0, 'blocks')
@@ -3362,9 +3362,9 @@ class BodyDiffNotificationTest < Minitest::Test
   def test_wiki_news_body_and_news_comment_use_their_own_settings
     settings = { 'slack' => { 'body_diff' => { 'wiki' => { 'body' => false },
                                              'news' => { 'description' => false, 'comment' => true } } } }
-    RedmineSlackNotification.stub(:config, settings) do
+    Slackmine.stub(:config, settings) do
       wiki = OpenStruct.new(page: OpenStruct.new(title: 'Home'), comments: '')
-      wiki_blocks = RedmineSlackNotification::Formatter.wiki_payload(
+      wiki_blocks = Slackmine::Formatter.wiki_payload(
         wiki, project, actor: OpenStruct.new(name: 'Editor'), action: 'updated', body_diff: ['old', 'new']
       ).dig('attachments', 0, 'blocks')
       assert wiki_blocks.any? { |block| block['type'] == 'section' && block.dig('text', 'text').to_s.include?("*Body*\nnew") }
@@ -3372,16 +3372,16 @@ class BodyDiffNotificationTest < Minitest::Test
 
       common = { action: 'updated', subject: 'Headline', url: 'https://example.com/news/1',
                  project: project, actor: OpenStruct.new(name: 'Editor'), body_diff: ['old', 'new'] }
-      news_blocks = RedmineSlackNotification::Formatter.generic_payload(noun: 'News', **common).dig('attachments', 0, 'blocks')
-      comment_blocks = RedmineSlackNotification::Formatter.generic_payload(noun: 'News comment', **common).dig('attachments', 0, 'blocks')
+      news_blocks = Slackmine::Formatter.generic_payload(noun: 'News', **common).dig('attachments', 0, 'blocks')
+      comment_blocks = Slackmine::Formatter.generic_payload(noun: 'News comment', **common).dig('attachments', 0, 'blocks')
       assert news_blocks.any? { |block| block['type'] == 'section' && block.dig('text', 'text').to_s.include?("*Summary*\nnew") }
       assert comment_blocks.any? { |block| block['type'] == 'markdown' && block['text'].include?('+ new') }
     end
   end
 
   def test_full_body_setting_shows_updated_text_for_description_wiki_and_comment
-    RedmineSlackNotification.stub(:config, { 'slack' => { 'body_diff' => false } }) do
-      formatter = RedmineSlackNotification::Formatter
+    Slackmine.stub(:config, { 'slack' => { 'body_diff' => false } }) do
+      formatter = Slackmine::Formatter
       {
         '説明' => '概要',
         '本文' => '本文',
@@ -3400,7 +3400,7 @@ class BodyDiffNotificationTest < Minitest::Test
     before = (1..20).map { |number| "unchanged #{number}" }
     after = before.dup
     after[9] = '**new value**'
-    block = RedmineSlackNotification::Formatter.body_diff_blocks('説明', before.join("\n"), after.join("\n")).first
+    block = Slackmine::Formatter.body_diff_blocks('説明', before.join("\n"), after.join("\n")).first
 
     assert_equal 'markdown', block['type']
     assert_includes block['text'], '```diff'
@@ -3408,7 +3408,7 @@ class BodyDiffNotificationTest < Minitest::Test
     assert_includes block['text'], '+ **new value**'
     refute_includes block['text'], "unchanged 1\n"
     assert_includes block['text'], '  …'
-    assert_equal '#6D5DFB', RedmineSlackNotification::Formatter.payload('fallback', blocks: [block]).dig('attachments', 0, 'color')
+    assert_equal '#6D5DFB', Slackmine::Formatter.payload('fallback', blocks: [block]).dig('attachments', 0, 'color')
   end
 
   def test_edited_issue_comment_renders_only_its_diff
@@ -3417,9 +3417,9 @@ class BodyDiffNotificationTest < Minitest::Test
     empty_changes = []
     empty_changes.define_singleton_method(:present?) { false }
     message = nil
-    RedmineSlackNotification.stub(:config, {}) do
-      RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
-        message = RedmineSlackNotification::Formatter.journal_payload(
+    Slackmine.stub(:config, {}) do
+      Slackmine::Formatter.stub(:change_fields, empty_changes) do
+        message = Slackmine::Formatter.journal_payload(
           issue, actor: OpenStruct.new(name: 'Editor'), notes: 'new text',
           comment_action: 'updated', previous_notes: 'old text'
         )
@@ -3440,9 +3440,9 @@ class BodyDiffNotificationTest < Minitest::Test
     empty_changes = []
     empty_changes.define_singleton_method(:present?) { false }
     message = nil
-    RedmineSlackNotification.stub(:config, { 'slack' => { 'body_diff' => false } }) do
-      RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
-        message = RedmineSlackNotification::Formatter.journal_payload(
+    Slackmine.stub(:config, { 'slack' => { 'body_diff' => false } }) do
+      Slackmine::Formatter.stub(:change_fields, empty_changes) do
+        message = Slackmine::Formatter.journal_payload(
           issue, actor: OpenStruct.new(name: 'Editor'), notes: '1. new text',
           comment_action: 'updated', previous_notes: '1. old text'
         )
@@ -3462,9 +3462,9 @@ class BodyDiffNotificationTest < Minitest::Test
     empty_changes = []
     empty_changes.define_singleton_method(:present?) { false }
     message = nil
-    RedmineSlackNotification.stub(:config, { 'slack' => { 'body_diff' => false } }) do
-      RedmineSlackNotification::Formatter.stub(:change_fields, empty_changes) do
-        message = RedmineSlackNotification::Formatter.journal_payload(
+    Slackmine.stub(:config, { 'slack' => { 'body_diff' => false } }) do
+      Slackmine::Formatter.stub(:change_fields, empty_changes) do
+        message = Slackmine::Formatter.journal_payload(
           issue, actor: OpenStruct.new(name: 'Editor'), notes: '',
           comment_action: 'deleted', previous_notes: "removed text\n![](old.png)"
         )
@@ -3479,17 +3479,17 @@ class BodyDiffNotificationTest < Minitest::Test
   end
 
   def test_body_diff_handles_code_fences_and_slack_markdown_budget
-    block = RedmineSlackNotification::Formatter.body_diff_blocks('本文', '```old', '```new').first
+    block = Slackmine::Formatter.body_diff_blocks('本文', '```old', '```new').first
     assert_includes block['text'], '````diff'
 
     existing = [{ 'type' => 'markdown', 'text' => 'x' * 11_800 }]
-    fallback = RedmineSlackNotification::Formatter.body_diff_blocks('本文', 'old', 'new', blocks: existing).first
+    fallback = Slackmine::Formatter.body_diff_blocks('本文', 'old', 'new', blocks: existing).first
     assert_equal 'section', fallback['type']
     assert_operator fallback.dig('text', 'text').length, :<, 3_000
   end
 
   def test_body_diff_handles_empty_and_normalized_line_endings
-    formatter = RedmineSlackNotification::Formatter
+    formatter = Slackmine::Formatter
     assert_empty formatter.body_diff_blocks('本文', "same\r\nline", "same\nline")
     removed = formatter.body_diff_blocks('本文', "old\ntext", '').first['text']
     assert_includes removed, '- old'
@@ -3500,7 +3500,7 @@ class BodyDiffNotificationTest < Minitest::Test
   def test_body_diff_truncates_large_changes_without_exceeding_limit
     before = (1..600).map { |number| "old #{number}" }.join("\n")
     after = (1..600).map { |number| "new #{number}" }.join("\n")
-    block = RedmineSlackNotification::Formatter.body_diff_blocks('本文', before, after).first
+    block = Slackmine::Formatter.body_diff_blocks('本文', before, after).first
     assert_operator block['text'].length, :<, 6_000
     assert_includes block['text'], 'Diff truncated.'
   end
@@ -3509,11 +3509,11 @@ class BodyDiffNotificationTest < Minitest::Test
     news = News.new(id: 17, title: 'Release', description: 'new body', project: project)
     news.define_singleton_method(:saved_change_to_description?) { true }
     news.define_singleton_method(:description_before_last_save) { 'old body' }
-    news.extend(RedmineSlackNotification::NewsPatch)
+    news.extend(Slackmine::NewsPatch)
     captured = nil
     formatter = ->(**kwargs) { captured = kwargs; :message }
-    RedmineSlackNotification::Formatter.stub(:generic_payload, formatter) do
-      RedmineSlackNotification.stub(:enqueue, ->(*) {}) do
+    Slackmine::Formatter.stub(:generic_payload, formatter) do
+      Slackmine.stub(:enqueue, ->(*) {}) do
         news.send(:notify_slack_generic, 'News', 'updated')
       end
     end
@@ -3525,11 +3525,11 @@ class BodyDiffNotificationTest < Minitest::Test
                              text: 'new body', comments: '')
     content.define_singleton_method(:saved_change_to_text?) { true }
     content.define_singleton_method(:text_before_last_save) { 'old body' }
-    content.extend(RedmineSlackNotification::WikiContentPatch)
+    content.extend(Slackmine::WikiContentPatch)
     captured = nil
     formatter = ->(*_args, **kwargs) { captured = kwargs; :message }
-    RedmineSlackNotification::Formatter.stub(:wiki_payload, formatter) do
-      RedmineSlackNotification.stub(:enqueue, ->(*) {}) do
+    Slackmine::Formatter.stub(:wiki_payload, formatter) do
+      Slackmine.stub(:enqueue, ->(*) {}) do
         content.send(:notify_slack_wiki_updated)
       end
     end
@@ -3537,8 +3537,8 @@ class BodyDiffNotificationTest < Minitest::Test
   end
 end
 
-require_relative '../app/jobs/redmine_slack_due_digest_job'
-require_relative '../app/jobs/redmine_slack_due_reminder_job'
+require_relative '../app/jobs/slackmine_due_digest_job'
+require_relative '../app/jobs/slackmine_due_reminder_job'
 
 class DueReminderTest < Minitest::Test
   def setup
@@ -3558,9 +3558,9 @@ class DueReminderTest < Minitest::Test
     project = OpenStruct.new(identifier: 'example')
     config = { 'due_reminders' => { 'days' => 3 },
                'projects' => { 'example' => { 'due_reminders' => { 'days' => 7, 'enabled' => false } } } }
-    RedmineSlackNotification.stub(:config, config) do
-      assert_equal({ enabled: false, days: 7 }, RedmineSlackNotification.due_reminder_settings(project))
-      assert_equal 7, RedmineSlackNotification.due_reminder_max_days
+    Slackmine.stub(:config, config) do
+      assert_equal({ enabled: false, days: 7 }, Slackmine.due_reminder_settings(project))
+      assert_equal 7, Slackmine.due_reminder_max_days
     end
   end
 
@@ -3571,11 +3571,11 @@ class DueReminderTest < Minitest::Test
       OpenStruct.new(id: 43, subject: 'Due today', due_date: Date.current, project: project),
       OpenStruct.new(id: 44, subject: 'Due soon', due_date: Date.current + 2, project: project)
     ]
-    RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
-      digest = RedmineSlackNotification::Formatter.due_digest_payload(issues, today: Date.current)
+    Slackmine::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+      digest = Slackmine::Formatter.due_digest_payload(issues, today: Date.current)
       assert_includes digest.dig('blocks', 0, 'text', 'text'), 'Due reminders: 3'
       assert_equal 3, digest['attachments'].size
-      assert_equal ['#D92D20', '#F79009', RedmineSlackNotification::Formatter.attachment_color],
+      assert_equal ['#D92D20', '#F79009', Slackmine::Formatter.attachment_color],
                    digest['attachments'].map { |attachment| attachment['color'] }
       overdue, current, upcoming = digest['attachments'].map do |attachment|
         attachment['blocks'].map { |block| block.dig('text', 'text') }.join("\n")
@@ -3609,13 +3609,13 @@ class DueReminderTest < Minitest::Test
         'colors' => { 'today' => '#445566', 'upcoming' => '#778899' }
       } } }
     }
-    RedmineSlackNotification.stub(:config, config) do
-      RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
-        global = RedmineSlackNotification::Formatter.due_digest_payload(issues, today: Date.current)
+    Slackmine.stub(:config, config) do
+      Slackmine::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+        global = Slackmine::Formatter.due_digest_payload(issues, today: Date.current)
         assert_equal ['#AABBCC', '#F79009', '#112233'], global['attachments'].map { |a| a['color'] }
 
-        RedmineSlackNotification.with_project(project) do
-          digest = RedmineSlackNotification::Formatter.due_digest_payload(issues, today: Date.current)
+        Slackmine.with_project(project) do
+          digest = Slackmine::Formatter.due_digest_payload(issues, today: Date.current)
           assert_equal ['#AABBCC', '#445566', '#778899'], digest['attachments'].map { |a| a['color'] }
         end
       end
@@ -3645,10 +3645,10 @@ class DueReminderTest < Minitest::Test
         'overdue_timing' => '%{days} days late'
       } } } }
     }
-    RedmineSlackNotification.stub(:config, config) do
-      RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
-        RedmineSlackNotification.with_project(project) do
-          digest = RedmineSlackNotification::Formatter.due_digest_payload(issues, today: Date.current,
+    Slackmine.stub(:config, config) do
+      Slackmine::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+        Slackmine.with_project(project) do
+          digest = Slackmine::Formatter.due_digest_payload(issues, today: Date.current,
                                                                            part: 2, total_parts: 3)
           assert_equal 'Summary 2: 1 late, 0 today [2/3]', digest['text']
           assert_equal '*Project 2 [2/3]*', digest.dig('blocks', 0, 'text', 'text')
@@ -3666,9 +3666,9 @@ class DueReminderTest < Minitest::Test
     project = OpenStruct.new(name: 'Example')
     issue = OpenStruct.new(id: 42, subject: 'Late', due_date: Date.current - 1, project: project)
     config = { 'messages' => { 'due_reminders' => { 'title' => '%{unknown}' } } }
-    RedmineSlackNotification.stub(:config, config) do
-      RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
-        digest = RedmineSlackNotification::Formatter.due_digest_payload([issue], today: Date.current)
+    Slackmine.stub(:config, config) do
+      Slackmine::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+        digest = Slackmine::Formatter.due_digest_payload([issue], today: Date.current)
         assert_equal '📋 *Due reminders: 1*', digest.dig('blocks', 0, 'text', 'text')
       end
     end
@@ -3689,12 +3689,12 @@ class DueReminderTest < Minitest::Test
       { 'channel' => { 'id' => 'D123' } }
     end
     config = { 'slack' => { 'bot_token' => 'token' } }
-    RedmineSlackNotification.stub(:config, config) do
+    Slackmine.stub(:config, config) do
       User.stub(:find_by, assignee) do
-        RedmineSlackNotification.stub(:slack_api, api) do
-          RedmineSlackNotification.stub(:post_message, ->(payload, channel, token) { posts << [payload, channel, token] }) do
-            RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
-              job = RedmineSlackDueDigestJob.new
+        Slackmine.stub(:slack_api, api) do
+          Slackmine.stub(:post_message, ->(payload, channel, token) { posts << [payload, channel, token] }) do
+            Slackmine::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+              job = SlackmineDueDigestJob.new
               job.stub(:due_issues_for, { ['token', 'U123'] => issues }) do
                 job.perform(7, '2026-09-29')
                 assert_empty posts
@@ -3718,7 +3718,7 @@ end
 
 Rake.application = Rake::Application.new
 Rake::Task.define_task(:environment)
-load File.expand_path('../lib/tasks/redmine_slack_due_reminders.rake', __dir__)
+load File.expand_path('../lib/tasks/slackmine_due_reminders.rake', __dir__)
 
 class DueReminderTaskTest < Minitest::Test
   class Scope
@@ -3785,8 +3785,8 @@ class DueReminderTaskTest < Minitest::Test
     scope = Scope.new
     queued = []
     logger = Object.new.tap { |item| item.define_singleton_method(:info) { |_message| } }
-    RedmineSlackNotification.stub(:due_reminder_max_days, 3) do
-      RedmineSlackNotification.stub(:due_reminder_settings, { enabled: true, days: 3 }) do
+    Slackmine.stub(:due_reminder_max_days, 3) do
+      Slackmine.stub(:due_reminder_settings, { enabled: true, days: 3 }) do
         Issue.stub(:joins, scope) do
           User.stub(:exists?, ->(options) { [3, 5, 7].include?(options[:id]) }) do
             Tracker.stub(:exists?, ->(options) { options[:id] == 2 }) do
@@ -3795,8 +3795,8 @@ class DueReminderTaskTest < Minitest::Test
                   Object.new.tap { |item| item.define_singleton_method(:pluck) { |_column| name == '1.0' ? [100] : [] } }
                 }) do
                   Rails.stub(:logger, logger) do
-                    RedmineSlackDueDigestJob.stub(:perform_later, ->(*args) { queued << args }) do
-                      Rake::Task['redmine:slack:due_reminders'].reenable
+                    SlackmineDueDigestJob.stub(:perform_later, ->(*args) { queued << args }) do
+                      Rake::Task['slackmine:due_reminders'].reenable
                       yield scope, queued
                     end
                   end
@@ -3812,17 +3812,17 @@ class DueReminderTaskTest < Minitest::Test
   def test_users_filters_multiple_assignees_before_queuing
     ENV['users'] = '3, 5,3'
     with_task do |scope, queued|
-      capture_io { Rake::Task['redmine:slack:due_reminders'].invoke }
+      capture_io { Rake::Task['slackmine:due_reminders'].invoke }
       assert_equal [3, 5], scope.filters[:assigned_to_id]
       assert_equal [[3, '2026-09-30', {}]], queued
     end
   end
 
-  def test_all_redmine_filters_are_passed_to_the_worker
+  def test_all_slackmine_filters_are_passed_to_the_worker
     ENV.update('days' => '7', 'tracker' => '2', 'project' => 'example',
                'users' => '3,5', 'version' => '1.0')
     with_task do |scope, queued|
-      capture_io { Rake::Task['redmine:slack:due_reminders'].invoke }
+      capture_io { Rake::Task['slackmine:due_reminders'].invoke }
       filters = { 'days' => 7, 'tracker_id' => 2, 'project_id' => 10, 'version_ids' => [100] }
       assert_equal({ assigned_to_id: [3, 5], project_id: 10, tracker_id: 2,
                      fixed_version_id: [100] }, scope.filters.reject { |key, _value| key == :issue_statuses })
@@ -3834,7 +3834,7 @@ class DueReminderTaskTest < Minitest::Test
     ['3,,5', '3,99', ''].each do |value|
       ENV['users'] = value
       with_task do |_scope, queued|
-        assert_raises(SystemExit) { capture_io { Rake::Task['redmine:slack:due_reminders'].invoke } }
+        assert_raises(SystemExit) { capture_io { Rake::Task['slackmine:due_reminders'].invoke } }
         assert_empty queued
       end
     end
@@ -3843,7 +3843,7 @@ class DueReminderTaskTest < Minitest::Test
   def test_removed_user_id_is_rejected_before_queuing
     ENV['USER_ID'] = '3'
     with_task do |_scope, queued|
-      assert_raises(SystemExit) { capture_io { Rake::Task['redmine:slack:due_reminders'].invoke } }
+      assert_raises(SystemExit) { capture_io { Rake::Task['slackmine:due_reminders'].invoke } }
       assert_empty queued
     end
   end
@@ -3851,17 +3851,17 @@ class DueReminderTaskTest < Minitest::Test
   def test_noncanonical_users_name_is_rejected_before_queuing
     ENV['users'.upcase] = '3'
     with_task do |_scope, queued|
-      assert_raises(SystemExit) { capture_io { Rake::Task['redmine:slack:due_reminders'].invoke } }
+      assert_raises(SystemExit) { capture_io { Rake::Task['slackmine:due_reminders'].invoke } }
       assert_empty queued
     end
   end
 
-  def test_invalid_redmine_filters_stop_before_queuing
+  def test_invalid_slackmine_filters_stop_before_queuing
     [{ 'days' => '-1' }, { 'days' => 'soon' }, { 'tracker' => '99' },
      { 'version' => 'missing' }].each do |values|
       ENV.update(values)
       with_task do |_scope, queued|
-        assert_raises(SystemExit) { capture_io { Rake::Task['redmine:slack:due_reminders'].invoke } }
+        assert_raises(SystemExit) { capture_io { Rake::Task['slackmine:due_reminders'].invoke } }
         assert_empty queued
       end
       values.each_key { |name| ENV.delete(name) }
@@ -3872,10 +3872,10 @@ class DueReminderTaskTest < Minitest::Test
     filters = { 'days' => 7, 'project_id' => 10, 'tracker_id' => 2, 'version_ids' => [100] }
     user = OpenStruct.new(id: 5)
     scope = Scope.new
-    job = RedmineSlackDueDigestJob.new
-    RedmineSlackNotification.stub(:due_reminder_settings, { enabled: true, days: 3 }) do
-      RedmineSlackNotification.stub(:bot_token, 'token') do
-        RedmineSlackNotification.stub(:slack_user_id_for, 'U123') do
+    job = SlackmineDueDigestJob.new
+    Slackmine.stub(:due_reminder_settings, { enabled: true, days: 3 }) do
+      Slackmine.stub(:bot_token, 'token') do
+        Slackmine.stub(:slack_user_id_for, 'U123') do
           Issue.stub(:joins, scope) do
             groups = job.send(:due_issues_for, user, Date.current, filters)
             assert_equal({ assigned_to_id: 5, project_id: 10, tracker_id: 2,
@@ -3896,15 +3896,15 @@ class CommentThreadDeliveryTest < Minitest::Test
     @root = { 'ts' => '1000.000001', 'bot_id' => 'B123', 'app_id' => 'ATEST', 'attachments' => [
       { 'blocks' => [{}, { 'text' => { 'text' => '*<https://redmine.example.com/issues/7|Subject>*' } }] }
     ] }
-    @payload = { 'text' => 'Comment', '_redmine_comment_issue_id' => 7 }
+    @payload = { 'text' => 'Comment', '_slackmine_comment_issue_id' => 7 }
   end
 
   def deliver(api)
     posts = []
-    RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackNotification.stub(:slack_api, api) do
-        RedmineSlackNotification.stub(:post_message, ->(payload, channel, token) { posts << [payload, channel, token] }) do
-          RedmineSlackNotification.notify(@payload, project: @project)
+    Slackmine.stub(:config, @settings) do
+      Slackmine.stub(:slack_api, api) do
+        Slackmine.stub(:post_message, ->(payload, channel, token) { posts << [payload, channel, token] }) do
+          Slackmine.notify(@payload, project: @project)
         end
       end
     end
@@ -3921,17 +3921,17 @@ class CommentThreadDeliveryTest < Minitest::Test
     end
     result = deliver(api)
     assert_equal '1000.000001', result['thread_ts']
-    refute result.key?('_redmine_comment_issue_id')
+    refute result.key?('_slackmine_comment_issue_id')
     refute @payload.key?('thread_ts')
   end
 
   def test_compact_payload_is_used_only_when_a_thread_is_found
-    @payload['_redmine_thread_comment_payload'] = { 'text' => 'Just the comment' }
+    @payload['_slackmine_thread_comment_payload'] = { 'text' => 'Just the comment' }
     result = deliver(->(*) { { 'messages' => [@root] } })
     assert_equal({ 'text' => 'Just the comment', 'thread_ts' => @root['ts'] }, result)
     result = deliver(->(*) { { 'messages' => [] } })
     assert_equal({ 'text' => 'Comment' }, result)
-    assert @payload.key?('_redmine_thread_comment_payload'), 'Queued source remains unchanged'
+    assert @payload.key?('_slackmine_thread_comment_payload'), 'Queued source remains unchanged'
   end
 
   def test_disabled_switch_and_non_comment_notifications_do_not_fetch_history
@@ -3939,10 +3939,10 @@ class CommentThreadDeliveryTest < Minitest::Test
       @settings['slack']['comment_notifications_in_threads'] = value
       result = deliver(->(*) { flunk 'Disabled lookup' })
       refute result.key?('thread_ts')
-      refute result.key?('_redmine_comment_issue_id')
+      refute result.key?('_slackmine_comment_issue_id')
     end
     @settings['slack']['comment_notifications_in_threads'] = true
-    @payload.delete('_redmine_comment_issue_id')
+    @payload.delete('_slackmine_comment_issue_id')
     refute deliver(->(*) { flunk 'Not a comment' }).key?('thread_ts')
   end
 
@@ -3977,7 +3977,7 @@ class CommentThreadDeliveryTest < Minitest::Test
   end
 
   def test_untrusted_links_other_apps_and_broadcast_replies_are_ignored
-    checker = RedmineSlackNotification::CommentThreads
+    checker = Slackmine::CommentThreads
     assert checker.notification_for_issue?(@root, 7, 'ATEST')
     [@root.merge('app_id' => 'AOTHER'), @root.merge('bot_id' => nil),
      @root.merge('thread_ts' => '999.000001'), @root.merge('ts' => 'invalid')].each do |message|
@@ -3990,7 +3990,7 @@ class CommentThreadDeliveryTest < Minitest::Test
 end
 
 class AutomaticChannelMatchingTest < Minitest::Test
-  MATCHING = RedmineSlackNotification::ChannelMatching
+  MATCHING = Slackmine::ChannelMatching
 
   def setup
     MATCHING.instance_variable_set(:@cache, {})
@@ -4000,8 +4000,8 @@ class AutomaticChannelMatchingTest < Minitest::Test
   end
 
   def resolve(api)
-    RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackNotification.stub(:slack_api, api) { RedmineSlackNotification.channel_id(@project) }
+    Slackmine.stub(:config, @settings) do
+      Slackmine.stub(:slack_api, api) { Slackmine.channel_id(@project) }
     end
   end
 
@@ -4046,11 +4046,11 @@ class AutomaticChannelMatchingTest < Minitest::Test
       'slack' => { 'bot_token' => 'parent-token', 'work_object_actions' => true },
       'events' => { 'issue' => { 'created' => false } } } }
     @settings['slack']['auto_map_channels_by_name'] = false
-    RedmineSlackNotification.stub(:config, @settings) do
-      assert_equal 'CPARENT', RedmineSlackNotification.channel_id(@project)
-      assert_equal 'channel-test-token', RedmineSlackNotification.bot_token(@project)
-      refute RedmineSlackNotification.effective_config(@project).dig('slack', 'work_object_actions')
-      refute RedmineSlackNotification.effective_config(@project).key?('events')
+    Slackmine.stub(:config, @settings) do
+      assert_equal 'CPARENT', Slackmine.channel_id(@project)
+      assert_equal 'channel-test-token', Slackmine.bot_token(@project)
+      refute Slackmine.effective_config(@project).dig('slack', 'work_object_actions')
+      refute Slackmine.effective_config(@project).key?('events')
     end
   end
 
@@ -4150,7 +4150,7 @@ end
 
 class IssueReferenceLinksTest < Minitest::Test
   def test_links_plain_references_without_nesting_existing_links_or_matching_other_ids
-    formatter = RedmineSlackNotification::Formatter
+    formatter = Slackmine::Formatter
     link = '<https://redmine.example.com/issues/7|#7>'
     assert_equal "#{link} #{link} #70", formatter.link_issue_reference("#7 #{link} #70", 7)
     assert_equal '<@U123> ' + link, formatter.link_issue_reference('<@U123> #7', 7)
@@ -4158,7 +4158,7 @@ class IssueReferenceLinksTest < Minitest::Test
 
   def test_missing_related_issue_still_has_a_link_without_an_invented_subject
     Issue.stub(:find_by, nil) do
-      assert_equal '<https://redmine.example.com/issues/7|#7>', RedmineSlackNotification::Formatter.relation_issue_link(7)
+      assert_equal '<https://redmine.example.com/issues/7|#7>', Slackmine::Formatter.relation_issue_link(7)
     end
   end
 end

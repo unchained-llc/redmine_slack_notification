@@ -7,7 +7,7 @@ module Setting
 end
 
 class ThreadImagesTest < Minitest::Test
-  IMAGES = RedmineSlackNotification::ThreadImages
+  IMAGES = Slackmine::ThreadImages
   PNG = "\x89PNG\r\n\x1a\nexample".b
 
   def setup
@@ -28,7 +28,7 @@ class ThreadImagesTest < Minitest::Test
   end
 
   def download(data = PNG)
-    RedmineSlackNotification.stub(:slack_api, ->(method, body, token, **_) {
+    Slackmine.stub(:slack_api, ->(method, body, token, **_) {
       @calls << [method, body, token]
       { 'file' => @metadata }
     }) do
@@ -76,7 +76,7 @@ class ThreadImagesTest < Minitest::Test
 
   def test_failure_on_later_image_cleans_up_earlier_download
     @event['files'] << { 'id' => 'F124' }
-    RedmineSlackNotification.stub(:slack_api, ->(_method, body, *_args, **_) {
+    Slackmine.stub(:slack_api, ->(_method, body, *_args, **_) {
       { 'file' => @metadata.merge('id' => body['file']) }
     }) do
       count = 0
@@ -94,7 +94,7 @@ class ThreadImagesTest < Minitest::Test
   def test_total_size_limit_does_not_download_the_overflowing_image
     @event['files'] = (1..6).map { |index| { 'id' => "F#{index}" } }
     Setting.stub(:attachment_max_size, 10240) do
-      RedmineSlackNotification.stub(:slack_api, ->(_method, body, *_args, **_) {
+      Slackmine.stub(:slack_api, ->(_method, body, *_args, **_) {
         { 'file' => @metadata.merge('id' => body['file'], 'size' => IMAGES::MAX_BYTES) }
       }) do
         IMAGES.stub(:fetch, ->(*) {
@@ -117,8 +117,8 @@ class ThreadImagesTest < Minitest::Test
   end
 
   def test_missing_scope_has_failure_feedback_result
-    error = RedmineSlackNotification::SlackApiError.new('files.info', 200, { 'error' => 'missing_scope' })
-    RedmineSlackNotification.stub(:slack_api, ->(*) { raise error }) do
+    error = Slackmine::SlackApiError.new('files.info', 200, { 'error' => 'missing_scope' })
+    Slackmine.stub(:slack_api, ->(*) { raise error }) do
       assert_raises(IMAGES::ImportError) { IMAGES.download(@event, 'token') }
     end
   end
@@ -159,10 +159,10 @@ class ThreadImagesTest < Minitest::Test
   def test_image_only_file_share_events_and_edited_events
     event = { 'type' => 'message', 'subtype' => 'file_share', 'user' => 'U123', 'channel' => 'C123',
               'ts' => '1000.000002', 'thread_ts' => '1000.000001', 'files' => [{ 'id' => 'F123' }] }
-    assert RedmineSlackNotification::ThreadComments.reply_event?(event)
-    refute RedmineSlackNotification::ThreadComments.reply_event?(event.merge('edited' => {}))
-    refute RedmineSlackNotification::ThreadComments.reply_event?(event.merge('ts' => event['thread_ts']))
-    refute RedmineSlackNotification::ThreadComments.reply_event?(event.merge('files' => [], 'text' => ''))
+    assert Slackmine::ThreadComments.reply_event?(event)
+    refute Slackmine::ThreadComments.reply_event?(event.merge('edited' => {}))
+    refute Slackmine::ThreadComments.reply_event?(event.merge('ts' => event['thread_ts']))
+    refute Slackmine::ThreadComments.reply_event?(event.merge('files' => [], 'text' => ''))
   end
 end
 
@@ -187,7 +187,7 @@ class ThreadImageCommentsTest < ThreadCommentsUrlTest
     attachment_factory.define_singleton_method(:new) { |**_| @attachment }
     attachment_factory.instance_variable_set(:@attachment, @attachment)
     Object.const_set(:Attachment, attachment_factory)
-    RedmineSlackNotification::ThreadImages.stub(:download, [@upload]) { super }
+    Slackmine::ThreadImages.stub(:download, [@upload]) { super }
   ensure
     Object.send(:remove_const, :Attachment)
   end

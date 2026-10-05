@@ -1,6 +1,8 @@
 [English](README.md) | [日本語](README.ja.md)
 
-# Redmine の Slack 通知
+# Slackmine
+
+通知機能からSlackとRedmineの統合へ機能が広がったため、**Redmine Event Notifications for Slack**（`redmine_slack_notification`）から **Slackmine** に改名しました。内部名・プラグインID・設定ファイル名・エンドポイントも `slackmine` に統一し、旧名の互換対応は設けていません。
 
 Redmine 7 の Issue、Wiki、News、作業時間、Version、Project のイベントを Slack に通知するプラグインです。Issue の期日が近づいたとき、担当者に Slack DM で毎日リマインダーを送ることもできます。通知には Redmine の対象ページへのリンクと、色付きの Block Kit attachment を使います。配信は ActiveJob を経由し、通常は Sidekiq の `slack` キューで処理します。
 
@@ -38,8 +40,8 @@ Work Objectのプレビュー・操作、スラッシュコマンド、スレッ
 - 期日リマインダーの DM を使う場合は、Slack アプリの **App Home → Display Messages tab** を有効にしてください。
 - `slack` キューを処理する ActiveJob ワーカー。本番環境では Sidekiq を推奨します。
 
-1. このディレクトリを Redmine の `plugins/redmine_slack_notification` に配置します。
-2. [設定例](config/redmine_slack_notification.yml.example)を Redmine アプリケーションの `config/redmine_slack_notification.yml` にコピーします。
+1. このディレクトリを Redmine の `plugins/slackmine` に配置します。
+2. [設定例](config/slackmine.yml.example)を Redmine アプリケーションの `config/slackmine.yml` にコピーします。
 3. Bot Token と、デフォルトまたはプロジェクト固有のチャンネル ID を設定します。実際の YAML ファイルは Git に含めないでください。
 4. Sidekiq が `slack` キューを処理するように設定し、ボットを通知先チャンネルに招待します。
 5. Redmine と Sidekiq を再起動します。どちらのプロセスも YAML 設定をキャッシュします。
@@ -61,8 +63,8 @@ projects:
 
 プラグインは、次の順で最初に見つかった設定ファイルを読み込みます。
 
-1. `<Redmine root>/config/redmine_slack_notification.yml`
-2. `plugins/redmine_slack_notification/config/redmine_slack_notification.yml`
+1. `<Redmine root>/config/slackmine.yml`
+2. `plugins/slackmine/config/slackmine.yml`
 
 最上位の設定グループ `slack`、`events`、`messages`、`users`、`due_reminders` は、`projects.<identifier>` 以下で上書きできます。ネストしたマップはキーごとにマージされ、省略したプロジェクト設定は全体設定を引き継ぎます。`false` を明示すると、全体設定の `true` を上書きします。Bot Token の優先順位は、`projects.<identifier>.slack.bot_token`、`SLACK_BOT_TOKEN`、全体の `slack.bot_token` の順です。チャンネルは、`projects.<identifier>.slack.default_channel_id`、従来の `projects.<identifier>.channel_id`、子自身の名前による自動照合の順に確認します。見つからなければ近い親から同じ順序で確認し、最後に全体の `slack.default_channel_id` を使います。プロジェクトのキーには表示名ではなく Redmine の**識別子**を使います。Token またはチャンネルがない場合、通知は送られずログに記録されます。チャンネル ID は通常、公開チャンネルが `C`、非公開チャンネルが `G` で始まります。プロジェクト固有の Token も Git に含めず、YAML の変更後は Redmine と Sidekiq を再起動してください。
 
@@ -155,7 +157,7 @@ projects:
           status_changed: false
 ```
 
-同じキーでは、プロジェクト固有の値が全体の値より優先されます。全体で無効にした `issue.updated.enabled` をプロジェクトで上書きする場合は、親スイッチもそのプロジェクトで有効にしてください。従来のフラットなキー `status_changed`、`comment_added`、`issue_updated` なども両方の階層で使えます。同じ階層では、ネストしたキーが対応するフラットなキーより優先されます。従来のフラット設定では、`issue_updated` が親スイッチと `other_changed` の両方を制御します。[設定例](config/redmine_slack_notification.yml.example)にネストした設定の全体を掲載しています。
+同じキーでは、プロジェクト固有の値が全体の値より優先されます。全体で無効にした `issue.updated.enabled` をプロジェクトで上書きする場合は、親スイッチもそのプロジェクトで有効にしてください。従来のフラットなキー `status_changed`、`comment_added`、`issue_updated` なども両方の階層で使えます。同じ階層では、ネストしたキーが対応するフラットなキーより優先されます。従来のフラット設定では、`issue_updated` が親スイッチと `other_changed` の両方を制御します。[設定例](config/slackmine.yml.example)にネストした設定の全体を掲載しています。
 
 Wiki ページ、News、作業時間、Version の削除通知は、後から追加されたため初期状態では無効です。削除されたレコードのページは存在しないため、削除通知のリンクは所属するプロジェクトのページを指します。
 
@@ -269,7 +271,7 @@ users:
 ```
 
 1. コードと YAML を配置し、Redmine と Sidekiq を再起動します。Sidekiq が `slack` キューを処理していることを確認してください。
-2. Slack アプリの **Event Subscriptions → Enable Events** を ON にします。Request URL を `https://redmine.example.com/redmine_slack/events` にし、**Verified** を確認します。別のサーバーでは Redmine の公開 URL に合わせてください。サブディレクトリ配置の場合は、そのパスも含めます。
+2. Slack アプリの **Event Subscriptions → Enable Events** を ON にします。Request URL を `https://redmine.example.com/slackmine/events` にし、**Verified** を確認します。別のサーバーでは Redmine の公開 URL に合わせてください。サブディレクトリ配置の場合は、そのパスも含めます。
 3. **Subscribe to bot events** に `entity_details_requested` を追加し、**Save Changes** します。このイベントと `entity.presentDetails` に追加 OAuth スコープは不要です。
 4. チャンネルの Work Object カードを開き、ステータス・担当者・期日・説明文を確認します。Redmine で変更後、詳細パネルを再読み込みし、最新値になることを確認します。新しい通知を送る必要はありません。
 
@@ -325,7 +327,7 @@ slack:
 
 Work Objectが表示される通知では、上部の重複見出し、本文中の件名リンク、カードにも表示されている現在値を省きます。コメント・説明・変更前後の差分・カードにない項目は残します。通知本文の整理は新しい通知から適用されます。
 
-`slack.work_object_actions: true` を設定すると、Work Object が有効なすべての公開チケットのメインカードにステータス・担当者（未割当の場合も表示）・優先度・期日と「コメントを追加」「外部サービスで開く」を表示します。`work_object_actions: false` で操作を無効にします。「課題を編集」はSlackのモーダルを開き、権限に応じてステータス・担当者・優先度・期日・コメントを変更できます。既定では無効です。Slack アプリの **Interactivity & Shortcuts** を有効にし、Request URL を `https://redmine.example.com/redmine_slack/interactions` に設定します。署名検証には上記の `slack.events` 設定を共用します。
+`slack.work_object_actions: true` を設定すると、Work Object が有効なすべての公開チケットのメインカードにステータス・担当者（未割当の場合も表示）・優先度・期日と「コメントを追加」「外部サービスで開く」を表示します。`work_object_actions: false` で操作を無効にします。「課題を編集」はSlackのモーダルを開き、権限に応じてステータス・担当者・優先度・期日・コメントを変更できます。既定では無効です。Slack アプリの **Interactivity & Shortcuts** を有効にし、Request URL を `https://redmine.example.com/slackmine/interactions` に設定します。署名検証には上記の `slack.events` 設定を共用します。
 
 ```yaml
 slack:
@@ -538,7 +540,7 @@ slack:
 
 ### 文言とテンプレート
 
-最上位の `messages` ツリーで通知文言を変更できます。イベントを送るかどうかは制御しません。すべてのキーは任意です。省略した値や空文字列には組み込みの初期値を使います。[設定例](config/redmine_slack_notification.yml.example)には、使用できるすべてのキーとサンプル値を掲載しています。
+最上位の `messages` ツリーで通知文言を変更できます。イベントを送るかどうかは制御しません。すべてのキーは任意です。省略した値や空文字列には組み込みの初期値を使います。[設定例](config/slackmine.yml.example)には、使用できるすべてのキーとサンプル値を掲載しています。
 
 | グループ | 設定対象 |
 | --- | --- |
@@ -594,7 +596,7 @@ users:
 
 ![Slackメッセージからチケット作成](docs/images/features/message-to-issue.webp)
 
-Slackアプリの **Interactivity & Shortcuts** でInteractivityを有効にし、Request URLを `https://redmine.example.com/redmine_slack/interactions` に設定します。**メッセージショートカット**を追加し、Callback IDを `redmine_message_create`、名前を「チケットを作成」などにします。Botスコープに `commands` を追加し、スコープを変更した場合はアプリを再インストールしてください。[スラッシュコマンド](#スラッシュコマンド)の連携設定を共用するため、`slack.slash_command`、グローバルBot Token、署名シークレット、app/team ID、ユーザー対応付けが必要です。Work Objectプレビューは任意です。
+Slackアプリの **Interactivity & Shortcuts** でInteractivityを有効にし、Request URLを `https://redmine.example.com/slackmine/interactions` に設定します。**メッセージショートカット**を追加し、Callback IDを `slackmine_message_create`、名前を「チケットを作成」などにします。Botスコープに `commands` を追加し、スコープを変更した場合はアプリを再インストールしてください。[スラッシュコマンド](#スラッシュコマンド)の連携設定を共用するため、`slack.slash_command`、グローバルBot Token、署名シークレット、app/team ID、ユーザー対応付けが必要です。Work Objectプレビューは任意です。
 
 メッセージの「その他のアクション」からショートカットを実行し、プロジェクトを選択します。次のフォームでトラッカー・題名・説明を確認して保存します。最初の空でない行を題名にし、説明には本文と `chat.getPermalink` で取得した投稿元リンクを入れます。スレッド返信からも使用できますが、コピーするのは選択したメッセージだけです。通常の本文が空の場合は、Block Kitや添付カードのタイトル・本文・項目からテキストを取り込みます。添付ファイル・スレッド全体・AI要約は取り込みません。Slackの本文の書式記法はそのまま残ります。題名は255文字、説明は投稿元リンクを含め3,000文字までに短縮するため、保存前に確認してください。
 
@@ -615,7 +617,7 @@ Redmineの標準 `IssueQuery` を使い、未完了・有効なプロジェク�
 
 1. 全体の `slack.app_home: true` を設定し、全体の `slack.bot_token` と `slack.events` のアプリID・チームID・Signing Secretを設定します。
 2. Slackアプリの **App Home → Show Tabs → Home Tab** を有効にします。
-3. **Event Subscriptions → Subscribe to bot events** に `app_home_opened` を追加します。Request URLは既存の `/redmine_slack/events` を使います。
+3. **Event Subscriptions → Subscribe to bot events** に `app_home_opened` を追加します。Request URLは既存の `/slackmine/events` を使います。
 4. Redmineユーザーとの対応付けを設定し、RedmineとSidekiqを再起動します。
 
 ホームを開いたとき、表示を切り替えたとき、「更新」を押したときに取得します。チケット変更後も、このホームから保存した場合は一覧を更新します。他の場所での更新は次の取得時に反映します。追加の定期ジョブやDB変更はありません。
@@ -628,28 +630,28 @@ Redmineの標準 `IssueQuery` を使い、未完了・有効なプロジェク�
 
 ![スラッシュコマンド](docs/images/features/slash-commands.webp)
 
-`slack.slash_command: /redmine` を設定し、Slackアプリに同名のコマンドを登録します。省略すると無効です。Request URLは `https://redmine.example.com/redmine_slack/commands`。`commands` スコープを追加してアプリを再インストールしてください。Interactivityは `/redmine_slack/interactions` を使用します。既存の署名シークレット、app/team ID、Bot Token、ユーザー対応付けも必要です。グローバルの連携設定・ユーザー対応付けを使用し、同じ連携に属するプロジェクトだけを対象にします。
+`slack.slash_command: /slackmine` を設定し、Slackアプリに同名のコマンドを登録します。省略すると無効です。Request URLは `https://redmine.example.com/slackmine/commands`。`commands` スコープを追加してアプリを再インストールしてください。Interactivityは `/slackmine/interactions` を使用します。既存の署名シークレット、app/team ID、Bot Token、ユーザー対応付けも必要です。グローバルの連携設定・ユーザー対応付けを使用し、同じ連携に属するプロジェクトだけを対象にします。
 
 追加テーブル・DBマイグレーションは不要です。フォーム送信・直接変更の再送対策には既存の `Rails.cache` を使用し、処理中は5分、成功済みは24時間記録します。入力エラー時は記録を解除し、修正後に再送できます。例外時は保存結果が不明な可能性があるため、短時間の処理中記録を残します。DB保存とキャッシュ更新は一体ではないため、キャッシュ消失・期限切れ・プロセス内のみのキャッシュ・保存直後の異常終了では重複の可能性が残ります。直接変更はサーバーで生成したリクエスト識別子を使用し、Slackへの応答前に結果を記録するため、配信の再試行では保存済みの結果を再利用します。複数Web・コマンド処理プロセス間の抑止には、`unless_exist` を原子的に扱える共有キャッシュが必要です。プラグインから新しいキャッシュサービスを導入することはありません。
 
 | コマンド | 動作 |
 | --- | --- |
-| `/redmine` / `/redmine help` | 使い方と自分の課題・期限・リマインダー・新規作成ボタン |
-| `/redmine 123` / `/redmine #123` | 設定済みならWork Objectカード、未設定ならリンク・状態・コメント追加ボタン |
-| `/redmine my` | 自分に直接割り当てられた未完了課題 |
-| `/redmine due` | 自分の期限超過・3日以内が期日の課題 |
-| `/redmine reminders` | 定期リマインダーの設定で、自分の期日一覧を今すぐ取得 |
-| `/redmine search キーワード` | 題名の部分一致検索（大文字小文字を区別しない） |
-| `/redmine new [プロジェクト識別子]` | プロジェクト選択後、トラッカー・題名・説明の作成フォーム |
-| `/redmine comment 123` | コメントフォームを開くボタン |
-| `/redmine status 123 [ステータス名またはID]` | 値を指定すると直接変更、省略すると選択フォームを開くボタン |
-| `/redmine assign 123 [ログイン名・表示名・ID]` | 値を指定すると直接変更、省略すると担当者の選択フォームを開くボタン |
+| `/slackmine` / `/slackmine help` | 使い方と自分の課題・期限・リマインダー・新規作成ボタン |
+| `/slackmine 123` / `/slackmine #123` | 設定済みならWork Objectカード、未設定ならリンク・状態・コメント追加ボタン |
+| `/slackmine my` | 自分に直接割り当てられた未完了課題 |
+| `/slackmine due` | 自分の期限超過・3日以内が期日の課題 |
+| `/slackmine reminders` | 定期リマインダーの設定で、自分の期日一覧を今すぐ取得 |
+| `/slackmine search キーワード` | 題名の部分一致検索（大文字小文字を区別しない） |
+| `/slackmine new [プロジェクト識別子]` | プロジェクト選択後、トラッカー・題名・説明の作成フォーム |
+| `/slackmine comment 123` | コメントフォームを開くボタン |
+| `/slackmine status 123 [ステータス名またはID]` | 値を指定すると直接変更、省略すると選択フォームを開くボタン |
+| `/slackmine assign 123 [ログイン名・表示名・ID]` | 値を指定すると直接変更、省略すると担当者の選択フォームを開くボタン |
 
-`status`・`assign` は `#123` も受け付けます。値を省略した場合は、返されたボタンから選択フォームを開き、送信して初めて変更を保存します。`/redmine status 123 終了` や `/redmine assign 123 alice` のように値を指定すると、キューでコマンドを処理した時点で直接保存します。名前は大文字小文字を区別しない完全一致で、許可された候補を1件に特定できる必要があります。空白を含む名前も引用符なしで指定できます。名前が重複する場合はIDを使ってください。担当者は `me`（自分）、`none`・設定した未割当ラベルも指定できます。不明・重複・許可されない値では変更せず、選択フォームを開くボタンを返します。`/redmine` は設定した `slack.slash_command` に置き換えてください。`slack.work_object_actions: true`、有効なRedmineユーザーへの対応付け、同じ連携に属する公開課題、対象項目の編集権限が必要です。この2つのコマンドにはWork Objectプレビューの有効化は不要です。ステータスは実行者のRedmineワークフローで許可された候補、担当者はRedmineで割当可能なユーザーと「未割当」を表示します。担当者は最大99人、ステータスは最大100件で、フォームを開けない場合はRedmineの課題編集画面を使用してください。保存時にも連携・権限・ワークフロー・割当候補を再確認し、既存の課題行ロック内で更新します。現在と同じ値を選んだ場合は履歴を追加せずフォームを閉じます。Slack側のコマンド追加登録やスコープ追加は不要です。 直接変更の成功時・値が同じ場合は、プレビュー設定済みなら最新のWork Objectカードを返し、既存の表示項目・ボタン設定を使います。プレビュー未設定では文字の確認応答を返します。配信前に結果を記録するため、再送時に変更やカード生成を繰り返しません。
+`status`・`assign` は `#123` も受け付けます。値を省略した場合は、返されたボタンから選択フォームを開き、送信して初めて変更を保存します。`/slackmine status 123 終了` や `/slackmine assign 123 alice` のように値を指定すると、キューでコマンドを処理した時点で直接保存します。名前は大文字小文字を区別しない完全一致で、許可された候補を1件に特定できる必要があります。空白を含む名前も引用符なしで指定できます。名前が重複する場合はIDを使ってください。担当者は `me`（自分）、`none`・設定した未割当ラベルも指定できます。不明・重複・許可されない値では変更せず、選択フォームを開くボタンを返します。`/slackmine` は設定した `slack.slash_command` に置き換えてください。`slack.work_object_actions: true`、有効なRedmineユーザーへの対応付け、同じ連携に属する公開課題、対象項目の編集権限が必要です。この2つのコマンドにはWork Objectプレビューの有効化は不要です。ステータスは実行者のRedmineワークフローで許可された候補、担当者はRedmineで割当可能なユーザーと「未割当」を表示します。担当者は最大99人、ステータスは最大100件で、フォームを開けない場合はRedmineの課題編集画面を使用してください。保存時にも連携・権限・ワークフロー・割当候補を再確認し、既存の課題行ロック内で更新します。現在と同じ値を選んだ場合は履歴を追加せずフォームを閉じます。Slack側のコマンド追加登録やスコープ追加は不要です。 直接変更の成功時・値が同じ場合は、プレビュー設定済みなら最新のWork Objectカードを返し、既存の表示項目・ボタン設定を使います。プレビュー未設定では文字の確認応答を返します。配信前に結果を記録するため、再送時に変更やカード生成を繰り返しません。
 
-結果は実行した本人だけに表示します。番号指定、または `my`・`due`・`search` の結果が1件の場合、対象プロジェクトの `slack.work_object_previews: true` が有効でコマンドと同じBot Tokenを使用していれば、自動でWork Objectカードを表示します。項目・ボタンは既存のYAML設定に従い、新たな切替設定は不要です。未設定や非公開課題では簡易表示を使います。 本人だけに表示するカードのボタン押下では、Slackが課題URLと参照情報を省略する場合があるため、操作ボタンに課題IDを持たせています。自分のRedmineで課題を特定したうえで、連携・閲覧・編集権限を通常どおり確認します。本人だけに表示するカードからも、権限で許可されたステータス・優先度・担当者・期日・コメントの編集フォームを開けます。このカードは `chat.update` で更新できないため、保存後は番号指定で再取得してください。複数件の課題一覧はリマインダーと同じ色付き添付・件数見出し・箇条書きに統一し、チケットリンク・プロジェクト名・期日までの相対日数を表示します。期日なしでは日数を省略します。並び順は維持し、各行のボタンは表示しません。行の書式は `messages.due_reminders`、見出しは `messages.commands.my`・`.due`・`.search` を使います。コメント操作は `/redmine 123` または `/redmine comment 123` から行えます。一覧は最大100件の候補から10件、プロジェクトは最大20件を表示し、現在のチャンネルに対応するプロジェクトを優先します。プロジェクト識別子で絞り込めます。閲覧権限を確認し、保存時にも権限とRedmineの検証を再確認します。必須カスタムフィールドは簡易作成フォームでは入力できないため、フォーム内のRedmineへのリンクから登録してください。コメント追加には `work_object_actions: true` が必要で、既存の公開課題編集ポリシーに従います。保存後は通常のRedmine通知処理が動きます。チャンネルへ共有する操作は追加していません。
+結果は実行した本人だけに表示します。番号指定、または `my`・`due`・`search` の結果が1件の場合、対象プロジェクトの `slack.work_object_previews: true` が有効でコマンドと同じBot Tokenを使用していれば、自動でWork Objectカードを表示します。項目・ボタンは既存のYAML設定に従い、新たな切替設定は不要です。未設定や非公開課題では簡易表示を使います。 本人だけに表示するカードのボタン押下では、Slackが課題URLと参照情報を省略する場合があるため、操作ボタンに課題IDを持たせています。自分のRedmineで課題を特定したうえで、連携・閲覧・編集権限を通常どおり確認します。本人だけに表示するカードからも、権限で許可されたステータス・優先度・担当者・期日・コメントの編集フォームを開けます。このカードは `chat.update` で更新できないため、保存後は番号指定で再取得してください。複数件の課題一覧はリマインダーと同じ色付き添付・件数見出し・箇条書きに統一し、チケットリンク・プロジェクト名・期日までの相対日数を表示します。期日なしでは日数を省略します。並び順は維持し、各行のボタンは表示しません。行の書式は `messages.due_reminders`、見出しは `messages.commands.my`・`.due`・`.search` を使います。コメント操作は `/slackmine 123` または `/slackmine comment 123` から行えます。一覧は最大100件の候補から10件、プロジェクトは最大20件を表示し、現在のチャンネルに対応するプロジェクトを優先します。プロジェクト識別子で絞り込めます。閲覧権限を確認し、保存時にも権限とRedmineの検証を再確認します。必須カスタムフィールドは簡易作成フォームでは入力できないため、フォーム内のRedmineへのリンクから登録してください。コメント追加には `work_object_actions: true` が必要で、既存の公開課題編集ポリシーに従います。保存後は通常のRedmine通知処理が動きます。チャンネルへ共有する操作は追加していません。
 
-`/redmine reminders` は定期実行と同じ抽出・表示処理を使います。自分が直接担当する未完了課題のうち、閲覧権限、`due_reminders.enabled`、全体・プロジェクト別の `due_reminders.days` を満たすものが対象です。期限超過・今日・近日の一覧を実行した会話で本人だけに返し、0件でも応答します。100件ずつに分割し、現在のapp/teamと本人のSlack対応付けに一致する課題に限定します。全員向けcronの起動やスケジュール変更は行いません。`due` の固定3日・最大10件とは異なり、設定した期間で全件を返します。表示は既存の `messages.due_reminders` と色設定を使用し、ボタン名と0件時の文言は `messages.commands` で変更できます。Slack側のコマンド追加登録・スコープ追加・DBテーブル追加は不要です。
+`/slackmine reminders` は定期実行と同じ抽出・表示処理を使います。自分が直接担当する未完了課題のうち、閲覧権限、`due_reminders.enabled`、全体・プロジェクト別の `due_reminders.days` を満たすものが対象です。期限超過・今日・近日の一覧を実行した会話で本人だけに返し、0件でも応答します。100件ずつに分割し、現在のapp/teamと本人のSlack対応付けに一致する課題に限定します。全員向けcronの起動やスケジュール変更は行いません。`due` の固定3日・最大10件とは異なり、設定した期間で全件を返します。表示は既存の `messages.due_reminders` と色設定を使用し、ボタン名と0件時の文言は `messages.commands` で変更できます。Slack側のコマンド追加登録・スコープ追加・DBテーブル追加は不要です。
 
 表示文言はexampleの `messages.commands` で変更できます。`messages.commands.help` は複数行のコマンド一覧で、`%{command}` を `slack.slash_command` に置換します。既存YAMLで `help` を上書きしている場合は、その値を更新するか削除すると新しい既定文を利用できます。スラッシュコマンドはスレッド内では使えません。既存のスレッド返信連携を使用してください。一覧はSlackキューで処理し、新規・コメントフォームは表示されたボタンを押して開きます。フォームを開く処理と保存は同期処理のため、Slackの3秒制限内に収まるよう、ユーザー照合とDBの応答時間に注意してください。
 
@@ -660,8 +662,8 @@ Redmineの標準 `IssueQuery` を使い、未完了・有効なプロジェク�
 Redmine アプリケーションのタイムゾーンに合わせて、タスクを 1 日 1 回実行します。タスクは `slack` キューにジョブを登録し、ワーカーが DM を送ります。
 
 ```bash
-cd /path/to/redmine
-bundle exec rake redmine:slack:due_reminders RAILS_ENV=production
+cd /path/to/slackmine
+bundle exec rake slackmine:due_reminders RAILS_ENV=production
 ```
 
 Redmine の運用環境で使用しているスケジューラーに、このタスクを 1 日 1 回登録してください。同じ日に再実行した場合も、その都度リマインダーが送られます。
@@ -670,8 +672,8 @@ cron から実行する場合は、先に Redmine のディレクトリへ移動
 
 ```sh
 #!/bin/sh
-cd /path/to/redmine || exit 1
-bundle exec rake redmine:slack:due_reminders days=7 RAILS_ENV=production
+cd /path/to/slackmine || exit 1
+bundle exec rake slackmine:due_reminders days=7 RAILS_ENV=production
 ```
 
 Redmine 標準のリマインダーコマンドと同じ絞り込みオプションを Rake の環境引数として指定できます。省略した条件では対象を絞り込みません。
@@ -687,8 +689,8 @@ Redmine 標準のリマインダーコマンドと同じ絞り込みオプショ
 たとえば、ユーザー 3 と 5 だけに絞る場合、またはすべての条件を組み合わせる場合は次のように実行します。
 
 ```bash
-bundle exec rake redmine:slack:due_reminders users=3,5 RAILS_ENV=production
-bundle exec rake redmine:slack:due_reminders days=7 tracker=2 project=example users=3,5 version="1.0" RAILS_ENV=production
+bundle exec rake slackmine:due_reminders users=3,5 RAILS_ENV=production
+bundle exec rake slackmine:due_reminders days=7 tracker=2 project=example users=3,5 version="1.0" RAILS_ENV=production
 ```
 
 指定したすべての条件に一致する Issue だけを対象にし、ワーカーも送信前に条件と担当者を再確認します。値が無効な場合や指定したユーザー・トラッカー・プロジェクト・バージョンが存在しない場合は、ジョブを登録する前に停止します。同じ日に既に通知した Issue も、実行のたびに再送されます。
@@ -713,7 +715,7 @@ projects:
 
 担当者は、Issue を閲覧できる有効な Redmine ユーザーであり、`users` または `slack.auto_map_users_by_name` で Slack ユーザーに対応付けられている必要があります。グループ担当者と対応付けのないユーザーはスキップし、ログに記録します。Redmine で担当者に閲覧権限がある場合は、非公開 Issue も本人への DM に含められます。DM 配信には `chat:write` と `im:write` を持つ Bot Token が必要です。プロジェクトのチャンネル ID は使いません。Slack アプリの設定で **App Home → Messages Tab → Display Messages tab** を有効にしてください。有効にしていないと、`conversations.open` が成功しても Slack が `messages_tab_disabled` を返します。スコープを追加した場合はアプリを再インストールしてください。スケジュールに依存する前に、テスト用の Issue が受信者の Slack DM に表示されることを確認してください。
 
-DM の文言は YAML の `messages.due_reminders` 以下で変更できます。[設定例](config/redmine_slack_notification.yml.example)にすべてのキーとプレースホルダーを掲載しています。たとえば、他のグループを変更せずに見出しと期限超過グループのラベルを変更できます。
+DM の文言は YAML の `messages.due_reminders` 以下で変更できます。[設定例](config/slackmine.yml.example)にすべてのキーとプレースホルダーを掲載しています。たとえば、他のグループを変更せずに見出しと期限超過グループのラベルを変更できます。
 
 ```yaml
 messages:
@@ -738,7 +740,7 @@ messages:
 
 ## 配信と運用
 
-`RedmineSlackNotificationJob` は Redmine のイベント後、ActiveJob の `slack` キューに登録されます。Sidekiq を使う場合は、たとえば次のようにキューを設定します。
+`SlackmineNotificationJob` は Redmine のイベント後、ActiveJob の `slack` キューに登録されます。Sidekiq を使う場合は、たとえば次のようにキューを設定します。
 
 ```yaml
 :queues:
@@ -747,7 +749,7 @@ messages:
   - slack
 ```
 
-Slack API の失敗はログに記録され、Sidekiq が再試行します。Redmine の操作はロールバックされません。通知の投稿に成功した後、一時的な画像プレビューの削除に失敗した場合は、重複投稿を避けるため、エラーを記録するだけでジョブを再試行しません。通知が届かない場合は、`RedmineSlackNotificationJob` と `RedmineSlackNotification` のログを確認してください。
+Slack API の失敗はログに記録され、Sidekiq が再試行します。Redmine の操作はロールバックされません。通知の投稿に成功した後、一時的な画像プレビューの削除に失敗した場合は、重複投稿を避けるため、エラーを記録するだけでジョブを再試行しません。通知が届かない場合は、`SlackmineNotificationJob` と `Slackmine` のログを確認してください。
 
 開発環境では、ActiveJob の inline アダプターを使えば Sidekiq なしで実行できます。
 
@@ -793,7 +795,7 @@ slack:
 
 ## プライバシーと開発
 
-チャンネル通知では、非公開 Issue と非公開 Journal のコメントを除外します。毎日の DM には、担当者が Redmine で閲覧できる非公開 Issue を含められます。非公開 Issue や非公開コメントの画像はアップロードしません。実際の `redmine_slack_notification.yml` をコミットしたり、Bot Token をログ・設定例・サポート依頼に載せたりしないでください。Token が漏れた場合は更新してください。
+チャンネル通知では、非公開 Issue と非公開 Journal のコメントを除外します。毎日の DM には、担当者が Redmine で閲覧できる非公開 Issue を含められます。非公開 Issue や非公開コメントの画像はアップロードしません。実際の `slackmine.yml` をコミットしたり、Bot Token をログ・設定例・サポート依頼に載せたりしないでください。Token が漏れた場合は更新してください。
 
 ローカルのテストスイートは次のコマンドで実行できます。
 

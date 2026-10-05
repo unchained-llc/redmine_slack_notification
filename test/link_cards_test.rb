@@ -3,7 +3,7 @@ require_relative 'message_shortcuts_test'
 require 'time'
 
 class LinkCardsTest < Minitest::Test
-  CARDS = RedmineSlackNotification::LinkCards
+  CARDS = Slackmine::LinkCards
   URL = 'https://example.slack.com/archives/C123/p1791115675755579'
 
   def setup
@@ -21,8 +21,8 @@ class LinkCardsTest < Minitest::Test
   end
 
   def fetch(url = URL, **options)
-    RedmineSlackNotification.stub(:bot_token, 'token') do
-      RedmineSlackNotification.stub(:slack_api, lambda { |method, body, *_args|
+    Slackmine.stub(:bot_token, 'token') do
+      Slackmine.stub(:slack_api, lambda { |method, body, *_args|
         @calls << [method, body]
         case method
         when 'auth.test' then { 'url' => @workspace }
@@ -112,10 +112,10 @@ class LinkCardsTest < Minitest::Test
   end
 
   def test_color_override_and_invalid_css_fallback
-    RedmineSlackNotification.stub(:effective_config, { 'slack' => { 'link_cards' => { 'color' => '#123ABC' } } }) do
+    Slackmine.stub(:effective_config, { 'slack' => { 'link_cards' => { 'color' => '#123ABC' } } }) do
       assert_equal '#123ABC', CARDS.color(@issue.project)
     end
-    RedmineSlackNotification.stub(:effective_config, { 'slack' => { 'link_cards' => { 'color' => 'red; background:url(evil)' } } }) do
+    Slackmine.stub(:effective_config, { 'slack' => { 'link_cards' => { 'color' => 'red; background:url(evil)' } } }) do
       assert_equal '#6D5DFB', CARDS.color(@issue.project)
     end
   end
@@ -127,7 +127,7 @@ class LinkCardsTest < Minitest::Test
     CARDS.stub(:fetch, ->(*) { calls += 1; { 'text' => '<script>alert(1)</script>', 'author' => 'Example', 'channel' => 'test' } }) do
       rendered = CARDS.render_links(html, @issue, @viewer, nil, state)
       doc = Nokogiri::HTML.fragment(rendered)
-      assert_equal 2, doc.css('.redmine-slack-link-card').size
+      assert_equal 2, doc.css('.slackmine-link-card').size
       assert_equal 1, doc.css('pre a').size
       assert_empty doc.css('script')
       assert_includes doc.text, '<script>alert(1)</script>'
@@ -159,8 +159,8 @@ class LinkCardsTest < Minitest::Test
     @message['thread_ts'] = '1791110000.000001'
     @message['reply_count'] = 2
     bot = { 'bot' => { 'name' => 'Example Monitor', 'icons' => { 'image_48' => 'https://cdn.example.com/bot.png' } } }
-    RedmineSlackNotification.stub(:bot_token, 'token') do
-      RedmineSlackNotification.stub(:slack_api, ->(method, body, *) {
+    Slackmine.stub(:bot_token, 'token') do
+      Slackmine.stub(:slack_api, ->(method, body, *) {
         case method
         when 'auth.test' then { 'url' => @workspace }
         when 'conversations.history' then { 'messages' => body['oldest'] == @message['ts'] ? [@message] : [] }

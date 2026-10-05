@@ -15,7 +15,7 @@ module Setting
 end
 
 class LinkQuotesTest < Minitest::Test
-  Q = RedmineSlackNotification::LinkQuotes
+  Q = Slackmine::LinkQuotes
   URL = LinkCardsTest::URL
 
   def setup
@@ -30,7 +30,7 @@ class LinkQuotesTest < Minitest::Test
 
   def import(text)
     Setting.stub(:text_formatting, 'markdown') do
-      RedmineSlackNotification::LinkCards.stub(:fetch_for_project, ->(_project, url, **_) { @calls << url; @card }) do
+      Slackmine::LinkCards.stub(:fetch_for_project, ->(_project, url, **_) { @calls << url; @card }) do
         Q.import(text, @issue, @viewer)
       end
     end
@@ -72,7 +72,7 @@ class LinkQuotesTest < Minitest::Test
     decoded = Q.blocks(saved).first.last
     assert_equal @card['text'], decoded['text']
     assert_equal 'Parent searchable wording', decoded['parent']['text']
-    html = RedmineSlackNotification::LinkCards.render_card(decoded, URL, @issue.project)
+    html = Slackmine::LinkCards.render_card(decoded, URL, @issue.project)
     assert_includes html, 'Thread reply'
     assert_empty Nokogiri::HTML.fragment(html).css('script')
   end
@@ -83,8 +83,8 @@ class LinkQuotesTest < Minitest::Test
     @card['parent'] = @card.reject { |key, _| %w[parent parent_url thread_reply].include?(key) }
                            .merge('text' => 'Parent notification')
     source = "<a href=\"#{URL}\">reply</a>"
-    previous = Thread.current[:redmine_slack_thread_comment]
-    Thread.current[:redmine_slack_thread_comment] = true
+    previous = Thread.current[:slackmine_thread_comment]
+    Thread.current[:slackmine_thread_comment] = true
     saved = import(source)
     decoded = Q.blocks(saved).first.last
     assert_equal URL, decoded['url']
@@ -92,19 +92,19 @@ class LinkQuotesTest < Minitest::Test
     refute decoded.key?('parent')
     refute decoded.key?('thread_reply')
     refute_includes saved, 'Parent notification'
-    html = RedmineSlackNotification::LinkCards.render_card(decoded, URL, @issue.project)
+    html = Slackmine::LinkCards.render_card(decoded, URL, @issue.project)
     refute_includes html, 'Thread reply'
     refute_includes html, 'Open parent message'
     assert_includes html, 'Example User'
     assert_equal URL, Nokogiri::HTML.fragment(html).at_css('a')['href']
 
-    Thread.current[:redmine_slack_thread_comment] = nil
+    Thread.current[:slackmine_thread_comment] = nil
     manual = Q.blocks(import(source)).first.last
     assert_equal 'Parent notification', manual['parent']['text']
     assert_equal true, manual['thread_reply']
     assert @card.key?('parent')
   ensure
-    Thread.current[:redmine_slack_thread_comment] = previous
+    Thread.current[:slackmine_thread_comment] = previous
   end
 
   def test_permissions_failures_code_and_duplicate_targets
@@ -123,30 +123,30 @@ class LinkQuotesTest < Minitest::Test
     @issue[:new_record?] = true
     assert_equal 1, Q.blocks(import(source)).size
     Setting.stub(:text_formatting, 'markdown') do
-      RedmineSlackNotification::LinkCards.stub(:fetch_for_project, nil) do
+      Slackmine::LinkCards.stub(:fetch_for_project, nil) do
         assert_equal source, Q.import(source, @issue, @viewer)
       end
     end
   end
 
   def test_image_association_is_only_recorded_for_the_imported_reply
-    origin = Thread.current[:redmine_slack_thread_comment]
-    images = Thread.current[:redmine_slack_thread_images]
+    origin = Thread.current[:slackmine_thread_comment]
+    images = Thread.current[:slackmine_thread_images]
     source = %(<a href="#{URL}">reply</a>)
-    Thread.current[:redmine_slack_thread_comment] = true
-    Thread.current[:redmine_slack_thread_images] = { url: URL, ids: [41, 42] }
+    Thread.current[:slackmine_thread_comment] = true
+    Thread.current[:slackmine_thread_images] = { url: URL, ids: [41, 42] }
     assert_equal [41, 42], Q.blocks(import(source)).first.last['thread_image_ids']
-    Thread.current[:redmine_slack_thread_images] = { url: URL.sub('C123', 'C456'), ids: [41] }
+    Thread.current[:slackmine_thread_images] = { url: URL.sub('C123', 'C456'), ids: [41] }
     refute Q.blocks(import(source)).first.last.key?('thread_image_ids')
-    Thread.current[:redmine_slack_thread_images] = { url: URL, ids: [41] }
-    Thread.current[:redmine_slack_thread_comment] = nil
+    Thread.current[:slackmine_thread_images] = { url: URL, ids: [41] }
+    Thread.current[:slackmine_thread_comment] = nil
     refute Q.blocks(import(source)).first.last.key?('thread_image_ids')
     [[], [0], ['41'], [41, 41], (1..11).to_a].each do |ids|
       assert_empty Q.blocks(Q.encode(@card.merge('thread_image_ids' => ids), URL))
     end
   ensure
-    Thread.current[:redmine_slack_thread_comment] = origin
-    Thread.current[:redmine_slack_thread_images] = images
+    Thread.current[:slackmine_thread_comment] = origin
+    Thread.current[:slackmine_thread_images] = images
   end
 
   def test_invalid_metadata_is_not_interpreted_and_unsafe_avatar_is_removed
@@ -170,8 +170,8 @@ class LinkQuotesTest < Minitest::Test
       def will_save_change_to_description?; changed; end
       def will_save_change_to_notes?; changed; end
     end
-    issue_class = Class.new(callback_class) { include RedmineSlackNotification::IssuePatch }
-    journal_class = Class.new(callback_class) { include RedmineSlackNotification::JournalPatch }
+    issue_class = Class.new(callback_class) { include Slackmine::IssuePatch }
+    journal_class = Class.new(callback_class) { include Slackmine::JournalPatch }
     assert_equal :import_slack_description_quotes, issue_class.callback
     assert_equal :import_slack_notes_quotes, journal_class.callback
     record = issue_class.new
@@ -206,13 +206,13 @@ class LinkQuotesTest < Minitest::Test
       attr_accessor :message
       def mail(*, **); message; end
     end
-    mailer = Class.new(base) { prepend RedmineSlackNotification::MailerPatch }.new
+    mailer = Class.new(base) { prepend Slackmine::MailerPatch }.new
     mailer.message = message
     assert_same message, mailer.mail
     assert_includes text_part.body, 'Unique searchable wording'
     refute_includes text_part.body, '[slack-quote:'
     assert_equal '<p>HTML</p>', html_part.body.decoded
-    slack = RedmineSlackNotification::Formatter.mrkdwn(quote)
+    slack = Slackmine::Formatter.mrkdwn(quote)
     assert_includes slack, 'Unique searchable wording'
     refute_includes slack, '[slack-quote:'
   end

@@ -38,7 +38,7 @@ class User < ActiveRecord::Base
   end
 end
 
-require_relative '../lib/redmine_slack_notification'
+require_relative '../lib/slackmine'
 
 ActiveRecord::Base.establish_connection(adapter: 'sqlite3', database: ':memory:')
 ActiveRecord::Schema.verbose = false
@@ -96,13 +96,13 @@ end
 
 class Journal < ActiveRecord::Base
   belongs_to :issue
-  include RedmineSlackNotification::JournalPatch
+  include Slackmine::JournalPatch
   def journalized; issue; end
   def private_notes?; false; end
 end
 
 class ThreadCommentsPersistenceTest < Minitest::Test
-  COMMENTS = RedmineSlackNotification::ThreadComments
+  COMMENTS = Slackmine::ThreadComments
 
   def setup
     EmailAddress.delete_all
@@ -133,15 +133,15 @@ class ThreadCommentsPersistenceTest < Minitest::Test
   end
 
   def persist
-    RedmineSlackNotification::WorkObjects.stub(:viewer_for, @viewer) do
-      RedmineSlackNotification.stub(:config, @settings) do
-        RedmineSlackNotification.stub(:enqueue, ->(*) { flunk 'Comment notification loop' }) do
-          RedmineSlackNotification.stub(:slack_api, ->(method, body, *_args, **_options) {
+    Slackmine::WorkObjects.stub(:viewer_for, @viewer) do
+      Slackmine.stub(:config, @settings) do
+        Slackmine.stub(:enqueue, ->(*) { flunk 'Comment notification loop' }) do
+          Slackmine.stub(:slack_api, ->(method, body, *_args, **_options) {
             raise "Unexpected API: #{method}" unless method == 'chat.getPermalink'
             { 'permalink' => reply_url(body['message_ts']) }
           }) do
             # Card acquisition is tested separately from persistence.
-            RedmineSlackNotification::LinkQuotes.stub(:import, ->(text, *) { text }) do
+            Slackmine::LinkQuotes.stub(:import, ->(text, *) { text }) do
               COMMENTS.persist_reply(@issue, @event, 'TTEST')
             end
           end
@@ -158,7 +158,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     assert_equal :duplicate, persist
     assert_equal 1, Journal.count
     assert_same @previous_user, User.current
-    assert_nil Thread.current[:redmine_slack_thread_comment]
+    assert_nil Thread.current[:slackmine_thread_comment]
     @event['ts'] = '1791001000.000003'
     assert_equal :saved, persist
     assert_equal 2, Journal.count
@@ -179,13 +179,13 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     @event['files'] = [{ 'id' => 'F123' }]
     file = image_upload
     assert COMMENTS.reply_event?(@event)
-    RedmineSlackNotification::ThreadImages.stub(:download, [file]) { assert_equal :saved, persist }
+    Slackmine::ThreadImages.stub(:download, [file]) { assert_equal :saved, persist }
     assert_equal 1, Attachment.count
     assert_equal @issue.id, Attachment.first.issue_id
     assert_equal 3, Attachment.first.author_id
     assert_includes Journal.first.notes, "![](#{Attachment.first.filename})"
     assert file.closed?
-    RedmineSlackNotification::ThreadImages.stub(:download, ->(*) { flunk 'Duplicate downloaded images' }) do
+    Slackmine::ThreadImages.stub(:download, ->(*) { flunk 'Duplicate downloaded images' }) do
       assert_equal :duplicate, persist
     end
     assert_equal 1, Journal.count
@@ -198,7 +198,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     @event['files'] = [{ 'id' => 'F123' }]
     file = image_upload
     original_save = @issue.method(:save!)
-    RedmineSlackNotification::ThreadImages.stub(:download, [file]) do
+    Slackmine::ThreadImages.stub(:download, [file]) do
       @issue.stub(:save!, -> { original_save.call; raise IOError, 'simulated crash' }) do
         assert_raises(IOError) { persist }
       end
@@ -210,7 +210,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     # A fresh model, as on a Sidekiq retry, can save both records successfully.
     @issue.reload
     file = image_upload
-    RedmineSlackNotification::ThreadImages.stub(:download, [file]) { assert_equal :saved, persist }
+    Slackmine::ThreadImages.stub(:download, [file]) { assert_equal :saved, persist }
     assert_equal 1, Journal.count
     assert_equal 1, Attachment.count
   ensure
@@ -220,7 +220,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
   def test_invalid_attachment_rejects_all_images_and_comment
     @event['files'] = [{ 'id' => 'F123' }, { 'id' => 'F124' }]
     files = [image_upload, image_upload('')]
-    RedmineSlackNotification::ThreadImages.stub(:download, files) { assert_equal :restricted, persist }
+    Slackmine::ThreadImages.stub(:download, files) { assert_equal :restricted, persist }
     assert_equal 0, Attachment.count
     assert_equal 0, Journal.count
     assert files.all?(&:closed?)
@@ -249,7 +249,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     assert_equal :restricted, persist
     assert_equal 0, Journal.count
     assert_same @previous_user, User.current
-    assert_nil Thread.current[:redmine_slack_thread_comment]
+    assert_nil Thread.current[:slackmine_thread_comment]
   end
 
   def test_parent_identity_exact_timestamp_host_and_subject_position_are_required
@@ -301,7 +301,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     end
     assert_equal 0, Journal.count
     assert_same @previous_user, User.current
-    assert_nil Thread.current[:redmine_slack_thread_comment]
+    assert_nil Thread.current[:slackmine_thread_comment]
     assert_equal :saved, persist
     assert_equal 1, Journal.count
   end
@@ -330,13 +330,13 @@ class ThreadCommentsPersistenceTest < Minitest::Test
   end
 
   def test_configured_app_team_and_channel_are_required_before_history_access
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       assert COMMENTS.accepted_reply?('ATEST', 'TTEST', @event)
       refute COMMENTS.accepted_reply?('AOTHER', 'TTEST', @event)
       refute COMMENTS.accepted_reply?('ATEST', 'TOTHER', @event)
       refute COMMENTS.accepted_reply?('ATEST', 'TTEST', @event.merge('channel' => 'COTHER'))
       @settings['slack']['thread_comments'] = false
-      RedmineSlackNotification.stub(:slack_api, ->(*) { flunk 'History should not be fetched' }) do
+      Slackmine.stub(:slack_api, ->(*) { flunk 'History should not be fetched' }) do
         assert_nil COMMENTS.process('ATEST', 'TTEST', @event)
       end
     end
@@ -344,9 +344,9 @@ class ThreadCommentsPersistenceTest < Minitest::Test
 
   def test_automatic_channel_projects_accept_replies_without_project_yaml_entries
     @settings['slack']['auto_map_channels_by_name'] = true
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       Project.stub(:active, [@project]) do
-        RedmineSlackNotification::ChannelMatching.stub(:channel_for, 'C123') do
+        Slackmine::ChannelMatching.stub(:channel_for, 'C123') do
           assert_includes COMMENTS.contexts('ATEST', 'TTEST', 'C123'), @project
           assert COMMENTS.accepted_reply?('ATEST', 'TTEST', @event)
         end
@@ -356,9 +356,9 @@ class ThreadCommentsPersistenceTest < Minitest::Test
 
   def email_viewer(member = {})
     profile = { 'id' => 'U123', 'team_id' => 'TTEST', 'profile' => { 'email' => 'ALICE@EXAMPLE.COM' } }.merge(member)
-    RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackNotification.stub(:slack_api, ->(*) { { 'user' => profile } }) do
-        RedmineSlackNotification::WorkObjects.viewer_for('U123')
+    Slackmine.stub(:config, @settings) do
+      Slackmine.stub(:slack_api, ->(*) { { 'user' => profile } }) do
+        Slackmine::WorkObjects.viewer_for('U123')
       end
     end
   end
@@ -405,9 +405,9 @@ class ThreadCommentsPersistenceTest < Minitest::Test
 
   def test_email_api_failure_denies_access_without_saving
     @settings['slack']['auto_map_users_by_email'] = true
-    RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackNotification.stub(:slack_api, ->(*) { raise IOError, 'Unavailable' }) do
-        assert_nil RedmineSlackNotification::WorkObjects.viewer_for('U123')
+    Slackmine.stub(:config, @settings) do
+      Slackmine.stub(:slack_api, ->(*) { raise IOError, 'Unavailable' }) do
+        assert_nil Slackmine::WorkObjects.viewer_for('U123')
       end
     end
     assert_equal 0, Journal.count
@@ -425,11 +425,11 @@ class ThreadCommentsPersistenceTest < Minitest::Test
       else { 'ts' => '1791001000.000004' }
       end
     end
-    RedmineSlackNotification.stub(:config, @settings) do
+    Slackmine.stub(:config, @settings) do
       Issue.stub(:find_by, @issue) do
-        RedmineSlackNotification::WorkObjects.stub(:viewer_for, @viewer) do
-          RedmineSlackNotification.stub(:slack_api, api) do
-            RedmineSlackNotification::LinkQuotes.stub(:import, ->(text, *) { text }) do
+        Slackmine::WorkObjects.stub(:viewer_for, @viewer) do
+          Slackmine.stub(:slack_api, api) do
+            Slackmine::LinkQuotes.stub(:import, ->(text, *) { text }) do
               2.times { COMMENTS.process('ATEST', 'TTEST', @event) }
             end
           end

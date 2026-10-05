@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 
-require_relative 'lib/redmine_slack_notification'
+require_relative 'lib/slackmine'
 
 
-Redmine::Plugin.register :redmine_slack_notification do
-  name 'Redmine Event Notifications'
+Redmine::Plugin.register :slackmine do
+  name 'Slackmine'
   author 'Unchained'
-  description 'Send Redmine 7 issue and wiki notifications to Slack.'
+  description 'Integrate Redmine 7 with Slack: notifications, Work Objects, issue actions, search, and thread replies.'
   version '0.1.0'
   requires_redmine version_or_higher: '7.0.0'
 

@@ -8,11 +8,11 @@ class Project
 end
 
 class MessageShortcutsTest < Minitest::Test
-  SHORTCUTS = RedmineSlackNotification::MessageShortcuts
-  COMMANDS = RedmineSlackNotification::SlashCommands
+  SHORTCUTS = Slackmine::MessageShortcuts
+  COMMANDS = Slackmine::SlashCommands
 
   def setup
-    @settings = { 'slack' => { 'slash_command' => '/redmine', 'bot_token' => 'token',
+    @settings = { 'slack' => { 'slash_command' => '/slackmine', 'bot_token' => 'token',
       'events' => { 'app_id' => 'ATEST', 'team_id' => 'TTEST', 'signing_secret' => 'test-secret' } } }
     @viewer = OpenStruct.new(id: 3)
     @allowed = true
@@ -34,14 +34,14 @@ class MessageShortcutsTest < Minitest::Test
 
   def with_context
     @scope.instance_variable_set(:@rows, @projects)
-    RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackNotification::WorkObjects.stub(:viewer_for, @viewer) do
+    Slackmine.stub(:config, @settings) do
+      Slackmine::WorkObjects.stub(:viewer_for, @viewer) do
         COMMANDS.stub(:authorized_project?, ->(*) { @allowed }) do
           Project.stub(:allowed_to, @scope) do
             Project.stub(:find_by, ->(id:) { id.to_s == '1' ? @project : nil }) do
               Rails.stub(:cache, @cache) do
-                RedmineSlackNotification.stub(:channel_id, 'C123') do
-                  RedmineSlackNotification.stub(:slack_api, ->(*args) { raise Timeout::Error if @timeout; @calls << args; { 'permalink' => @permalink } }) { yield }
+                Slackmine.stub(:channel_id, 'C123') do
+                  Slackmine.stub(:slack_api, ->(*args) { raise Timeout::Error if @timeout; @calls << args; { 'permalink' => @permalink } }) { yield }
                 end
               end
             end
@@ -65,7 +65,7 @@ class MessageShortcutsTest < Minitest::Test
     issue = OpenStruct.new(allowed_target_trackers: [OpenStruct.new(id: 2, name: 'Task')])
     issue.define_singleton_method(:allowed_target_trackers) { |*| [OpenStruct.new(id: 2, name: 'Task')] }
     Issue.stub(:new, issue) do
-      RedmineSlackNotification::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
+      Slackmine::Formatter.stub(:url, ->(path) { "https://redmine.example#{path}" }) do
         SHORTCUTS.interaction('ATEST', 'TTEST', selection(picker))
       end
     end
@@ -80,7 +80,7 @@ class MessageShortcutsTest < Minitest::Test
       result = creation_view(picker)
       assert_equal 'update', result['response_action']
       view = result['view']
-      assert_equal 'redmine_command_create', view['callback_id']
+      assert_equal 'slackmine_command_create', view['callback_id']
       assert_equal '1', view['private_metadata']
       fields = view['blocks'].select { |b| b['type'] == 'input' }.to_h { |b| [b['block_id'], b['element']] }
       assert_equal 'First line', fields['subject']['initial_value']
@@ -99,7 +99,7 @@ class MessageShortcutsTest < Minitest::Test
       @settings['slack'].delete('slash_command')
       assert_equal({}, SHORTCUTS.interaction('ATEST', 'TTEST', @payload))
       assert_empty @calls
-      @settings['slack']['slash_command'] = '/redmine'
+      @settings['slack']['slash_command'] = '/slackmine'
       assert_equal({}, SHORTCUTS.interaction('OTHER', 'TTEST', @payload))
       assert_empty @calls
       @viewer = nil
@@ -170,7 +170,7 @@ class MessageShortcutsTest < Minitest::Test
     body = URI.encode_www_form('payload' => JSON.generate(@payload))
     timestamp = Time.now.to_i.to_s
     signature = 'v0=' + OpenSSL::HMAC.hexdigest('SHA256', 'test-secret', "v0:#{timestamp}:#{body}")
-    controller = RedmineSlackEventsController.new
+    controller = SlackmineEventsController.new
     controller.request = OpenStruct.new(content_length: body.bytesize, raw_post: body, headers: {
       'X-Slack-Request-Timestamp' => timestamp, 'X-Slack-Signature' => signature })
     with_context do
@@ -254,7 +254,7 @@ class MessageShortcutsTest < Minitest::Test
       'fields' => [{ 'title' => 'Reason', 'value' => 'Timeout' }], 'fallback' => 'Duplicated fallback' }]
     with_context do
       view = creation_view(open_picker)['view']
-      assert_equal 'redmine_command_create', view['callback_id']
+      assert_equal 'slackmine_command_create', view['callback_id']
       assert_equal 'Service alert', view['blocks'].find { |b| b['block_id'] == 'subject' }.dig('element', 'initial_value')
       description = view['blocks'].find { |b| b['block_id'] == 'description' }.dig('element', 'initial_value')
       assert_includes description, "Service alert\nConnection failed\nReason: Timeout"

@@ -24,22 +24,22 @@ module ActionController
   end
 end
 
-require_relative '../app/controllers/redmine_slack_events_controller'
-require_relative '../app/jobs/redmine_slack_work_object_details_job'
-require_relative '../app/jobs/redmine_slack_work_object_unfurl_job'
-require_relative '../app/jobs/redmine_slack_work_object_interaction_job'
-require_relative '../app/jobs/redmine_slack_thread_comment_job'
+require_relative '../app/controllers/slackmine_events_controller'
+require_relative '../app/jobs/slackmine_work_object_details_job'
+require_relative '../app/jobs/slackmine_work_object_unfurl_job'
+require_relative '../app/jobs/slackmine_work_object_interaction_job'
+require_relative '../app/jobs/slackmine_thread_comment_job'
 
 class SlackEventsControllerTest < Minitest::Test
   def test_watch_button_opens_synchronously_and_confirmation_without_inputs_queues
     interaction = { 'type' => 'block_actions', 'api_app_id' => 'ATEST',
       'team' => { 'id' => 'TTEST' }, 'user' => { 'id' => 'U123' }, 'trigger_id' => 'fresh-trigger',
       'container' => { 'type' => 'entity_detail', 'entity_url' => 'https://example.com/issues/7' },
-      'actions' => [{ 'action_id' => 'redmine_watch' }] }
+      'actions' => [{ 'action_id' => 'slackmine_watch' }] }
     opened = []
     queued = []
-    RedmineSlackNotification::WorkObjects.stub(:process_interaction, ->(*args) { opened << args }) do
-      RedmineSlackWorkObjectInteractionJob.stub(:perform_later, ->(*args) { queued << args }) do
+    Slackmine::WorkObjects.stub(:process_interaction, ->(*args) { opened << args }) do
+      SlackmineWorkObjectInteractionJob.stub(:perform_later, ->(*args) { queued << args }) do
         assert_equal :ok, dispatch(raw: URI.encode_www_form('payload' => JSON.generate(interaction))).status
         assert_equal 1, opened.length
         assert_empty queued
@@ -47,10 +47,10 @@ class SlackEventsControllerTest < Minitest::Test
         assert_equal :unauthorized, dispatch(raw: URI.encode_www_form('payload' => JSON.generate(interaction)), signature: 'v0=' + '0' * 64).status
         assert_equal 1, opened.length
         interaction['type'] = 'view_submission'
-        interaction['view'] = { 'type' => 'modal', 'callback_id' => 'redmine_watch_settings', 'private_metadata' => '{}' }
+        interaction['view'] = { 'type' => 'modal', 'callback_id' => 'slackmine_watch_settings', 'private_metadata' => '{}' }
         assert_equal :ok, dispatch(raw: URI.encode_www_form('payload' => JSON.generate(interaction))).status
         assert_equal({}, queued.first.last.dig('view', 'state', 'values'))
-        interaction['view']['callback_id'] = 'redmine_edit_issue'
+        interaction['view']['callback_id'] = 'slackmine_edit_issue'
         assert_equal :bad_request, dispatch(raw: URI.encode_www_form('payload' => JSON.generate(interaction))).status
       end
     end
@@ -63,21 +63,21 @@ class SlackEventsControllerTest < Minitest::Test
     @payload = { 'type' => 'event_callback', 'api_app_id' => 'ATEST', 'team_id' => 'TTEST',
                  'event' => { 'type' => 'entity_details_requested', 'trigger_id' => 'test-trigger',
                               'user' => 'U123', 'entity_url' => 'https://example.com/issues/7',
-                              'external_ref' => { 'id' => 'issue7', 'type' => 'redmine_issue' },
+                              'external_ref' => { 'id' => 'issue7', 'type' => 'slackmine_issue' },
                               'unused_field' => 'do not queue' } }
   end
 
   def dispatch(payload = @payload, signature: nil, timestamp: Time.now.to_i, raw: nil, length: nil)
     body = raw || JSON.generate(payload)
     signature ||= 'v0=' + OpenSSL::HMAC.hexdigest('SHA256', 'test-secret', "v0:#{timestamp}:#{body}")
-    controller = RedmineSlackEventsController.new
+    controller = SlackmineEventsController.new
     controller.request = OpenStruct.new(content_length: length || body.bytesize, raw_post: body,
                                         headers: { 'X-Slack-Request-Timestamp' => timestamp.to_s,
                                                    'X-Slack-Signature' => signature })
     @jobs = []
-    RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackWorkObjectDetailsJob.stub(:perform_later, ->(*args) { @jobs << args }) do
-        RedmineSlackWorkObjectUnfurlJob.stub(:perform_later, ->(*args) { @jobs << args }) { controller.receive }
+    Slackmine.stub(:config, @settings) do
+      SlackmineWorkObjectDetailsJob.stub(:perform_later, ->(*args) { @jobs << args }) do
+        SlackmineWorkObjectUnfurlJob.stub(:perform_later, ->(*args) { @jobs << args }) { controller.receive }
       end
     end
     controller
@@ -133,8 +133,8 @@ class SlackEventsControllerTest < Minitest::Test
 
   def test_job_passes_event_to_details_handler
     arguments = nil
-    RedmineSlackNotification::WorkObjects.stub(:present_details, ->(*args) { arguments = args }) do
-      RedmineSlackWorkObjectDetailsJob.new.perform('ATEST', 'TTEST', @payload['event'])
+    Slackmine::WorkObjects.stub(:present_details, ->(*args) { arguments = args }) do
+      SlackmineWorkObjectDetailsJob.new.perform('ATEST', 'TTEST', @payload['event'])
     end
     assert_equal ['ATEST', 'TTEST', @payload['event']], arguments
   end
@@ -158,8 +158,8 @@ class SlackEventsControllerTest < Minitest::Test
   def test_unfurl_job_passes_event_to_handler
     event = { 'type' => 'link_shared', 'user' => 'U123', 'links' => [] }
     arguments = nil
-    RedmineSlackNotification::WorkObjects.stub(:unfurl_links, ->(*args) { arguments = args }) do
-      RedmineSlackWorkObjectUnfurlJob.new.perform('ATEST', 'TTEST', event)
+    Slackmine::WorkObjects.stub(:unfurl_links, ->(*args) { arguments = args }) do
+      SlackmineWorkObjectUnfurlJob.new.perform('ATEST', 'TTEST', event)
     end
     assert_equal ['ATEST', 'TTEST', event], arguments
   end
@@ -168,14 +168,14 @@ class SlackEventsControllerTest < Minitest::Test
     interaction = { 'type' => 'block_actions', 'api_app_id' => 'ATEST',
                     'team' => { 'id' => 'TTEST' }, 'user' => { 'id' => 'U123' },
                     'container' => { 'type' => 'entity_detail', 'entity_url' => 'https://example.com/issues/7' },
-                    'actions' => [{ 'action_id' => 'redmine_assign_to_me' }], 'token' => 'do-not-queue' }
+                    'actions' => [{ 'action_id' => 'slackmine_assign_to_me' }], 'token' => 'do-not-queue' }
     body = URI.encode_www_form('payload' => JSON.generate(interaction))
     queued = []
-    RedmineSlackWorkObjectInteractionJob.stub(:perform_later, ->(*args) { queued << args }) do
+    SlackmineWorkObjectInteractionJob.stub(:perform_later, ->(*args) { queued << args }) do
       assert_equal :ok, dispatch(raw: body).status
       assert_equal 'ATEST', queued.first[0]
       assert_equal 'TTEST', queued.first[1]
-      assert_equal 'redmine_assign_to_me', queued.first[2].dig('actions', 0, 'action_id')
+      assert_equal 'slackmine_assign_to_me', queued.first[2].dig('actions', 0, 'action_id')
       refute queued.first[2].key?('token')
       assert_equal :unauthorized, dispatch(raw: body, signature: 'v0=' + '0' * 64).status
       assert_equal :bad_request, dispatch(raw: body + '&other=1').status
@@ -193,7 +193,7 @@ class SlackEventsControllerTest < Minitest::Test
                                 } } }, 'token' => 'do-not-queue' }
     body = URI.encode_www_form('payload' => JSON.generate(interaction))
     queued = []
-    RedmineSlackWorkObjectInteractionJob.stub(:perform_later, ->(*args) { queued << args }) do
+    SlackmineWorkObjectInteractionJob.stub(:perform_later, ->(*args) { queued << args }) do
       assert_equal :ok, dispatch(raw: body).status
       values = queued.first[2].dig('view', 'state', 'values')
       assert_equal 'Test note', values.dig('new_comment', 'new_comment.input', 'value')
@@ -208,19 +208,19 @@ class SlackEventsControllerTest < Minitest::Test
              'container' => { 'type' => 'message_attachment', 'entity_url' => 'https://example.com/issues/7',
                               'external_ref' => { 'id' => 'issue7' }, 'channel_id' => 'C123',
                               'message_ts' => '123.456', 'is_ephemeral' => true, 'other' => 'drop' },
-             'actions' => [{ 'action_id' => 'redmine_edit_issue', 'value' => 'drop' }] }
+             'actions' => [{ 'action_id' => 'slackmine_edit_issue', 'value' => 'drop' }] }
     queued = []
-    RedmineSlackWorkObjectInteractionJob.stub(:perform_later, ->(*args) { queued << args }) do
+    SlackmineWorkObjectInteractionJob.stub(:perform_later, ->(*args) { queued << args }) do
       assert_equal :ok, dispatch(raw: URI.encode_www_form('payload' => JSON.generate(card))).status
       assert_equal 'C123', queued.first[2].dig('container', 'channel_id')
       refute queued.first[2]['container'].key?('other')
       refute queued.first[2]['actions'].first.key?('value')
-      card['actions'].first['value'] = 'redmine_issue:7'
+      card['actions'].first['value'] = 'slackmine_issue:7'
       assert_equal :ok, dispatch(raw: URI.encode_www_form('payload' => JSON.generate(card))).status
-      assert_equal 'redmine_issue:7', queued.last[2].dig('actions', 0, 'value')
+      assert_equal 'slackmine_issue:7', queued.last[2].dig('actions', 0, 'value')
       assert_equal true, queued.last[2].dig('container', 'is_ephemeral')
       modal = card.merge('type' => 'view_submission', 'view' => {
-        'type' => 'modal', 'callback_id' => 'redmine_edit_issue', 'private_metadata' => '{}',
+        'type' => 'modal', 'callback_id' => 'slackmine_edit_issue', 'private_metadata' => '{}',
         'state' => { 'values' => {
           'priority' => { 'priority' => { 'selected_option' => { 'value' => '5' } } },
           'assignee' => { 'assignee' => { 'selected_option' => { 'value' => '3' } } },
@@ -246,17 +246,17 @@ class SlackEventsControllerTest < Minitest::Test
       'files' => [{ 'id' => 'F123', 'url_private' => 'do not queue', 'name' => 'screen.png' }],
       'unused_field' => 'do not queue' }
     queued = []
-    RedmineSlackThreadCommentJob.stub(:perform_later, ->(*args) { queued << args }) do
+    SlackmineThreadCommentJob.stub(:perform_later, ->(*args) { queued << args }) do
       assert_equal :ok, dispatch.status
     end
     assert_equal 1, queued.size
     args = JSON.parse(JSON.generate(queued.first))
     assert_equal [{ 'id' => 'F123' }], args.last['files']
     refute args.last.key?('unused_field')
-    assert RedmineSlackNotification::ThreadComments.reply_event?(args.last)
+    assert Slackmine::ThreadComments.reply_event?(args.last)
     received = []
-    RedmineSlackNotification::ThreadComments.stub(:process, ->(*values) { received << values }) do
-      RedmineSlackThreadCommentJob.new.perform(*args)
+    Slackmine::ThreadComments.stub(:process, ->(*values) { received << values }) do
+      SlackmineThreadCommentJob.new.perform(*args)
     end
     assert_equal args, received.first
   end
@@ -266,7 +266,7 @@ class SlackEventsControllerTest < Minitest::Test
     @payload['event'] = { 'type' => 'message', 'user' => 'U123', 'text' => 'Reply',
                           'channel' => 'C123', 'ts' => '1000.000002', 'thread_ts' => '1000.000001' }
     queued = []
-    RedmineSlackThreadCommentJob.stub(:perform_later, ->(*args) { queued << args }) do
+    SlackmineThreadCommentJob.stub(:perform_later, ->(*args) { queued << args }) do
       assert_equal :ok, dispatch.status
       assert_equal 1, queued.length
       assert_equal @payload['event'], queued.first.last

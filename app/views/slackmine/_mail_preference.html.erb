@@ -1,0 +1,7 @@
+<%= fields_for :pref, @user.pref do |pref_fields| %>
+  <p id="slackmine-mail-preference">
+    <%= pref_fields.check_box :slack_suppress_mail %>
+    <%= label_tag :pref_slack_suppress_mail, l(:label_slack_suppress_mail) %>
+    <em class="info"><%= l(:text_slack_suppress_mail) %></em>
+  </p>
+<% end %>

@@ -5,7 +5,7 @@
 require 'action_mailer'
 require 'minitest/autorun'
 require 'ostruct'
-require_relative '../lib/redmine_slack_notification/mail_preference'
+require_relative '../lib/slackmine/mail_preference'
 
 class PreferenceTestMailer < ActionMailer::Base
   self.delivery_method = :test
@@ -19,7 +19,7 @@ class PreferenceTestMailer < ActionMailer::Base
     mail(to: user.mail, subject: 'Password', body: 'Password notification')
   end
 
-  prepend RedmineSlackNotification::MailerPatch
+  prepend Slackmine::MailerPatch
 end
 
 class MailPreferenceActionMailerTest < Minitest::Test
@@ -29,7 +29,7 @@ class MailPreferenceActionMailerTest < Minitest::Test
   end
 
   def test_suppressed_action_produces_null_mail_and_no_delivery
-    RedmineSlackNotification::MailPreference.stub(:suppress?, true) do
+    Slackmine::MailPreference.stub(:suppress?, true) do
       message = PreferenceTestMailer.issue_add(@user, Object.new)
       assert_instance_of ActionMailer::Base::NullMail, message.message
       message.deliver_now
@@ -38,7 +38,7 @@ class MailPreferenceActionMailerTest < Minitest::Test
   end
 
   def test_retained_action_delivers_original_mail
-    RedmineSlackNotification::MailPreference.stub(:suppress?, false) do
+    Slackmine::MailPreference.stub(:suppress?, false) do
       PreferenceTestMailer.issue_add(@user, Object.new).deliver_now
     end
     assert_equal 1, ActionMailer::Base.deliveries.size
@@ -46,7 +46,7 @@ class MailPreferenceActionMailerTest < Minitest::Test
   end
 
   def test_password_mail_does_not_consult_suppression_policy
-    RedmineSlackNotification::MailPreference.stub(:suppress?, ->(*) { flunk 'Account email must bypass policy' }) do
+    Slackmine::MailPreference.stub(:suppress?, ->(*) { flunk 'Account email must bypass policy' }) do
       PreferenceTestMailer.lost_password(@user).deliver_now
     end
     assert_equal 'Password', ActionMailer::Base.deliveries.first.subject

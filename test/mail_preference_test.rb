@@ -2,10 +2,10 @@
 require_relative 'slash_commands_edit_test'
 
 class MailPreferenceTest < Minitest::Test
-  POLICY = RedmineSlackNotification::MailPreference
+  POLICY = Slackmine::MailPreference
 
   def setup
-    @pref = Class.new(Hash) { include RedmineSlackNotification::UserPreferencePatch }.new
+    @pref = Class.new(Hash) { include Slackmine::UserPreferencePatch }.new
     @pref.slack_suppress_mail = '1'
     @user = OpenStruct.new(login: 'example', mail: 'example@example.com', pref: @pref)
     @project = OpenStruct.new(identifier: 'example', active?: true)
@@ -19,9 +19,9 @@ class MailPreferenceTest < Minitest::Test
   end
 
   def configured
-    RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackNotification.stub(:event_enabled?, ->(_project, event) { !@disabled.include?(event) }) do
-        RedmineSlackNotification.stub(:slack_api, ->(method, params, token, **options) {
+    Slackmine.stub(:config, @settings) do
+      Slackmine.stub(:event_enabled?, ->(_project, event) { !@disabled.include?(event) }) do
+        Slackmine.stub(:slack_api, ->(method, params, token, **options) {
           @calls << [method, params, token, options]
           result = @responses.shift
           raise result if result.is_a?(Exception)
@@ -37,7 +37,7 @@ class MailPreferenceTest < Minitest::Test
 
   def journal(notes: '', private_notes: false, details: [])
     object = OpenStruct.new(journalized: @issue, notes: notes, private_notes?: private_notes)
-    object.extend(RedmineSlackNotification::JournalPatch)
+    object.extend(Slackmine::JournalPatch)
     object.define_singleton_method(:visible_details) { |_user| details }
     object
   end
@@ -73,7 +73,7 @@ class MailPreferenceTest < Minitest::Test
   def test_missing_or_ambiguous_name_match_retains_mail
     @settings['users'] = {}
     @settings['slack']['auto_map_users_by_name'] = true
-    RedmineSlackNotification.stub(:slack_user_id_for_name, nil) { refute suppress }
+    Slackmine.stub(:slack_user_id_for_name, nil) { refute suppress }
     assert_empty @calls
   end
 
@@ -84,7 +84,7 @@ class MailPreferenceTest < Minitest::Test
   end
 
   def with_name_match
-    RedmineSlackNotification.stub(:slack_user_id_for_name, 'U123') { yield }
+    Slackmine.stub(:slack_user_id_for_name, 'U123') { yield }
   end
 
   def test_automatic_name_match_with_verified_email_suppresses_mail
@@ -136,7 +136,7 @@ class MailPreferenceTest < Minitest::Test
   def test_manual_mapping_blocks_automatic_fallback_when_invalid
     automatic_identity
     @settings['users'][@user.login] = false
-    RedmineSlackNotification.stub(:slack_user_id_for_name, ->(*) { flunk 'Manual mapping must win' }) do
+    Slackmine.stub(:slack_user_id_for_name, ->(*) { flunk 'Manual mapping must win' }) do
       refute suppress
     end
     assert_empty @calls
@@ -175,7 +175,7 @@ class MailPreferenceTest < Minitest::Test
   end
 
   def test_missing_token_retains_mail
-    RedmineSlackNotification.stub(:bot_token, '') { refute suppress }
+    Slackmine.stub(:bot_token, '') { refute suppress }
     assert_empty @calls
   end
 
@@ -191,8 +191,8 @@ class MailPreferenceTest < Minitest::Test
 
   def test_real_event_configuration_can_retain_mail
     @settings['events'] = { 'issue' => { 'created' => false } }
-    RedmineSlackNotification.stub(:config, @settings) do
-      RedmineSlackNotification.stub(:slack_api, ->(*) { flunk 'Disabled event must not check Slack' }) do
+    Slackmine.stub(:config, @settings) do
+      Slackmine.stub(:slack_api, ->(*) { flunk 'Disabled event must not check Slack' }) do
         refute POLICY.suppress?(@user, :issue_add, @issue)
       end
     end
@@ -221,7 +221,7 @@ class MailPreferenceTest < Minitest::Test
   def test_api_failure_retains_mail_and_restores_project_context
     @responses = [IOError.new('unavailable')]
     refute suppress
-    assert_nil Thread.current[:redmine_slack_notification_project]
+    assert_nil Thread.current[:slackmine_project]
   end
 
   def test_membership_is_checked_again_for_next_mail
@@ -261,10 +261,10 @@ class MailPreferenceTest < Minitest::Test
 
   def test_empty_journal_and_slack_origin_keep_mail
     refute suppress(:issue_edit, journal)
-    Thread.current[:redmine_slack_thread_comment] = true
+    Thread.current[:slackmine_thread_comment] = true
     refute suppress
   ensure
-    Thread.current[:redmine_slack_thread_comment] = nil
+    Thread.current[:slackmine_thread_comment] = nil
   end
 
   def test_supported_wiki_and_news_actions
@@ -294,7 +294,7 @@ class MailPreferenceTest < Minitest::Test
       def lost_password(user)
         [:password, user]
       end
-      prepend RedmineSlackNotification::MailerPatch
+      prepend Slackmine::MailerPatch
     end
     mailer = klass.new
     configured { assert_nil mailer.issue_add(@user, @issue) }
