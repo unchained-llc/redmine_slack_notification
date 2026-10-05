@@ -69,7 +69,7 @@ class RedmineSlackEventsController < ActionController::Base
         # The watch confirmation has no input blocks; Slack may omit state.
         values = {} if values.nil? && source['type'] == 'modal' && source['callback_id'] == 'redmine_watch_settings'
         return head :bad_request unless values.is_a?(Hash)
-        interaction['view']['state'] = { 'values' => values.slice('status', 'priority', 'assignee', 'due_date', 'new_comment') }
+        interaction['view']['state'] = { 'values' => values.slice('status', 'priority', 'assignee', 'due_date', 'new_comment', 'description') }
       end
       watch_action = source_key == 'container' && Array(interaction['actions']).one? &&
                      %w[redmine_watch redmine_unwatch].include?(interaction['actions'].first['action_id'])

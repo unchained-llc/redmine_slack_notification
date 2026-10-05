@@ -225,6 +225,7 @@ class SlackEventsControllerTest < Minitest::Test
           'priority' => { 'priority' => { 'selected_option' => { 'value' => '5' } } },
           'assignee' => { 'assignee' => { 'selected_option' => { 'value' => '3' } } },
           'due_date' => { 'due_date' => { 'selected_date' => '2026-10-12' } },
+          'description' => { 'description' => { 'value' => 'Updated description' } },
           'unrelated' => { 'value' => 'drop' }
         } }
       })
@@ -233,6 +234,7 @@ class SlackEventsControllerTest < Minitest::Test
       assert_equal '5', values.dig('priority', 'priority', 'selected_option', 'value')
       assert_equal '3', values.dig('assignee', 'assignee', 'selected_option', 'value')
       assert_equal '2026-10-12', values.dig('due_date', 'due_date', 'selected_date')
+      assert_equal 'Updated description', values.dig('description', 'description', 'value')
       refute values.key?('unrelated')
     end
   end

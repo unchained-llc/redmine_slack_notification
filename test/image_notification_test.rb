@@ -2312,6 +2312,7 @@ class WorkObjectDetailsTest < Minitest::Test
       self.priority_id = attrs['priority_id'].to_i if attrs['priority_id']
       self.priority = IssuePriority.active.find { |priority| priority.id == priority_id } if attrs['priority_id']
       self.due_date = attrs['due_date'].empty? ? nil : Date.iso8601(attrs['due_date']) if attrs.key?('due_date')
+      self.description = attrs['description'] if attrs.key?('description')
     end
     @issue.define_singleton_method(:init_journal) do |_viewer, note|
       (@events ||= []) << :journal
@@ -2559,6 +2560,66 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_empty capture_interaction(button)
   end
 
+  def test_description_edit_preserves_raw_text_and_saves_with_journal
+    prepare_action_issue
+    @issue.description = "  # Heading\n\nOriginal body\n "
+    field = capture_details.first[1].dig('metadata', 'entity_payload', 'fields', 'description')
+    assert_equal @issue.description, field['value']
+    assert_equal true, field.dig('edit', 'enabled')
+    modal = WORK.edit_modal(@issue, @user, {})
+    assert_equal @issue.description, modal['blocks'].find { |block| block['block_id'] == 'description' }.dig('element', 'initial_value')
+    submission = action_payload('view_submission', 'view')
+    submission['view']['state'] = { 'values' => { 'description' => { 'description.input' => { 'value' => "Changed\n本文" } } } }
+    capture_interaction(submission)
+    assert_equal "Changed\n本文", @issue.description
+    assert_equal [:journal, :attributes], @issue.events
+    count = @issue.events.length
+    capture_interaction(submission)
+    assert_equal count, @issue.events.length
+    submission['view']['state']['values']['description']['description.input']['value'] = nil
+    capture_interaction(submission)
+    assert_equal '', @issue.description
+    field = capture_details.first[1].dig('metadata', 'entity_payload', 'fields', 'description')
+    assert_equal '', field['value']
+    assert_equal true, field.dig('edit', 'enabled')
+  end
+
+  def test_description_edit_rechecks_permission_and_never_saves_a_truncated_long_body
+    prepare_action_issue
+    @issue.description = 'Original'
+    @issue.define_singleton_method(:safe_attribute?) { |attribute, _viewer| attribute != 'description' }
+    refute capture_details.first[1].dig('metadata', 'entity_payload', 'fields', 'description').key?('edit')
+    RedmineSlackNotification.stub(:config, @settings) { assert_equal :restricted, WORK.update_issue(@issue, @user, description: 'Forbidden') }
+    assert_equal 'Original', @issue.description
+    @issue.define_singleton_method(:safe_attribute?) { |*| true }
+    @issue.description = 'あ' * 3001
+    refute capture_details.first[1].dig('metadata', 'entity_payload', 'fields', 'description').key?('edit')
+    refute WORK.edit_modal(@issue, @user, {})['blocks'].any? { |block| block['block_id'] == 'description' }
+    RedmineSlackNotification.stub(:config, @settings) { assert_equal :restricted, WORK.update_issue(@issue, @user, description: 'Shortened') }
+    assert_equal 3001, @issue.description.length
+    assert_empty @issue.events
+    @issue.description = 'Original'
+    RedmineSlackNotification.stub(:config, @settings) { assert_equal :restricted, WORK.update_issue(@issue, @user, description: 'a' * 3001) }
+    assert_equal 'Original', @issue.description
+  end
+
+  def test_description_modal_submission_and_comment_form_isolation
+    prepare_action_issue
+    @issue.description = 'Original'
+    form = WORK.edit_modal(@issue, @user, action_payload('block_actions', 'container')['container'])
+    form['state'] = { 'values' => { 'description' => { 'description' => { 'value' => 'Modal update' } } } }
+    submission = action_payload('view_submission', 'view')
+    submission['view'] = form
+    capture_interaction(submission)
+    assert_equal 'Modal update', @issue.description
+    form['callback_id'] = 'redmine_add_comment'
+    form['state']['values'] = { 'description' => { 'description' => { 'value' => 'Must not change' } },
+                              'new_comment' => { 'new_comment' => { 'value' => 'Only a comment' } } }
+    capture_interaction(submission)
+    assert_equal 'Modal update', @issue.description
+    assert_equal 'Only a comment', @issue.notes.last
+  end
+
   def test_detail_edit_action_opens_the_issue_modal
     prepare_action_issue
     button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'redmine_edit_issue' }])
@@ -2674,7 +2735,7 @@ class WorkObjectDetailsTest < Minitest::Test
     calls = capture_interaction(click)
     assert_equal ['views.open'], calls.map(&:first)
     modal = calls.first[1]['view']
-    assert_equal %w[status priority assignee due_date new_comment], modal['blocks'].map { |block| block['block_id'] }
+    assert_equal %w[description status priority assignee due_date new_comment], modal['blocks'].map { |block| block['block_id'] }
     context = JSON.parse(modal['private_metadata'])
     assert_equal @url, context['entity_url']
     assert_equal @event['external_ref'], context['external_ref']

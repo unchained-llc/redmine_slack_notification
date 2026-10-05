@@ -353,6 +353,8 @@ The first two available actions are primary buttons and the next five are overfl
 
 Detail panes filter actions for the viewer's permissions, assignee, and watcher state. Shared cards cannot personalize buttons per viewer, so permissions and personal state are checked when invoked. Labels use the corresponding `messages.work_objects` keys.
 
+Description editing is available in the Work Object detail pane and the Issue edit modal when Redmine allows the acting user to edit `description`. The full raw text is used, including whitespace and Markdown. Slack text inputs support at most 3,000 characters: longer existing descriptions remain read-only and the modal links to the full Redmine edit form. Long descriptions are never shortened for saving. Clearing an editable description saves an empty value. Saves recheck permissions and record changes through the normal Redmine journal and notification path.
+
 With `watch: true`, both shared cards and detail panes open Watch settings showing your current state and a Watch or Unwatch submit button. The current state is checked on click, so a stale Watch/Unwatch label cannot prevent switching the setting. Opening the form does not change the watch state. Watch forms open synchronously to avoid queue delays expiring Slack modal triggers; confirmation saves on the Slack queue. Input-free confirmation payloads are accepted. There is no separate `unwatch` button setting. Labels use `messages.work_objects.watch_settings`, `watching`, `not_watching`, `watch`, and `unwatch`.
 
 ### Match viewers by email

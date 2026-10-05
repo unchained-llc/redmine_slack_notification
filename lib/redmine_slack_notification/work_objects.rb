@@ -175,6 +175,11 @@ module RedmineSlackNotification
       return metadata unless actions_enabled?(issue)
 
       fields = metadata.fetch('entity_payload').fetch('fields')
+      if issue.attributes_editable?(viewer) && issue.safe_attribute?('description', viewer) && issue.description.to_s.length <= 3000
+        # Use the full raw text, not the shortened/stripped display value.
+        fields['description'] = { 'value' => issue.description.to_s, 'format' => 'markdown',
+          'edit' => { 'enabled' => true, 'optional' => true, 'text' => { 'max_length' => 3000 } } }
+      end
       if issue.attributes_editable?(viewer) && issue.safe_attribute?('assigned_to_id', viewer)
         options = assignee_options(issue)
         if options
@@ -251,6 +256,16 @@ module RedmineSlackNotification
       return unless comment_only ? issue.notes_addable?(viewer) : issue.attributes_editable?(viewer)
 
       blocks = []
+      if !comment_only && !assignee_only && issue.safe_attribute?('description', viewer)
+        if issue.description.to_s.length <= 3000
+          element = { 'type' => 'plain_text_input', 'action_id' => 'description', 'multiline' => true, 'max_length' => 3000 }
+          element['initial_value'] = issue.description.to_s unless issue.description.to_s.empty?
+          blocks << { 'type' => 'input', 'block_id' => 'description', 'optional' => true,
+                      'label' => { 'type' => 'plain_text', 'text' => Formatter.field_label('description') }, 'element' => element }
+        else
+          blocks << Formatter.section_text("<#{Formatter.url("/issues/#{issue.id}/edit")}|#{SlashCommands.message('full_form')}>")
+        end
+      end
       if !comment_only && issue.safe_attribute?('status_id', viewer)
         statuses = issue.new_statuses_allowed_to(viewer)
         blocks << select_input('status', Formatter.field_label('status'), statuses, issue.status_id) if statuses.any? { |status| status.id == issue.status_id }
@@ -498,17 +513,21 @@ module RedmineSlackNotification
           due_date = values.dig('due_date', modal ? 'due_date' : 'due_date.input', 'selected_date')
           due_date = '' if values.key?('due_date') && due_date.nil?
           comment = values.dig('new_comment', modal ? 'new_comment' : 'new_comment.input', 'value')
+          description = values.dig('description', modal ? 'description' : 'description.input', 'value')
+          description = '' if values.key?('description') && description.nil?
           return unless status.nil? || status.to_s.match?(/\A[1-9]\d*\z/)
           return unless priority.nil? || priority.to_s.match?(/\A[1-9]\d*\z/)
           return unless assignee.nil? || assignee == 'none' || assignee.to_s.match?(/\A[1-9]\d*\z/)
           return unless due_date.nil? || due_date == '' || valid_date?(due_date)
           return unless comment.nil? || (comment.is_a?(String) && comment.length <= 3000)
+          return unless description.nil? || (description.is_a?(String) && description.length <= 3000)
           if modal && source['callback_id'] == 'redmine_add_comment'
             return if comment.to_s.strip.empty?
             status = priority = assignee = due_date = nil
+            description = nil
           end
           outcome = update_issue(issue, viewer, assigned_to_id: assignee, status_id: status,
-                                 priority_id: priority, due_date: due_date, comment: comment)
+                                 priority_id: priority, due_date: due_date, comment: comment, description: description)
         end
         Rails.logger&.info("RedmineSlackNotification: Work Object interaction issue=#{issue.id} result=#{outcome}")
         if (outcome == :saved || outcome == :unchanged) && context['is_ephemeral'] != true &&
@@ -568,13 +587,18 @@ module RedmineSlackNotification
       false
     end
 
-    def update_issue(issue, viewer, assigned_to_id: nil, status_id: nil, priority_id: nil, due_date: nil, comment: nil)
+    def update_issue(issue, viewer, assigned_to_id: nil, status_id: nil, priority_id: nil, due_date: nil, comment: nil, description: nil)
       previous_user = User.current
       User.current = viewer
       issue.with_lock do
         next :restricted unless issue.project.active? && !issue.is_private? && issue.visible?(viewer) &&
                                 actions_enabled?(issue)
         attrs = {}
+        unless description.nil?
+          next :restricted unless description.is_a?(String) && description.length <= 3000 && issue.description.to_s.length <= 3000 &&
+                                  issue.attributes_editable?(viewer) && issue.safe_attribute?('description', viewer)
+          attrs['description'] = description unless issue.description.to_s == description
+        end
         unless assigned_to_id.nil?
           next :restricted unless issue.attributes_editable?(viewer) && issue.safe_attribute?('assigned_to_id', viewer) &&
                                   (assigned_to_id.to_s == 'none' ||
