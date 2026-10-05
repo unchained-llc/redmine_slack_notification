@@ -1,0 +1,141 @@
+{
+  "common": "Use case: ui-mockup. Create a precise English documentation UI illustration, landscape 1536x1024. Render only the narrowly cropped feature area specified below, on white/light gray, sharp system sans-serif text. DO NOT add an application sidebar, global navigation, dashboards, settings tabs, explanatory callouts, logos, extra buttons or fields. Do not turn plain text into badges. No outer device frame. All data is fictional: Alice Example, Sam Example, Website, #website, #1042 Improve onboarding, redmine.example.com. The little app avatar may be a neutral R square, not an invented logo. Preserve EVERY exact label and field order. Do not prettify by changing Slack's plain Block Kit controls. Footer outside the feature crop: 'Illustrative example · Fictional data · Layout may vary by Slack client'. ",
+  "specs": [
+    [
+      "event-notifications",
+      "Crop a Slack channel message area with 3 bot messages from Redmine, neutral R avatar and timestamps. Each has a WHITE attachment with only thin purple #6D5DFB vertical line. Message1 exact '🆕 Issue created' (NO actor in this heading), blue bold '#1042 Improve onboarding', Content 'Simplify the first-time setup flow.', divider Metadata two-column Project Website, Updated by Alice Example, Tracker Task, Category Not set, Priority Normal. Message2 exact '✏️ Wiki page updated' (NO actor in heading), blue Deployment guide, Body diff with monospace '- Run setup manually' and '+ Run the setup script', divider Metadata Project Website, Updated by Sam Example, Changed location Deployment guide. Message3 exact '⏱️ Time entry created' (NO actor in heading), blue linked '#320', divider Metadata Project Website, Updated by Sam Example, Hours 1.5h, Spent on 2026-11-05. Do not replace time entry ID with issue subject. No footer links/buttons/status badges/category colors."
+    ],
+    [
+      "notification-formatting",
+      "Crop one Slack Redmine notification attachment with white background and thin purple vertical line. Exact content in this order: '🔄 Alice Example Issue updated'; blue bold '#1042 Improve onboarding'; bold 'Description diff'; monospaced diff code block containing '- Start with three steps' and '+ Start with two steps', subtle diff styling confined to code block; divider; bold 'Changes'; plain two-column fields 'Status' with 'New → In progress', 'Due date' with '2026-11-10 → 2026-11-12'; divider; bold 'Metadata'; two-column label/value fields Project Website, Updated by Alice Example, Tracker Task, Category Not set, Priority Normal, Status In progress, Assignee @Alice Example as Slack mention, Due date 2026-11-12. No invented description changes heading, no full card/status badges, no buttons, no image."
+    ],
+    [
+      "channel-routing",
+      "Show a GENERIC text editor crop titled config/redmine_slack_notification.yml with only this valid root-indented YAML, exact text:\nslack:\n  default_channel_id: 'CEXAMPLE01'\nprojects:\n  product:\n    channel_id: 'CEXAMPLE02'\n  website:\n    channel_id: 'CEXAMPLE03'\nNo GUI settings or sidebar. Below editor, small plainly titled 'Routing order' with three simple text boxes 'Own project' → 'Nearest parent project' → 'Global default'. This is a configuration illustration, not an actual app page. Never indent projects under slack. No secrets."
+    ],
+    [
+      "work-object-previews",
+      "Crop actual Slack Work Object card left and native entity detail pane right, NO surrounding channel/sidebar/composer. Match native Slack screenshot structure: card title 'Improve onboarding'; subline 'Issue #1042 in Redmine · Preview in Slack'. Three fields across horizontal row Assignee Alice Example, Due date 2026/11/12, Status In progress. Horizontal footer: 'Updated just now', 'Reload' text link, buttons 'Open Redmine', 'Edit issue'. Right details panel narrow vertical: top 'Issue  Redmine' with sync, expand, edit and close small native icons; title Improve onboarding, source #1042 link; tabs Details and Conversation. Vertical labels values Description / Simplify the first-time setup flow.; Creator / Sam Example; Created / 2 days ago; Updated / just now; Assignee / Alice Example; Status / In progress; Due date / 2026/11/12; Priority / Normal; Project / Website. Bottom actions Open Redmine and Edit issue. Plain native gray fields, no decorative per-field icons, no status blue badge, no project field in the small preview card."
+    ],
+    [
+      "issue-actions",
+      "Crop ONLY a native Slack modal, without a dimmed invented background. Title 'Edit issue #1042', close X. EXACT field order: Description optional multiline prefilled 'Simplify the first-time setup flow.'; Status dropdown In progress; Priority dropdown Normal; Assignee dropdown Alice Example; Due date optional datepicker 2026-11-12; Add comment optional multiline 'The setup guide is ready for review.'. Description MUST be present at the top. Footer Cancel and Save, Save normal Slack green. No other inputs, no percentage. Fit all six fields clearly."
+    ],
+    [
+      "comment-threads",
+      "Crop Slack channel root comment left and native Thread pane right, no surrounding sidebar. Left Redmine app message has WHITE purple-left-line notification attachment, exact '💬 Comment added', blue '#1042 Improve onboarding', divider, bold Added comment, 'The draft is ready for review.', and native '2 replies' beneath. Thread pane right repeats root then TWO bot replies, each SIMPLE Slack text, no purple attachment line and NO repeated issue card, NO Comment added header in replies. First reply exact linked heading 'Redmine #1042: New comment' and body 'Please check the new setup steps.'. Second exact same heading 'Redmine #1042: New comment' and body 'Updated the screenshots.'. Replies do NOT include author in heading, metadata, Added comment label, buttons, or nested entity cards. Default thread payload is deliberately simple. Preserve this exact difference between root and replies."
+    ],
+    [
+      "thread-replies",
+      "Crop ONLY a Redmine issue journal comment, no complete invented app chrome or split screen. Top 'Alice Example updated just now'. White rounded Slack quote card max 680px wide, thin border #d5d9df and 4px purple #6D5DFB left border. Header small neutral A avatar, bold 'Alice Example', gray '· #website · 2026/11/05 10:12'. Body 'Looks good. I will test it today.'. Footer actual multicolor Slack mark followed by blue bold 'Open in Slack'. This is an automatically imported notification-thread reply. CRITICAL no nested parent card, no Thread reply label, no raw URL, no save confirmation in Redmine. Only journal and quote card."
+    ],
+    [
+      "slash-commands",
+      "Crop native Slack private command response, no sidebar or message showing posted slash command. Gray small native 'Only visible to you'. Redmine bot neutral R avatar. Plain bold heading '📋 Issues (up to 10 results)'. Thin purple-left-border white attachment: bold 'Search results (3)' followed three single bullet lines with blue clickable issue title, plain project and timing suffix: '• #1042 Improve onboarding · Website · 7d left'; '• #1048 Update welcome email · Website · 8d left'; '• #1051 Review setup checklist · Website · 9d left'. No status fields, badges, result cards, extra buttons, or invented 'Found 3 issues'. Below response, native composer with UNSENT '/redmine search onboarding'. Clear all labels exactly."
+    ],
+    [
+      "message-to-issue",
+      "Side by side TWO separate native Slack modal crops on plain gray canvas, step numbers small 1 and 2 OUTSIDE UI. First modal exact title 'New issue', paragraph 'Choose a project (up to 100). The next form includes the selected message and its source link.', field Project dropdown Website, Cancel and Continue. Second modal exact title 'New issue', top blue link 'Open the full form in Redmine', fields in exact order Tracker dropdown Task, Subject single line 'Please improve the first-time setup guide.', Description multiline 'Please improve the first-time setup guide.\\n\\nSource Slack message: https://example.slack.com/archives/CEXAMPLE01/p1793872800000001'. Footer Cancel and Save. NO Project field in second modal, NO Create button, no action menu simultaneously floating over a modal, no attachments or AI summary."
+    ],
+    [
+      "slack-link-cards",
+      "Crop ONLY a Redmine journal comment. Top Alice Example updated 2 minutes ago. Thin purple-left-border white quote card with exact header small neutral S avatar, bold Sam Example, gray '· #website · 2026/11/05 09:30'. Body 'The onboarding draft is ready. Please review the two setup steps.'. Card footer actual Slack multicolor mark plus blue bold Open in Slack link. Below outside card normal text 'Added this to the review checklist.'. Rounded8px border, no fake action bar/sidebar, no raw URL and no extra quote marks."
+    ],
+    [
+      "due-reminders",
+      "Crop ONLY a native Slack DM from Redmine with neutral R avatar timestamp9:00 AM. Bold heading '📋 Due reminders: 3'. Three plain white attachments separated by margin with thin colored vertical lines: first red #D92D20 label bold '🚨 Overdue (1)', single bullet line blue '#1038 Update help center' then plain '· Website · 2d overdue'; second orange #F79009 label bold '⏰ Due today (1)', line blue '#1042 Improve onboarding' then plain '· Website'; third purple #6D5DFB label bold '📅 Due soon (1)', line blue '#1048 Update welcome email' then plain '· Website · 2d left'. No big colored badges, backgrounds, dates, Project labels, source buttons or duplicated Open in Redmine links. Each issue title itself is a link."
+    ],
+    [
+      "app-home",
+      "Crop ONLY native Slack App Home content area. Header My issues. All sections dropdown with adjacent Refresh on left. Then FOUR compact native Slack data tables with one caption each: Updated by me · 1; Due this week · 1; Assigned to me · 1; Reported by me · 1. Each has FIVE exact headers Subject / Status / Assignee / Due date / Edit issue. Subject column widest40%, blue bold '#1042 Improve onboarding', gray Website on second line; In progress; Alice Example;2026-11-12; button Edit issue. SAME issue data in ALL FOUR tables. Per-table native magnifier,expand,ellipsis compact toolbar. No duplicate headings or extra Project column, no Title / Project header, no Edit shorthand. Footer within home 'Up to 10 open issues per section. Open details or refresh to get current data.'. No sidebar/settings/analytics. Plain native gray headers white rows. Fit four single-row tables with reasonable readable spacing."
+    ],
+    [
+      "user-mapping",
+      "Generic text editor crop titled config/redmine_slack_notification.yml, not inside a Slack message and not in a plugin settings page. Exact YAML roots users and slack aligned, values quoted:\nusers:\n  alice: 'UEXAMPLE01'\n  sam: 'UEXAMPLE02'\nslack:\n  auto_map_users_by_name: false\n  auto_map_users_by_email: true\nOutside editor below, small text 'Explicit mappings take priority. Email matching authorizes incoming actions; name matching resolves outgoing mentions.' No made-up account mapping GUI, no Settings menu, no bot message claiming to publish configuration."
+    ],
+    [
+      "email-preference",
+      "Crop ONLY a native Redmine My account email notifications fieldset on white, no purple app chrome or fake Settings tabs. Heading 'Email notifications'. Label 'Email notifications' dropdown 'For any event on all my projects'. Checkbox unchecked 'I do not want to be notified of changes that I make myself'. Checkbox checked 'Skip email for notifications covered by Slack'. Gray help paragraph EXACT 'Skip supported notification emails when Slack notifications are enabled and your mapped Slack account belongs to the destination channel. Account and security emails are unaffected. Slack delivery success is not checked.'. No confirmation, extra buttons, Slack settings or invented security panels."
+    ]
+  ],
+  "sections": [
+    [
+      "event-notifications",
+      "## Event switches",
+      "## イベントの切り替え"
+    ],
+    [
+      "notification-formatting",
+      "## Notification content",
+      "## 通知内容"
+    ],
+    [
+      "channel-routing",
+      "### Inherit a parent project channel",
+      "### 親プロジェクトのチャンネルを継承する"
+    ],
+    [
+      "work-object-previews",
+      "### Ticket Work Object Previews",
+      "### チケットの Work Object Previews"
+    ],
+    [
+      "issue-actions",
+      "### Work Object card and detail actions",
+      "### Work Object カードと詳細パネルからの操作"
+    ],
+    [
+      "comment-threads",
+      "### Threaded Redmine comment notifications",
+      "### Redmineコメント通知をスレッドにまとめる"
+    ],
+    [
+      "thread-replies",
+      "### Add Redmine comments from notification threads",
+      "### 通知スレッドからRedmineにコメントを追加"
+    ],
+    [
+      "slash-commands",
+      "## Slash command",
+      "## スラッシュコマンド"
+    ],
+    [
+      "message-to-issue",
+      "## Create an Issue from a Slack message",
+      "## Slackメッセージからチケット作成"
+    ],
+    [
+      "slack-link-cards",
+      "## Slack message cards in issue text",
+      "## Redmine本文内のSlackリンクカード"
+    ],
+    [
+      "due-reminders",
+      "## Daily due-date DMs",
+      "## 毎日の期日リマインダー DM"
+    ],
+    [
+      "app-home",
+      "## App Home issue lists",
+      "## App Homeのチケット一覧"
+    ],
+    [
+      "user-mapping",
+      "### Assignee mentions",
+      "### 担当者のメンション"
+    ],
+    [
+      "email-preference",
+      "## Personal email preference",
+      "## 個人ごとの通知メール設定"
+    ]
+  ],
+  "revisions": {
+    "thread-replies": "Only fix one layout error: the Slack source link and small multicolor Slack mark must be INSIDE the quote card below the reply body. Extend the rounded outer border and purple left edge downward to enclose that existing Slack link. Keep the link left aligned at the same inset as the body. No separate source link outside the card. Preserve all other content and English wording exactly. Keep the original image size.",
+    "slack-link-cards": "Only fix the source link text at bottom inside quote card: replace '#1042 Improve onboarding' with exact single word 'Slack'. Keep the small multicolor Slack mark immediately before it. This link opens Slack, NOT a Redmine issue. Preserve every other text, field and layout. Do not add new content. Keep original image size."
+  },
+  "label_revisions": {
+    "thread-replies": "Replace only the source link label beside the existing Slack icon with 'Open in Slack'; preserve all other content and layout.",
+    "slack-link-cards": "Replace only the source link label beside the existing Slack icon with 'Open in Slack'; preserve all other content and layout."
+  }
+}

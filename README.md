@@ -27,6 +27,8 @@ The plugin provides notifications, Work Object actions, and optional slash comma
 
 Work Object previews/actions, slash commands, thread integration, and reminders require their respective configuration and Slack app scopes/events. The personal email option is off by default. See each linked section for setup and limits.
 
+The images below illustrate supported feature content and controls using fictional English data. They are not live screenshots or pixel-exact reproductions of Slack; surrounding navigation is omitted, and configuration examples show YAML rather than a settings GUI. Both language versions share the same images.
+
 ## Requirements and setup
 
 - Redmine 7.0 or later.
@@ -89,6 +91,8 @@ projects:
 ```
 
 ## Event switches
+
+![Event switches](docs/images/features/event-notifications.webp)
 
 The `events` tree controls delivery. The table gives every supported leaf and its default when omitted. `true` enables an event and `false` disables it; use YAML booleans, not quoted strings.
 
@@ -157,6 +161,8 @@ Deletion of Wiki pages, News, time entries, and Versions defaults to off because
 
 ## Notification content
 
+![Notification content](docs/images/features/notification-formatting.webp)
+
 The card contains an event heading, a link to the Redmine record, and relevant text or changed fields. Issue creation and updates include the configured current-value metadata; comment-only and deletion notifications do not. Other event types show their metadata unless disabled below. `slack.attachment_color` changes the card's left border:
 
 ```yaml
@@ -218,6 +224,8 @@ Issue creation includes the description. New comments include their text. An Iss
 Redmine Markdown is converted for Slack text. Numbered lists use Slack `markdown` blocks so repeated `1.` markers render as an ordered list; longer content uses `mrkdwn` sections to stay within Slack's 12,000-character Markdown-block budget.
 
 ### Ticket Work Object Previews
+
+![Ticket Work Object Previews](docs/images/features/work-object-previews.webp)
 
 Set `slack.work_object_previews: true` to add Slack **Task Work Object** metadata to public Issue creation, update, and comment notifications. Omitted or `false` preserves existing notifications. The event body, change diffs, colored attachments, and images remain; Slack can display an additional Work Object card. Deleted Issues, non-Issue notifications, and daily due-date DMs are excluded.
 
@@ -311,6 +319,8 @@ The main card Add comment button opens a comment-only modal. It requires comment
 
 ### Work Object card and detail actions
 
+![Work Object card and detail actions](docs/images/features/issue-actions.webp)
+
 Set `slack.work_object_actions: true` to show status, assignee (including unassigned), priority, and due date plus the Add comment and Open in source service buttons on every public Issue Work Object card with previews enabled. Set `work_object_actions: false` to disable these features. Edit issue opens a Slack modal for permitted status, assignee, priority, due date, and comment changes. The default is disabled. Enable **Interactivity & Shortcuts** in the Slack app and set its Request URL to `https://redmine.example.com/redmine_slack/interactions`. The same `slack.events` signing configuration authenticates the requests.
 
 ```yaml
@@ -374,6 +384,8 @@ This is distinct from `auto_map_users_by_name`, which only resolves outgoing men
 
 ### Inherit a parent project channel
 
+![Inherit a parent project channel](docs/images/features/channel-routing.webp)
+
 For each level, the plugin first checks explicit `slack.default_channel_id` or legacy `channel_id`, then a unique match between the Redmine display name and an existing Slack channel when automatic matching is enabled. It starts with the issue's own project, then follows the actual Redmine parent hierarchy from nearest to farthest. The global default is used only if no project in the hierarchy resolves a channel. Thus a child with no matching channel can use its parent's existing channel without repeating channel IDs in YAML. A child's own name match takes priority over any ancestor setting.
 
 This applies only to destination channels; bot tokens, events, messages, users, and reminder settings keep their existing global/project rules. The bot used by the child must have access to the selected channel. Moving a project changes its inherited destination. `slack.auto_map_channels_by_name: true` must be enabled for the child to search names throughout the hierarchy; each ancestor also uses its own effective automatic-matching setting. Setting it to `false` on the child disables all name lookup, while explicit ancestor channels remain available.
@@ -408,6 +420,8 @@ Automatic routing also applies to comment notification threads and Slack-to-Redm
 
 ### Threaded Redmine comment notifications
 
+![Threaded Redmine comment notifications](docs/images/features/comment-threads.webp)
+
 Set `slack.comment_notifications_in_threads: true` to post comment-only additions, edits, and deletions in the latest matching Issue notification thread in the configured channel. Omitted or `false` keeps channel posts. Updates that also contain enabled Issue changes remain channel posts. When a thread is found, new comments show a configurable heading and the formatted comment body, without repeating the Issue link, full event card, or Work Object preview. Comment edits retain the configured body/diff presentation; deletions retain the removal diff. Images continue to be supported. Channel fallback uses the full notification. This option works independently of `slack.thread_comments` and Work Object Previews.
 
 ```yaml
@@ -432,6 +446,8 @@ messages:
 Each delivery searches up to three history pages, requesting 100 messages per page (Slack may return fewer). Only root notifications from the configured app with the exact Issue subject link qualify; user messages, links in comment bodies, and broadcast replies do not. Missing matches, missing app configuration, and lookup errors fall back to a normal channel post. No thread mapping is saved in a database, Redis, or a file. The latest notification may differ from the thread where a conversation started; older threads outside the search range are not found. History requests add latency and consume Slack API rate limits. Existing cards are not moved.
 
 ### Add Redmine comments from notification threads
+
+![Add Redmine comments from notification threads](docs/images/features/thread-replies.webp)
 
 Set `slack.thread_comments: true` to save text replies to this plugin's Issue notifications as Redmine comments authored by the replying user. Omitted or `false` disables the feature. Work Object Previews are optional.
 
@@ -546,6 +562,8 @@ For example, `generic_fallback: '%{event}: %{subject}'` produces `News updated: 
 
 ### Assignee mentions
 
+![Assignee mentions](docs/images/features/user-mapping.webp)
+
 When an Issue assignee changes, an explicit `users` mapping can turn the new assignee into a Slack mention:
 
 ```yaml
@@ -560,6 +578,8 @@ The new assignee uses Slack's `<@U0123456789>` mention format. Issue authors, Jo
 
 ## Create an Issue from a Slack message
 
+![Create an Issue from a Slack message](docs/images/features/message-to-issue.webp)
+
 In the Slack app's **Interactivity & Shortcuts**, enable Interactivity with Request URL `https://redmine.example.com/redmine_slack/interactions`, then create a **message shortcut** with callback ID `redmine_message_create`. Use a label such as **Create Redmine issue**. Add the `commands` Bot scope and reinstall the app when scopes change. This feature reuses the [slash-command](#slash-command) integration: configure `slack.slash_command`, the global Bot Token, signing secret, app/team IDs, and user mapping. Work Object previews are optional.
 
 Open a message's **More actions** menu and choose the shortcut. Select a project, then review the tracker, subject, and description before saving. The first nonblank line becomes the subject; the description includes the message text and a permalink obtained with `chat.getPermalink`. Thread replies are supported, but only the selected message is copied. When the normal message text is empty, text from Block Kit sections and attachment cards (titles, bodies, and fields) is used instead. Attachment files, full thread history, and AI summaries are not imported. Slack's raw text formatting is retained. Subjects are limited to 255 characters, and descriptions to 3,000 characters with space reserved for the source link; review any shortened text before saving.
@@ -569,6 +589,8 @@ The picker includes up to 100 active projects where the mapped user can create I
 The selected message is temporarily stored in the existing `Rails.cache`, bound to the initiating user and app/team, for 30 minutes. After the picker changes to the creation form, the draft is held in the form. An expired or unavailable source cache requires reopening the shortcut. Multiple web workers need a shared cache or session affinity for this two-step flow. No new database tables or cache service are installed. Opening and updating modals is synchronous and subject to Slack's three-second response limit; test with the installed app after deployment. A private-channel or DM source can be copied into a project visible to other members: review the destination and draft before saving.
 
 ## App Home issue lists
+
+![App Home issue lists](docs/images/features/app-home.webp)
 
 The Home shows four sections in order: Updated by me, Due this week, Assigned to me, and Reported by me. Updated means any visible journal authored by you, not only the last updater. Updated and reported issues sort by latest issue update; assigned issues sort by priority then latest update; due-this-week issues sort by project. All use Redmine’s standard `IssueQuery` filters for open issues, active projects, user/group assignment, visibility, and the current week.
 
@@ -583,6 +605,8 @@ Data refreshes when Home opens, when the filter changes, on Refresh, and after s
 The edit button shows an issue link and permitted edit/comment inputs, reusing the Work Object modal and Redmine permission/workflow checks. Existing `work_object_previews`, `work_object_actions`, and `work_object_buttons` settings control edits. Otherwise details are read-only. Visible private issues may be listed, but retain the existing prohibition on Slack edits. Override labels through `messages.app_home` in the example configuration.
 
 ## Slash command
+
+![Slash command](docs/images/features/slash-commands.webp)
 
 Set `slack.slash_command: /redmine` (omit it to disable), register the same command in the Slack app, and set its Request URL to `https://redmine.example.com/redmine_slack/commands`. Add the `commands` scope and reinstall the app. Keep Interactivity enabled at `/redmine_slack/interactions` and configure the existing signing secret, app/team IDs, bot token, and user mappings. This command uses the global integration and user mapping; results are limited to projects belonging to that integration.
 
@@ -610,6 +634,8 @@ Results are ephemeral (visible only to the requester). When a number lookup or a
 All command text is configurable under `messages.commands` in the English example. The multiline `messages.commands.help` lists every command and replaces `%{command}` with `slack.slash_command`. If your YAML already overrides `help`, update that value or remove it to use the new default. Search and lists run on the Slack queue. Modal buttons provide fresh trigger IDs, so queued commands do not try to open expired modal triggers. Modal opening and submission are synchronous and must complete within Slack's three-second deadline; monitor identity lookup and database latency.
 
 ## Daily due-date DMs
+
+![Daily due-date DMs](docs/images/features/due-reminders.webp)
 
 Run the task once a day in the Redmine application's time zone. It queues jobs on the `slack` queue; the worker sends the DMs:
 
@@ -680,6 +706,8 @@ The same keys can be overridden under `projects.<identifier>.messages.due_remind
 
 ## Personal email preference
 
+![Personal email preference](docs/images/features/email-preference.webp)
+
 In **My account → Email notifications**, below **I don't want to be notified of changes that I make myself**, each user can enable **Skip email for notifications covered by Slack** (off by default). This uses the existing Redmine user preference storage; no database migration is required.
 
 The option applies to new Issues, Issue changes/comments, Wiki creation/updates, and News creation/comments. Email is skipped only when all visible parts of the notification have Slack events enabled, a Bot Token and destination channel resolve for that project, and the recipient resolves to a Slack member currently in that channel. An explicit `users` login/email mapping takes priority. Without one, `slack.auto_map_users_by_name: true` can resolve a unique name match; a fresh Slack profile must also have an email address matching the recipient's primary Redmine email (case-insensitive). Existing project/ancestor/default channel routing is used. Invalid explicit mappings do not fall back to automatic matching. Private Issues and private notes, unsupported notification types, and account/security emails retain their normal Redmine email behavior.
@@ -720,6 +748,8 @@ If a notification is missing, check in this order:
 A YAML change requires restarting both Redmine and Sidekiq. A successful job post confirms API delivery; check the target channel to confirm the visible layout and images. Existing messages are not updated retroactively.
 
 ## Slack message cards in issue text
+
+![Slack message cards in issue text](docs/images/features/slack-link-cards.webp)
 
 When an issue description or comment containing a Slack permalink such as `https://example.slack.com/archives/C123/p1791115675755579` is created or edited, the plugin retrieves the message and appends a quote to the **existing description/notes column**. No database migration, new table, index or background job is required. The quoted body and resolved mention labels are saved as plain searchable text, with card metadata in a delimited block. The original URL and source wording are retained. The quote is a snapshot of the message at save time: Slack edits/deletions do not alter it. Repeated URLs (including different query parameters for the same message) and repeated saves do not append duplicate quotes. Code blocks and inline code are excluded using the current Redmine Markdown/Textile formatter. Failed retrievals leave the source unchanged and do not prevent saving.
 

@@ -127,7 +127,7 @@ class LinkCardsHelperTest < Minitest::Test
           assert_equal page, ajax
           doc = Nokogiri::HTML.fragment(ajax)
           assert_equal 1, doc.css('.redmine-slack-link-card').size
-          assert_equal ['Slack'], doc.css('a').map(&:text)
+          assert_equal ['Open in Slack'], doc.css('a').map(&:text)
           assert_operator doc.text.index('Saved message'), :<, doc.text.index('って返した')
           refute_includes ajax, '[slack-quote:'
         end
@@ -154,7 +154,7 @@ class LinkCardsHelperTest < Minitest::Test
     assert_equal ['Message 1', 'Message 0'], fragment.css('.redmine-slack-link-card-text').map(&:text)
     assert_equal ['Before', 'Message 1', 'Between', 'Message 0', 'After'], fragment.css('p').first(5).map { |p| p.at_css('.redmine-slack-link-card-text')&.text || p.text }
     assert_equal ['', ''], replacements.values
-    assert_equal ['Slack', 'Slack'], fragment.css('a').map(&:text)
+    assert_equal ['Open in Slack', 'Open in Slack'], fragment.css('a').map(&:text)
     assert_equal [urls[1], urls[0]], fragment.css('.redmine-slack-link-card a').map { |a| a['href'] }
   end
 
