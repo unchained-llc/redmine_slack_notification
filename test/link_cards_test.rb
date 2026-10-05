@@ -105,7 +105,7 @@ class LinkCardsTest < Minitest::Test
     assert_equal 'Example User', card.dig('names', 'U123')
     assert_equal 'example', card.dig('names', 'C123')
     html = CARDS.render_card(card, URL, @issue.project)
-    assert_includes html, 'スレッドへの返信'
+    assert_includes html, 'Thread reply'
     assert_includes html, 'Original topic'
     assert_includes html, '@Example User'
     assert_includes html, '#example'
@@ -172,7 +172,7 @@ class LinkCardsTest < Minitest::Test
         assert_equal 'Example Monitor', card['author']
         assert card['thread_reply']
         assert_nil card['parent']
-        assert_includes CARDS.render_card(card, URL, @issue.project), '親投稿をSlackで開く'
+        assert_includes CARDS.render_card(card, URL, @issue.project), 'Open parent message in Slack'
       end
     end
   end

@@ -88,7 +88,7 @@ module RedmineSlackNotification
         card = decode(match[1], match[3])
         next raw unless card
         parent = card['parent']
-        prefix = parent ? "スレッドの親投稿: #{parent['author']}\n#{parent['text']}\n\nスレッドへの返信\n" : ''
+        prefix = parent ? "Thread parent: #{parent['author']}\n#{parent['text']}\n\nThread reply\n" : ''
         "Slack — #{card['author']} · ##{card['channel']} · #{card['timestamp']}\n#{card['url']}\n#{prefix}#{card['text']}"
       end
     end

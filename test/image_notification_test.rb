@@ -1090,7 +1090,7 @@ class ImageNotificationTest < Minitest::Test
     issue = Issue.new(7105)
     issue.project = OpenStruct.new(id: 7)
     issue.define_singleton_method(:description) { "Report\n\n![Attached image](#{name})" }
-    issue.define_singleton_method(:author) { OpenStruct.new(name: 'LUMEN') }
+    issue.define_singleton_method(:author) { OpenStruct.new(name: 'Example Bot') }
     issue.define_singleton_method(:attachments) { [OpenStruct.new(id: 88, filename: name)] }
     payload = RedmineSlackNotification::Formatter.payload('Issue created', blocks: [
       RedmineSlackNotification::Formatter.mrkdwn_sections('Content', issue.description).first

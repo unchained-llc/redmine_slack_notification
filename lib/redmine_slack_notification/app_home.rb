@@ -119,32 +119,33 @@ module RedmineSlackNotification
       rows = scope.is_a?(Array) ? scope : scope.includes(:project, :status, :assigned_to).limit(LIMIT + 1).to_a
       count = rows.length > LIMIT ? "#{LIMIT}+" : rows.length.to_s
       blocks << { 'type' => 'divider' }
-      blocks << Formatter.section_text("*#{Formatter.text(message(key))} · #{count}*")
-      blocks << Formatter.section_text(Formatter.text(message('empty'))) if rows.empty?
-      return if rows.empty?
-      headers = %w[subject project status assignee due_date].map { |label| raw_cell(Formatter.field_label(label)) }
+      caption = "#{message(key)} · #{count}"
+      if rows.empty?
+        blocks << Formatter.section_text("*#{Formatter.text(caption)}*")
+        blocks << Formatter.section_text(Formatter.text(message('empty')))
+        return
+      end
       edit_label = Formatter.message('work_objects', 'edit_issue').to_s[0, 40]
-      headers << raw_cell(edit_label)
+      headers = (%w[subject status assignee due_date].map { |label| Formatter.field_label(label).to_s[0, 40] } +
+                  [edit_label]).map { |label| { 'type' => 'raw_text', 'text' => label } }
       table_rows = rows.first(LIMIT).map do |issue|
-        title = "##{issue.id} #{issue.subject}"[0, 200]
-        link = { 'type' => 'rich_text', 'elements' => [{ 'type' => 'rich_text_section', 'elements' => [
-          { 'type' => 'link', 'url' => Formatter.url("/issues/#{issue.id}"), 'text' => title }
+        assignee = issue.assigned_to ? issue.assigned_to.name : Formatter.message('values', 'unassigned')
+        due_date = issue.due_date ? issue.due_date.iso8601 : '—'
+        title = { 'type' => 'rich_text', 'elements' => [{ 'type' => 'rich_text_section', 'elements' => [
+          { 'type' => 'link', 'url' => Formatter.url("/issues/#{issue.id}"),
+            'text' => "##{issue.id} #{issue.subject}"[0, 200], 'style' => { 'bold' => true } },
+          { 'type' => 'text', 'text' => "\n#{issue.project.name.to_s[0, 60]}" }
         ] }] }
+        status = { 'type' => 'raw_text', 'text' => issue.status.name.to_s[0, 60] }
+        assigned = { 'type' => 'raw_text', 'text' => assignee.to_s[0, 60] }
+        due = { 'type' => 'raw_text', 'text' => due_date }
         edit = { 'type' => 'action_cell',
                  'element' => button(edit_label, "detail_#{issue.id}", issue.id.to_s),
                  'fallback' => { 'type' => 'raw_text', 'text' => edit_label } }
-        [link, raw_cell(issue.project.name.to_s[0, 100]), raw_cell(issue.status.name.to_s[0, 100]),
-         raw_cell(issue.assigned_to ? issue.assigned_to.name : Formatter.message('values', 'unassigned')),
-         raw_cell(issue.due_date ? issue.due_date.iso8601 : '—'), edit]
+        [title, status, assigned, due, edit]
       end
-      blocks << { 'type' => 'data_table', 'block_id' => PREFIX + key, 'caption' => message(key),
+      blocks << { 'type' => 'data_table', 'block_id' => PREFIX + key, 'caption' => caption,
                   'page_size' => 5, 'rows' => [headers] + table_rows }
-    end
-
-    # Structured cells are plain text, not mrkdwn. Bound their lengths so all
-    # four ten-row tables stay below Slack's aggregate 20,000-character limit.
-    def raw_cell(value)
-      { 'type' => 'raw_text', 'text' => value.to_s.empty? ? '—' : value.to_s[0, 40] }
     end
 
     def publish(app, team, slack_id, filter = 'all', notice: nil)

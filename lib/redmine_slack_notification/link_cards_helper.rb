@@ -99,15 +99,15 @@ module RedmineSlackNotification
       text = SlackMarkup.render(card['text'], card['names'] || {})
       context = +''
       if card['thread_reply']
-        context << %(<span class="redmine-slack-thread-label">↳ スレッドへの返信</span>)
+        context << %(<span class="redmine-slack-thread-label">↳ Thread reply</span>)
         if (parent = card['parent'])
           parent = parent.merge('channel' => card['channel'])
-          context << %(<span class="redmine-slack-thread-parent">#{header(parent, time_formatter)}<span class="redmine-slack-link-card-text">#{SlackMarkup.render(parent['text'].to_s[0, 500], parent['names'] || {})}</span>#{SlackMarkup.link(card['parent_url'], '親投稿をSlackで開く')}</span>)
+          context << %(<span class="redmine-slack-thread-parent">#{header(parent, time_formatter)}<span class="redmine-slack-link-card-text">#{SlackMarkup.render(parent['text'].to_s[0, 500], parent['names'] || {})}</span>#{SlackMarkup.link(card['parent_url'], 'Open parent message in Slack')}</span>)
         else
-          context << SlackMarkup.link(card['parent_url'], '親投稿をSlackで開く')
+          context << SlackMarkup.link(card['parent_url'], 'Open parent message in Slack')
         end
       elsif card['reply_count'].to_i > 0
-        context << %(<span class="redmine-slack-thread-label">#{card['reply_count'].to_i}件のスレッド返信</span>)
+        context << %(<span class="redmine-slack-thread-label">#{card['reply_count'].to_i} thread replies</span>)
       end
       %(<span class="redmine-slack-link-card" style="--slack-card-color: #{color(project)}">#{context}#{header(card, time_formatter)}<span class="redmine-slack-link-card-text">#{text}</span>#{SlackMarkup.link(url, 'Slack ↗')}</span>)
     end

@@ -26,9 +26,9 @@ module RedmineSlackNotification
                                       custom_fields attachments watchers].freeze
     DEFAULT_MESSAGES = {
       'app_home' => {
-        'title' => 'My issues', 'all' => 'All my issues', 'my' => '担当しているチケット',
-        'reported' => '報告したチケット', 'updated' => '更新したチケット',
-        'this_week' => '今週期限のチケット', 'refresh' => 'Refresh', 'detail' => 'Open details',
+        'title' => 'My issues', 'all' => 'All sections', 'my' => 'Assigned to me',
+        'reported' => 'Reported by me', 'updated' => 'Updated by me',
+        'this_week' => 'Due this week', 'refresh' => 'Refresh', 'detail' => 'Open details',
         'open' => 'Open in Redmine', 'empty' => 'No open issues.',
         'unmapped' => 'Your Slack account is not linked to an active Redmine user.',
         'limit' => 'Up to 10 open issues per section. Open details or refresh to get current data.'

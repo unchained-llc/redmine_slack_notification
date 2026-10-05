@@ -133,62 +133,66 @@ class AppHomeTest < Minitest::Test
     assert_includes scope.calls, [:where, [{ status: Project::STATUS_ACTIVE }]]
   end
 
-  def test_group_limits_rows_and_preserves_literal_text_in_structured_cells
+  def test_group_limits_issues_and_preserves_literal_text
     scope = Scope.new(Array.new(11, @issue))
     blocks = []
-    HOME.add_group(blocks, 'overdue', scope)
-    table = blocks.find { |block| block['type'] == 'data_table' }
-    rows = table['rows'].drop(1)
-    assert_equal 10, rows.length
-    assert_includes blocks.to_json, '10+'
-    assert_includes rows.first[0].dig('elements', 0, 'elements', 0, 'text'), '<unsafe & title>'
-    assert_equal '7', rows.first[5].dig('element', 'value')
+    HOME.add_group(blocks, 'updated', scope)
+    table = blocks.last
+    assert_equal 'data_table', table['type']
+    assert_equal 10, table['rows'].drop(1).length
+    assert_includes table['caption'], '10+'
+    assert_includes table['rows'][1][0].dig('elements', 0, 'elements', 0, 'text'), '<unsafe & title>'
+    assert_equal '7', table['rows'][1][4].dig('element', 'value')
+    assert_equal ['divider', 'data_table'], blocks.map { |block| block['type'] }
+    assert_equal 5, table['page_size']
     assert_includes scope.calls, [:limit, [11]]
   end
 
-  def test_assignee_column_supports_users_groups_and_unassigned_issues
+  def test_issue_metadata_supports_users_groups_and_unassigned_issues
     [OpenStruct.new(name: 'Alice'), OpenStruct.new(name: 'Support group'), nil].each do |assignee|
       @issue.assigned_to = assignee
       scope = Scope.new([@issue])
       blocks = []
       HOME.add_group(blocks, 'reported', scope)
-      table = blocks.find { |block| block['type'] == 'data_table' }
-      assert_equal RedmineSlackNotification::Formatter.field_label('assignee'), table['rows'][0][3]['text']
+      row = blocks.last['rows'][1]
       expected = assignee ? assignee.name : RedmineSlackNotification::Formatter.message('values', 'unassigned')
-      assert_equal expected, table['rows'][1][3]['text']
-      assert_equal 6, table['rows'][1].length
+      assert_equal @issue.status.name, row[1]['text']
+      assert_equal expected, row[2]['text']
+      assert_equal @issue.due_date.iso8601, row[3]['text']
+      assert_equal "\n#{@issue.project.name}", row[0].dig('elements', 0, 'elements', 1, 'text')
+      assert_equal 5, row.length
       assert_includes scope.calls, [:includes, [:project, :status, :assigned_to]]
     end
+    @issue.due_date = nil
+    blocks = []
+    HOME.add_group(blocks, 'my', [@issue])
+    assert_includes blocks.last['rows'][1][3]['text'], '—'
   end
 
-  def test_title_is_a_browser_link_and_edit_is_a_separate_action
+  def test_title_is_a_browser_link_and_edit_is_in_the_last_column
     other = @issue.dup
     other.id = 8
     blocks = []
     HOME.add_group(blocks, 'my', [@issue, other])
-    table = blocks.find { |block| block['type'] == 'data_table' }
     edit_label = RedmineSlackNotification::Formatter.message('work_objects', 'edit_issue')
-    assert_equal edit_label, table['rows'][0][5]['text']
-    table['rows'].drop(1).zip([@issue, other]).each do |row, issue|
-      title, edit = row.values_at(0, 5)
-      assert_equal 'rich_text', title['type']
-      link = title.dig('elements', 0, 'elements', 0)
+    blocks.last['rows'].drop(1).zip([@issue, other]).each do |row, issue|
+      link = row[0].dig('elements', 0, 'elements', 0)
       assert_equal 'link', link['type']
       assert_equal RedmineSlackNotification::Formatter.url("/issues/#{issue.id}"), link['url']
       assert_equal "##{issue.id} #{issue.subject}", link['text']
-      assert_equal 'action_cell', edit['type']
-      assert_equal "redmine_home_detail_#{issue.id}", edit.dig('element', 'action_id')
-      assert_equal issue.id.to_s, edit.dig('element', 'value')
-      assert_equal edit_label, edit.dig('element', 'text', 'text')
-      refute edit['element'].key?('url')
-      assert_equal edit_label, edit.dig('fallback', 'text')
+      assert_equal true, link.dig('style', 'bold')
+      assert_equal 'action_cell', row[4]['type']
+      edit = row[4]['element']
+      assert_equal "redmine_home_detail_#{issue.id}", edit['action_id']
+      assert_equal issue.id.to_s, edit['value']
+      assert_equal edit_label, edit.dig('text', 'text')
+      assert_equal edit_label, row[4].dig('fallback', 'text')
+      refute edit.key?('url')
     end
-
     @issue.subject = '長' * 300
     blocks.clear
     HOME.add_group(blocks, 'my', [@issue])
-    title = blocks.find { |block| block['type'] == 'data_table' }['rows'][1][0]
-    assert_equal 200, title.dig('elements', 0, 'elements', 0, 'text').length
+    assert_equal 200, blocks.last['rows'][1][0].dig('elements', 0, 'elements', 0, 'text').length
   end
 
   def test_four_full_tables_stay_within_slacks_total_cell_character_limit
@@ -197,15 +201,18 @@ class AppHomeTest < Minitest::Test
     @issue.status.name = 'x' * 1000
     @issue.assigned_to = OpenStruct.new(name: 'x' * 1000)
     blocks = []
-    HOME.stub(:message, 'x' * 1000) do
-      %w[updated this_week my reported].each do |key|
-        HOME.add_group(blocks, key, Scope.new(Array.new(10, @issue)))
+    formatter = RedmineSlackNotification::Formatter
+    formatter.stub(:field_label, 'x' * 1000) do
+      formatter.stub(:message, 'x' * 1000) do
+        %w[updated this_week my reported].each do |key|
+          HOME.add_group(blocks, key, Scope.new(Array.new(11, @issue)))
+        end
       end
     end
     cells = blocks.select { |block| block['type'] == 'data_table' }.flat_map { |block| block['rows'].flatten }
     length = cells.sum do |cell|
       case cell['type']
-      when 'rich_text' then cell.dig('elements', 0, 'elements', 0, 'text').length
+      when 'rich_text' then cell['elements'].sum { |section| section['elements'].sum { |element| element['text'].length } }
       when 'action_cell' then cell.dig('element', 'text', 'text').length
       else cell['text'].length
       end
@@ -213,13 +220,14 @@ class AppHomeTest < Minitest::Test
     assert_operator length, :<=, 20_000
   end
 
-  def test_empty_group_does_not_create_an_invalid_header_only_table
+  def test_empty_group_shows_only_one_heading_and_the_empty_message
     blocks = []
-    HOME.add_group(blocks, 'overdue', Scope.new)
-    refute blocks.any? { |block| block['type'] == 'data_table' }
+    HOME.add_group(blocks, 'updated', Scope.new)
+    assert_equal ['divider', 'section', 'section'], blocks.map { |block| block['type'] }
+    assert_includes blocks.last.dig('text', 'text'), HOME.message('empty')
   end
 
-  def test_table_detail_button_routes_to_existing_permission_checked_modal
+  def test_list_edit_button_routes_to_existing_permission_checked_modal
     calls = []
     HOME.stub(:open_detail, ->(*args) { calls << args }) do
       HOME.interaction('ATEST', 'TTEST', home_action('detail_7', '7'))

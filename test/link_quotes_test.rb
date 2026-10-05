@@ -73,7 +73,7 @@ class LinkQuotesTest < Minitest::Test
     assert_equal @card['text'], decoded['text']
     assert_equal 'Parent searchable wording', decoded['parent']['text']
     html = RedmineSlackNotification::LinkCards.render_card(decoded, URL, @issue.project)
-    assert_includes html, 'スレッドへの返信'
+    assert_includes html, 'Thread reply'
     assert_empty Nokogiri::HTML.fragment(html).css('script')
   end
 

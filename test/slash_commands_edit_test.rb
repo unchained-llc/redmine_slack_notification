@@ -307,7 +307,7 @@ class SlashCommandsEditTest < Minitest::Test
       assert_equal 4, @issue.assigned_to_id
       deliver_direct('assign 7 3')
       assert_equal 3, @issue.assigned_to_id
-      deliver_direct('assign 7 未割当')
+      deliver_direct('assign 7 Unassigned')
       assert_nil @issue.assigned_to_id
       result = deliver_direct('assign 7 none')
       assert_nil @issue.assigned_to_id

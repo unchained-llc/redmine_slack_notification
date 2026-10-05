@@ -124,7 +124,7 @@ module RedmineSlackNotification
       query = query.strip
       if kind == 'assign'
         unassigned = Formatter.message('values', 'unassigned')
-        return ['none', unassigned] if %w[none 未割当].include?(query) || query.casecmp?(unassigned)
+        return ['none', unassigned] if query.casecmp?('none') || query.casecmp?(unassigned)
         query = viewer.id.to_s if query.casecmp?('me')
       end
       candidates = kind == 'assign' ? issue.assignable_users : issue.new_statuses_allowed_to(viewer)
