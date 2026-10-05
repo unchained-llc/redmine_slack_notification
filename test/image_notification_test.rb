@@ -3340,6 +3340,37 @@ class BodyDiffNotificationTest < Minitest::Test
     end
   end
 
+  def test_document_and_forum_diffs_respect_independent_project_settings
+    settings = { 'slack' => { 'body_diff' => { 'document' => { 'description' => true },
+                                             'message' => { 'body' => false } } },
+                 'projects' => { project.identifier => { 'slack' => { 'body_diff' => {
+                   'document' => { 'description' => false }, 'message' => { 'body' => true }
+                 } } } } }
+    common = { action: 'updated', subject: 'Example', url: 'https://example.com/records/1',
+               project: project, actor: OpenStruct.new(name: 'Editor'), body_diff: ['old body', 'new body'] }
+    Slackmine.stub(:config, settings) do
+      document = Slackmine::Formatter.generic_payload(noun: 'Document', **common).dig('attachments', 0, 'blocks')
+      forum = Slackmine::Formatter.generic_payload(noun: 'Message', **common).dig('attachments', 0, 'blocks')
+      refute document.any? { |block| block['type'] == 'markdown' }
+      assert document.any? { |block| block.dig('text', 'text').to_s.include?("*Summary*\nnew body") }
+      assert_equal 1, forum.count { |block| block['type'] == 'markdown' && block['text'].include?('+ new body') }
+      refute forum.any? { |block| block['type'] == 'section' && block.dig('text', 'text').to_s.include?('new body') }
+    end
+    Slackmine.stub(:config, { 'slack' => { 'body_diff' => { 'document' => false, 'message' => false } } }) do
+      refute Slackmine.body_diff_enabled?(:document_description)
+      refute Slackmine.body_diff_enabled?(:message_body)
+      forum = Slackmine::Formatter.generic_payload(noun: 'Message', **common).dig('attachments', 0, 'blocks')
+      refute forum.any? { |block| block['type'] == 'markdown' }
+      assert_equal 1, forum.count { |block| block.dig('text', 'text').to_s.include?('new body') }
+      added = Slackmine::Formatter.generic_payload(noun: 'Message', **common.merge(action: 'posted', body_diff: nil, notes: 'new body')).dig('attachments', 0, 'blocks')
+      assert_equal 1, added.count { |block| block.dig('text', 'text').to_s.include?('new body') }
+    end
+    Slackmine.stub(:config, {}) do
+      assert Slackmine.body_diff_enabled?(:document_description)
+      assert Slackmine.body_diff_enabled?(:message_body)
+    end
+  end
+
   def test_mixed_issue_update_uses_separate_comment_and_description_settings
     issue = OpenStruct.new(id: 7098, subject: 'Title', project: project, tracker: OpenStruct.new(name: 'Task'))
     detail = OpenStruct.new(property: 'attr', prop_key: 'description', old_value: 'old body', value: 'new body')

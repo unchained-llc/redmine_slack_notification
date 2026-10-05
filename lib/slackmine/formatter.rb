@@ -732,7 +732,8 @@ module Slackmine
         body_blocks = if action == 'deleted'
                         body_diff_blocks(body_diff_label, *body_diff, blocks: blocks)
                       else
-                        diff_kind = noun == 'News' ? :news_description : noun == 'News comment' ? :news_comment : nil
+                        diff_kind = { 'News' => :news_description, 'News comment' => :news_comment,
+                                      'Document' => :document_description, 'Message' => :message_body }[noun]
                         updated_body_blocks(body_diff_label, *body_diff, blocks: blocks,
                                             full_heading: body_full_label, diff_kind: diff_kind)
                       end

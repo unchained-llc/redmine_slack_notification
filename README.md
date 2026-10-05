@@ -557,7 +557,7 @@ After deploying code and YAML, restart Redmine and Sidekiq. Reply to a test Issu
 
 ### Body diffs
 
-By default, edits to Issue descriptions and comments, Wiki bodies, and News descriptions and comments show a line diff. The `diff` code block marks removed lines with `-` and added lines with `+`, with two unchanged lines of context. Long lines and large diffs are shortened; follow the record link for the full text. A Wiki edit that changes only its edit comment has no body diff.
+By default, edits to Issue descriptions and comments, Wiki and forum message bodies, News descriptions and comments, and Document descriptions show a line diff. The `diff` code block marks removed lines with `-` and added lines with `+`, with two unchanged lines of context. Long lines and large diffs are shortened; follow the record link for the full text. A Wiki edit that changes only its edit comment has no body diff. `document.description` controls Document description diffs; `message.body` controls forum topic and reply body diffs. File notifications show the description as text and do not generate body diffs.
 
 Set `slack.body_diff` for each type. `false` shows the updated text instead of a diff:
 
@@ -572,9 +572,13 @@ slack:
     news:
       description: false
       comment: true
+    document:
+      description: true
+    message:
+      body: true
 ```
 
-Missing entries default to `true`. Setting `issue`, `wiki`, or `news` to `false` disables diffs for all children of that parent. The older scalar form, `body_diff: true` or `body_diff: false`, still applies to every type. Deleted Issue and News comments **always** show their removed lines as a diff, regardless of this setting.
+Missing entries default to `true`. Setting `issue`, `wiki`, `news`, `document`, or `message` to `false` disables diffs for all children of that parent. The older scalar form, `body_diff: true` or `body_diff: false`, still applies to every type. Deleted Issue and News comments **always** show their removed lines as a diff, regardless of this setting.
 
 ### Inline Issue images
 

@@ -68,6 +68,7 @@ module Slackmine
   DEFAULT_DISABLED_EVENTS = %w[wiki_deleted news_deleted time_entry_deleted version_deleted file_deleted document_file_deleted document_deleted message_deleted].freeze
   BODY_DIFF_PATHS = {
     issue_description: %w[issue description], issue_comment: %w[issue comment],
+    document_description: %w[document description], message_body: %w[message body],
     wiki_body: %w[wiki body], news_description: %w[news description], news_comment: %w[news comment]
   }.freeze
 

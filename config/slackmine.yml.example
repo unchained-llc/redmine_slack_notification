@@ -113,6 +113,10 @@ slack:
     news:
       description: true
       comment: true
+    document:
+      description: true
+    message:
+      body: true
   # Six-digit hexadecimal color for the left border of the Slack attachment.
   attachment_color: '#6D5DFB'
   # Issue fields are shown on creation and every update, even when unchanged.
