@@ -850,3 +850,19 @@ ruby -Itest test/thread_images_test.rb
 ```
 
 These tests exercise notification formatting and delivery logic with stubs. Additionally, run `ruby -Itest test/thread_comments_persistence_test.rb` where ActiveRecord and sqlite3 are available to check persistence, duplicate suppression, permission denial, and notification-loop suppression using in-memory Issue/Journal fixture tables. These tests do not connect to production databases or Redis, post to Slack, or verify a live Redmine installation.
+
+## Version history
+
+The pre-1.0 entries below retrospectively group development milestones. Their
+version numbers are editorial labels, not a record of published releases or Git tags.
+
+| Version | Highlights |
+| --- | --- |
+| **1.0.0** | First major release as Slackmine. Document, file, and forum notifications cover creation, editing, and deletion. Email suppression follows enabled Redmine mail triggers. |
+| **0.9.0** | Renamed the plugin and its configuration, endpoints, and tasks to Slackmine. Extended thread replies to images, PDFs, and other files, with attachment previews and links. |
+| **0.6.0** | Added Slack notification-thread replies as Redmine comments and saved Slack message quotes with links back to the original conversation. |
+| **0.5.0** | Added Issue Work Object previews, live details, editing, search, creation, slash commands, and personal App Home Issue lists. |
+| **0.4.0** | Added due-date reminder DMs and an optional personal preference to suppress email covered by Slack notifications. |
+| **0.3.0** | Expanded project channel routing, parent-project fallback, user mapping, and project-specific configuration. |
+| **0.2.0** | Expanded notification formatting with Block Kit cards, configurable metadata and wording, body diffs, and inline Issue images. |
+| **0.1.0** | Initial Redmine-to-Slack event notification integration under the former plugin name. |
