@@ -3,6 +3,10 @@
 # Do not commit this file because it contains Slack credentials.
 
 slack:
+  # Slack permalink cards in issue descriptions/comments. Six-digit hex color.
+  # Override with projects.<identifier>.slack.link_cards.color.
+  link_cards:
+    color: '#6D5DFB'
   # Register this command in Slack with Request URL /redmine_slack/commands.
   # Requires the commands scope and an app reinstall. Omit to disable.
   # Use /redmine reminders for a private, on-demand digest of your due issues.

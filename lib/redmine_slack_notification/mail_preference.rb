@@ -12,6 +12,18 @@ module RedmineSlackNotification
   end
 
   module MailerPatch
+    def mail(*args, **kwargs, &block)
+      message = super
+      parts = [message] + (message.respond_to?(:all_parts) ? message.all_parts : [])
+      parts.each do |part|
+        next unless part.respond_to?(:mime_type) && part.mime_type == 'text/plain'
+        content = part.body.decoded
+        next unless content.include?('[slack-quote:')
+        part.body = LinkQuotes.plain_source(content)
+      end
+      message
+    end
+
     # Returning without calling mail lets ActionMailer use its normal NullMail.
     # Account and security mail actions deliberately do not participate.
     %i[issue_add issue_edit news_added news_comment_added wiki_content_added wiki_content_updated].each do |action|

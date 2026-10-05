@@ -211,6 +211,7 @@ module RedmineSlackNotification
     # Converts the Markdown commonly used in Redmine descriptions/comments
     # into Slack mrkdwn without introducing interactive elements.
     def mrkdwn(value)
+      value = RedmineSlackNotification::LinkQuotes.plain_source(value) if defined?(RedmineSlackNotification::LinkQuotes)
       protected = []
       source = value.to_s.gsub("\r\n", "\n").gsub("\r", "\n")
       source.gsub!(/```[ \t]*\w*[ \t]*\n.*?```/m) { protect_mrkdwn(Regexp.last_match(0), protected) }
@@ -417,6 +418,10 @@ module RedmineSlackNotification
     end
 
     def build_journal_payload(issue, actor:, notes:, details: [], comment_action: 'added', previous_notes: nil)
+      if defined?(RedmineSlackNotification::LinkQuotes)
+        notes = RedmineSlackNotification::LinkQuotes.plain_source(notes)
+        previous_notes = RedmineSlackNotification::LinkQuotes.plain_source(previous_notes) unless previous_notes.nil?
+      end
       combined_update = details.any?
       label = combined_update ? event_label('Issue', 'updated') : message('events', 'comment', comment_action)
       icon = combined_update ? event_icon('updated', noun: 'Issue') : event_icon(comment_action, noun: 'Comment')

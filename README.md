@@ -19,6 +19,7 @@ The plugin provides notifications, Work Object actions, and optional slash comma
 | [Slack replies to Redmine comments](#add-redmine-comments-from-notification-threads) | Save text replies in supported notification threads as Redmine comments under the mapped user's identity. |
 | [Slash commands](#slash-command) | Find Issues, list your assigned/due Issues, request a personal reminder digest, create Issues, add comments, and change status or assignee through forms or direct command arguments. Single-Issue results can use Work Object cards, with text fallback when previews are disabled. |
 | [Create an Issue from a Slack message](#create-an-issue-from-a-slack-message) | Use a message shortcut, choose a permitted project, and review a new-Issue form prefilled with the selected message and its source link. |
+| [Slack link retrieval and cards](#slack-message-cards-in-issue-text) | Fetch messages linked from Issue descriptions/comments, save searchable quotes in the existing text fields, and display cards at the link positions with resolved names and thread context. |
 | [Due-date reminders](#daily-due-date-dms) | Send scheduled Slack DM digests of assigned open Issues that are overdue or due within a configurable window. Scheduling is configured separately. |
 | [User mapping](#assignee-mentions) | Map Redmine users to Slack IDs explicitly; optionally match names for outgoing mentions or [email addresses for incoming authorization](#match-viewers-by-email). Actions still enforce Redmine permissions and workflow rules. |
 | [Personal email preference](#personal-email-preference) | Let each user opt out of supported notification emails when Slack notification settings and channel membership qualify. Account/security emails remain enabled; Slack delivery success is not checked. |
@@ -702,6 +703,28 @@ If a notification is missing, check in this order:
 5. Sidekiq processes the `slack` queue; inspect the job error and Slack API error code in the log.
 
 A YAML change requires restarting both Redmine and Sidekiq. A successful job post confirms API delivery; check the target channel to confirm the visible layout and images. Existing messages are not updated retroactively.
+
+## Slack message cards in issue text
+
+When an issue description or comment containing a Slack permalink such as `https://example.slack.com/archives/C123/p1791115675755579` is created or edited, the plugin retrieves the message and appends a quote to the **existing description/notes column**. No database migration, new table, index or background job is required. The quoted body and resolved mention labels are saved as plain searchable text, with card metadata in a delimited block. The original URL and source wording are retained. The quote is a snapshot of the message at save time: Slack edits/deletions do not alter it. Repeated URLs (including different query parameters for the same message) and repeated saves do not append duplicate quotes. Code blocks and inline code are excluded using the current Redmine Markdown/Textile formatter. Failed retrievals leave the source unchanged and do not prevent saving.
+
+Saved cards replace the original link at its position in the source text; the card footer opens Slack. Comment updates via Ajax and full page reloads use the same rendering, preserving link order and intervening text. Redundant line breaks next to cards and empty paragraphs left by moved quotes are removed; normal text line breaks remain. If the original link is removed, the quote still displays where it was stored. Saved quotes render as cards in Ruby, without browser JavaScript or Slack API calls while viewing. Quote bodies are escaped/rendered as Slack markup, never executed as Redmine macros or raw HTML. Plain-text notification emails and outgoing Slack notifications use readable quotes without storage markers. Existing unquoted links keep their live preview until the description/comment is changed and saved; existing records are not bulk modified. Copying an existing quote preserves its snapshot.
+
+Configure the left border color globally or override it under `projects.<identifier>.slack.link_cards`:
+
+```yaml
+slack:
+  link_cards:
+    color: '#6D5DFB'
+```
+
+Only six-digit hex colors are accepted; omitted or invalid values use `#6D5DFB`. Thread replies have a reply label, a compact parent preview when available, and a link to the parent. Parent messages show their reply count. Only the selected message and its parent are fetched, not the entire thread. Both permalink query parameters (`thread_ts`) and message metadata identify replies. Users and channel mentions are resolved to names; failed lookups retain the supplied label or ID. Missing bot profiles are looked up with `bots.info`.
+
+Access follows Redmine issue and private-note permissions. Viewers do not need a mapped Slack account or channel membership: **saving a link shares and stores its message content (and parent preview for a reply) for readers of that issue or note.** The configured project bot must be a conversation member and have the appropriate history scope (`channels:history`, `groups:history`, `im:history`, or `mpim:history`) and conversation-read scope (`channels:read`, `groups:read`, `im:read`, or `mpim:read`). Author, user-mention and bot profiles use `users:read`. Reinstall the app after adding scopes. The permalink host must match the bot's authenticated workspace.
+
+Slack `mrkdwn` emphasis, strike-through, links, quotes and code are rendered, along with basic Markdown headings, lists, bold text and links. Standard emoji shortcodes become Unicode; custom emoji retain their shortcode. Raw HTML stays literal and links allow only HTTP, HTTPS and mailto. A reply not found in history is attempted through `conversations.replies`; API restrictions or failure may leave it as a normal link. Files are not imported.
+
+At most 20 unique links are considered per save, with a five-second budget for starting API calls and short network timeouts; links beyond the budget remain ordinary links. API results are reused only within that import, scoped by bot token. The same bounded retrieval remains for legacy live previews. Quotes are saved inside the source column; no shared HTML cache is used. Redmine issue/private-note permissions apply to the stored source and to normal Redmine search results. **The saved quote text is searchable through Redmine's existing issue-description and journal-note search** (disable “titles only” to include bodies). No separate search index is needed. Original unquoted links are not searchable by Slack message wording until imported. Snapshots can be edited or removed with the source text; removing only the original URL does not remove the stored quote. All ordinary Redmine notifications/history apply to these saved text changes.
 
 ## Privacy and development
 

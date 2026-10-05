@@ -554,6 +554,9 @@ module RedmineSlackNotification
   module_function
 
   def install_patches
+    if defined?(ApplicationHelper) && !(ApplicationHelper < RedmineSlackNotification::LinkCardsHelper)
+      ApplicationHelper.prepend RedmineSlackNotification::LinkCardsHelper
+    end
     if defined?(UserPreference) && !(UserPreference < RedmineSlackNotification::UserPreferencePatch)
       UserPreference.include RedmineSlackNotification::UserPreferencePatch
       UserPreference.safe_attributes 'slack_suppress_mail'
@@ -574,3 +577,7 @@ end
 
 Rails.application.config.to_prepare { RedmineSlackNotification.install_patches }
 Rails.application.config.after_initialize { RedmineSlackNotification.install_patches }
+
+require_relative 'redmine_slack_notification/link_cards'
+require_relative 'redmine_slack_notification/link_cards_helper'
+require_relative 'redmine_slack_notification/link_quotes'

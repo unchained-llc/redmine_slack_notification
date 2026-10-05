@@ -5,12 +5,17 @@ require_relative 'formatter'
 module RedmineSlackNotification
   module JournalPatch
     def self.included(base)
-
+      base.before_validation :import_slack_notes_quotes
       base.after_create_commit :notify_slack_journal_created
       base.after_update_commit :notify_slack_journal_comment_changed
     end
 
     private
+
+    def import_slack_notes_quotes
+      return unless will_save_change_to_notes? && journalized.is_a?(Issue)
+      self.notes = LinkQuotes.import(notes, journalized, User.current)
+    end
 
     def notify_slack_journal_created
       return if Thread.current[:redmine_slack_thread_comment]

@@ -413,6 +413,8 @@ class EventConfigurationTest < Minitest::Test
       false
     end
 
+    def self.before_validation(*); end
+
     def self.after_create_commit(*)
     end
 

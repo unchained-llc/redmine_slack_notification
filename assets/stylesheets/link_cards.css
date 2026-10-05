@@ -1,0 +1,15 @@
+.redmine-slack-link-card { display: block; margin: .7em 0; padding: 14px 16px; max-width: 680px; border: 1px solid var(--border-color, #d5d9df); border-left: 4px solid var(--slack-card-color, #6D5DFB); border-radius: 8px; background: var(--background-color, transparent); color: inherit; }
+.redmine-slack-link-card-header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: .9em; }
+.redmine-slack-link-card-header img { width: 28px; height: 28px; border-radius: 6px; object-fit: cover; }
+.redmine-slack-link-card-header > span { opacity: .7; }
+.redmine-slack-link-card-text { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0; max-height: 320px; overflow: auto; }
+
+.redmine-slack-link-card-text code { padding: 1px 4px; border-radius: 3px; background: rgba(128,128,128,.12); color: inherit; font-family: monospace; }
+.redmine-slack-link-card-text .slack-markdown-code-block { display: block; padding: 10px; margin: 6px 0; white-space: pre-wrap; }
+.redmine-slack-link-card-text .slack-markdown-quote { display: block; border-left: 3px solid #aaa; padding-left: 10px; margin: 3px 0; }
+.redmine-slack-link-card-text .slack-markdown-list-item { display: block; padding-left: 12px; }
+.redmine-slack-link-card-text .slack-markdown-heading { display: block; margin: 6px 0; }
+
+.redmine-slack-thread-label { display: block; font-size: .85em; opacity: .75; margin-bottom: 8px; }
+.redmine-slack-thread-parent { display: block; padding: 10px 12px; margin-bottom: 12px; border-left: 2px solid var(--border-color, #d5d9df); background: rgba(128,128,128,.06); font-size: .9em; }
+.redmine-slack-thread-parent .redmine-slack-link-card-text { max-height: 100px; }
