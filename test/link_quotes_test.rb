@@ -181,7 +181,7 @@ class LinkQuotesTest < Minitest::Test
         def before_validation(name); @callback = name; end
         def after_create_commit(*); end
         def after_update_commit(*); end
-        def after_destroy(*); end
+        def after_destroy_commit(*); end
       end
       attr_accessor :description, :notes, :journalized, :changed
       def will_save_change_to_description?; changed; end

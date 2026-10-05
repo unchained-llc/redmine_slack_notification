@@ -7,7 +7,7 @@ module Slackmine
     def self.included(base)
       base.before_validation :import_slack_description_quotes
       base.after_create_commit :notify_slack_issue_created
-      base.after_destroy :notify_slack_issue_deleted
+      base.after_destroy_commit :notify_slack_issue_deleted
     end
 
     private

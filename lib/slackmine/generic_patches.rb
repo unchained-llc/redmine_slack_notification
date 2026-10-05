@@ -6,8 +6,8 @@ module Slackmine
 
   module NewsPatch
     def self.included(base)
-      base.after_create { notify_slack_generic('News', 'created') }
-      base.after_update { notify_slack_generic('News', 'updated') }
+      base.after_create_commit { notify_slack_generic('News', 'created') }
+      base.after_update_commit { notify_slack_generic('News', 'updated') }
       base.after_destroy_commit { notify_slack_generic('News', 'deleted') }
     end
 
@@ -36,8 +36,8 @@ module Slackmine
 
   module TimeEntryPatch
     def self.included(base)
-      base.after_create { notify_slack_generic('Time entry', 'created') }
-      base.after_update { notify_slack_generic('Time entry', 'updated') }
+      base.after_create_commit { notify_slack_generic('Time entry', 'created') }
+      base.after_update_commit { notify_slack_generic('Time entry', 'updated') }
       base.after_destroy_commit { notify_slack_generic('Time entry', 'deleted') }
     end
 
@@ -59,8 +59,8 @@ module Slackmine
 
   module VersionPatch
     def self.included(base)
-      base.after_create { notify_slack_generic('Version', 'created') }
-      base.after_update { notify_slack_generic('Version', 'updated') }
+      base.after_create_commit { notify_slack_generic('Version', 'created') }
+      base.after_update_commit { notify_slack_generic('Version', 'updated') }
       base.after_destroy_commit { notify_slack_generic('Version', 'deleted') }
     end
 
@@ -84,7 +84,7 @@ module Slackmine
   module CommentPatch
     def self.included(base)
 
-      base.after_create { notify_slack_news_comment }
+      base.after_create_commit :notify_slack_news_comment
       base.after_update_commit :notify_slack_news_comment_updated
       base.after_destroy_commit :notify_slack_news_comment_deleted
     end
@@ -285,7 +285,7 @@ module Slackmine
 
   module ProjectPatch
     def self.included(base)
-      base.after_update { notify_slack_project_updated }
+      base.after_update_commit { notify_slack_project_updated }
     end
 
     private
