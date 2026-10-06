@@ -739,12 +739,20 @@ module Slackmine
                       end
         blocks.concat(body_blocks)
       elsif summary.to_s.strip.present?
-        blocks << section_text("*#{text(section_label('summary'))}*\n#{mrkdwn(summary.to_s.truncate(1200))}")
+        if markdown_table?(summary)
+          blocks.concat(mrkdwn_sections(section_label('summary'), summary))
+        else
+          blocks << section_text("*#{text(section_label('summary'))}*\n#{mrkdwn(summary.to_s.truncate(1200))}")
+        end
       end
       metadata = [['project', text(project.name)], ['updater', text(actor&.name || message('values', 'unknown'))]] + fields
       append_metadata(blocks, event_key(noun), metadata)
       if notes.to_s.strip.present? && !(noun == 'Message' && body_diff)
-        blocks.insert(2, *(ordered_list?(notes) ? mrkdwn_sections(section_label('comment'), notes.to_s) : [section_text("*#{text(section_label('comment'))}*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}")]))
+        if ordered_list?(notes) || markdown_table?(notes)
+          blocks.insert(2, *mrkdwn_sections(section_label('comment'), notes.to_s))
+        else
+          blocks.insert(2, section_text("*#{text(section_label('comment'))}*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}"))
+        end
       end
       payload(fallback, blocks: blocks)
     end
@@ -782,7 +790,9 @@ module Slackmine
       markdown_text = heading ? "**#{text(heading)}**\n\n#{markdown}" : markdown
       # Slack caps all Markdown blocks in one message at 12,000 characters.
       # Keep the existing section path for longer notes rather than dropping text.
-      return [{ 'type' => 'markdown', 'text' => markdown_text }] if ordered_list?(markdown) && markdown_text.length <= 12_000
+      if (ordered_list?(markdown) || markdown_table?(markdown)) && markdown_text.length <= 12_000
+        return [{ 'type' => 'markdown', 'text' => markdown_text }]
+      end
 
       chunks = value.to_s.each_char.each_slice(limit).map(&:join)
       chunks.each_with_index.map do |chunk, index|
@@ -793,6 +803,14 @@ module Slackmine
 
     def ordered_list?(value)
       value.to_s.match?(/^[ \t]*\d+\.[ \t]+/)
+    end
+
+    def markdown_table?(value)
+      lines = value.to_s.gsub("\r\n", "\n").gsub("\r", "\n").lines.map(&:strip)
+      lines.each_cons(2).any? do |header, separator|
+        separator.match?(/\A\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)+\|?\z/) &&
+          header.count('|') == separator.count('|') && header.include?('|')
+      end
     end
 
     def updated_body_blocks(label, before, after, blocks: [], full_heading: label, full_text: nil, diff_kind: nil)

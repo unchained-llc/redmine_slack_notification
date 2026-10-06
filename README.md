@@ -288,7 +288,7 @@ Existing `metadata.issue.created` / `metadata.issue.updated` maps are still read
 
 Issue creation includes the description. New comments include their text. An Issue update shows only enabled detail changes and, when applicable, a description diff. A Wiki update shows the edit comment if provided and a body diff when its text changed; Wiki creation does not include the full page body. News creation includes a summary of its description. Deleted comments display removed lines. The record title links to the full content in Redmine.
 
-Redmine Markdown is converted for Slack text. Numbered lists use Slack `markdown` blocks so repeated `1.` markers render as an ordered list; longer content uses `mrkdwn` sections to stay within Slack's 12,000-character Markdown-block budget.
+Redmine Markdown is converted for Slack text. Numbered lists use Slack `markdown` blocks so repeated `1.` markers render as an ordered list. Markdown tables in notification summaries, comments, and changed bodies use Slack `markdown` blocks so pipe tables render as tables; this applies to Issue and non-Issue notifications. Content over Slack's 12,000-character Markdown-block limit falls back to `mrkdwn` sections.
 
 ### Ticket Work Object Previews
 
