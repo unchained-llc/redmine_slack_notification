@@ -242,7 +242,6 @@ module Slackmine
       source.gsub!(/__([^_]+)__/, '*\1*')
       source.gsub!(/~~(.+?)~~/, '~\1~')
       source.gsub!(/^\s*[-*+]\s+/, '• ')
-      source.gsub!(/^\s*\d+\.\s+/, '• ')
       source.gsub!(/\n{3,}/, "\n\n")
       restore_mrkdwn(source, protected)
     end
