@@ -48,6 +48,28 @@ class LinkCardsTest < Minitest::Test
     end
   end
 
+  def test_disabled_link_cards_never_fetch_slack
+    Slackmine.stub(:config, { 'slack' => { 'link_cards' => { 'enabled' => false } } }) do
+      assert_nil fetch
+      assert_empty @calls
+    end
+  end
+
+  def test_link_card_defaults_and_project_overrides
+    Slackmine.stub(:config, {}) do
+      assert CARDS.enabled?(@issue.project)
+      assert CARDS.redmine_enabled?(@issue.project)
+    end
+    settings = { 'slack' => { 'link_cards' => { 'enabled' => false, 'redmine_enabled' => true } },
+                 'projects' => { 'example' => { 'slack' => { 'link_cards' => { 'enabled' => true, 'redmine_enabled' => false } } } } }
+    Slackmine.stub(:config, settings) do
+      assert CARDS.enabled?(@issue.project)
+      refute CARDS.redmine_enabled?(@issue.project)
+      refute CARDS.enabled?(nil)
+      refute CARDS.redmine_enabled?(nil)
+    end
+  end
+
   def test_card_fetches_only_exact_message_and_returns_plain_text
     card = fetch
     assert_equal 'Example User', card['author']

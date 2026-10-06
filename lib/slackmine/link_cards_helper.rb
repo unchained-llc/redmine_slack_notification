@@ -17,7 +17,9 @@ module Slackmine
       card_view = respond_to?(:controller_name) && options[:formatting] != false &&
                   ((controller_name == 'issues' && action_name == 'show' && request.format.html?) ||
                    (controller_name == 'journals' && action_name == 'update' && request.format.js?))
-      mail_cards = Slackmine.effective_config(issue.project).dig('slack', 'link_cards', 'mail_enabled') != false
+      mail_cards = LinkCards.enabled?(issue.project) &&
+                   Slackmine.effective_config(issue.project).dig('slack', 'link_cards', 'mail_enabled') != false
+      render_cards = card_view ? LinkCards.redmine_enabled?(issue.project) : mail_cards
       raw = if card_view
               LinkCards.source(issue, User.current, journal_id)
             elsif object.respond_to?(attribute)
@@ -33,7 +35,7 @@ module Slackmine
       quotes.each do |block, card|
         token = "SLACKQUOTE#{SecureRandom.hex(16)}"
         quote_urls[token] = card['source_urls'] || card['url']
-        replacements[token] = if options[:formatting] == false || (!card_view && !mail_cards)
+        replacements[token] = if options[:formatting] == false || !render_cards
                                 %(<span style="white-space: pre-wrap">#{SlackMarkup.escape(LinkQuotes.plain_source(block))}</span>)
                               else
                                 LinkCards.render_card(card, card['url'], issue.project,
@@ -45,7 +47,7 @@ module Slackmine
       unless replacements.empty?
         fragment = Nokogiri::HTML.fragment(html.to_s)
         quote_paragraphs = fragment.css('p').select { |node| replacements.keys.any? { |token| node.text.include?(token) } }
-        LinkCards.place_saved_cards(fragment, replacements, quote_urls) if card_view || mail_cards
+        LinkCards.place_saved_cards(fragment, replacements, quote_urls) if render_cards
         fragment.xpath('.//text()').each do |node|
           next unless replacements.keys.any? { |token| node.text.include?(token) }
           pieces = node.text.split(/(#{Regexp.union(replacements.keys)})/)
@@ -57,7 +59,7 @@ module Slackmine
       end
       html = LinkCards.place_reply_images(html, quotes.map(&:last), attachments: issue.attachments) if journal_id
       html = LinkCards.place_reply_files(html, quotes.map(&:last), attachments: issue.attachments) if journal_id
-      return html.html_safe unless card_view
+      return html.html_safe unless card_view && render_cards
       @slack_link_card_state ||= { api: {}, cards: {}, count: 0,
                                    deadline: Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5 }
       html = LinkCards.render_links(html, issue, User.current, journal_id, @slack_link_card_state,
@@ -217,6 +219,8 @@ module Slackmine
     end
 
     def render_links(html, issue, viewer, journal_id, state, time_formatter: nil, quoted_urls: [])
+      return html unless redmine_enabled?(issue.project)
+
       fragment = Nokogiri::HTML.fragment(html.to_s)
       changed = false
       fragment.css('a[href]').each do |anchor|

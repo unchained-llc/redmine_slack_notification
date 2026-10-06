@@ -4,7 +4,7 @@
 
 ![Slackmine — SlackとRedmineの連携](docs/assets/slackmine-icon.png)
 
-バージョン **1.2.0**。
+バージョン **1.2.1**。
 
 通知機能からSlackとRedmineの統合へ機能が広がったため、**Redmine Event Notifications for Slack**（`redmine_slack_notification`）から **Slackmine** に改名しました。内部名・プラグインID・設定ファイル名・エンドポイントも `slackmine` に統一し、旧名の互換対応は設けていません。
 
@@ -683,6 +683,18 @@ users:
 
 `slack.auto_map_users_by_name: true` を設定すると、Redmine の**ログイン名**と、有効な人間の Slack ユーザーの `profile.display_name` またはアカウントの `name` が大文字・小文字を区別せず完全一致する場合にも、自動で対応付けられます。明示的な対応付けが優先されます。対応するユーザーがいない場合や複数いる場合は、Redmine の名前をそのまま表示します。ユーザー一覧は 10 分間キャッシュし、API エラー時も名前表示へ戻します。自動対応付けには `users:read` と、スコープ追加後のアプリ再インストールが必要です。担当者メンションの対応付けではメールアドレスを読み込まず、`users:read.email` は不要です。[個人の通知メール抑止](#個人ごとの通知メール設定)にも名前の自動マッチングを使う場合は、本人確認のため`users:read.email`も必要です。
 
+担当者のメンションを止めたい場合は、`users` の該当ログイン名を `null` にし、`slack.auto_map_users_by_name: false` にします。同じユーザーのメールアドレスにもSlack IDを設定している場合は、そちらも `null` にしてください。対応するSlack IDがなくなると、Redmineの名前を通常のテキストで表示します。`null` はメンションだけの設定ではなく、他の機能で使う明示的なユーザー対応付けも外します。
+
+```yaml
+slack:
+  auto_map_users_by_name: false
+users:
+  alice: null
+  'alice@example.com': null # メールアドレスにも対応付けていた場合
+```
+
+`auto_map_users_by_email` はSlackからの閲覧・操作時の本人照合、`auto_map_channels_by_name` は通知先チャンネルの自動選択です。両方とも既定値は `false` ですが、メンションを止めるために変更する必要はありません。
+
 新しい担当者には Slack の `<@U0123456789>` メンション形式を使います。Issue の作成者、Journal の作成者、Wiki の更新者、Issue 更新見出しの操作者には、自動メンションを付けず名前を表示します。
 
 ## Slackメッセージからチケット作成
@@ -864,6 +876,10 @@ YAML を変更した場合は Redmine と Sidekiq の両方を再起動してく
 
 ## Redmine本文内のSlackリンクカード
 
+`slack.link_cards.enabled: false` でSlackリンク本文の取得・新しい引用の保存・Redmine画面とメールのカード表示をまとめてOFFにできます。既存の保存済み引用は削除せず、通常のテキストとして表示します。
+
+`slack.link_cards.redmine_enabled: false` はRedmine画面のカード表示と未保存リンクのライブプレビューだけをOFFにします。リンク保存時の本文取得・引用保存とメールのカード表示は継続します。メールだけOFFにする場合は既存の `mail_enabled: false` を使います。3項目とも省略時は `true` で、現在の動作を維持します。`projects.<identifier>.slack.link_cards` で個別に上書きできます。
+
 ![Redmine本文内のSlackリンクカード](docs/images/features/slack-link-cards.webp)
 
 チケットの説明・コメントに `https://example.slack.com/archives/C123/p1791115675755579` 形式のURLを貼って新規作成・編集すると、Slack本文を取得し、**既存の説明・コメント欄に引用を追記して保存**します。DBマイグレーション・専用テーブル・索引・バックグラウンドジョブは追加しません。引用本文と名前解決済みのメンションは検索可能な文字として保存し、カードの情報は区切り付きのブロックに保持します。元のURL・本文は維持します。引用は保存時点の内容で、Slack側の編集・削除では変わりません。同じ投稿への複数URL（クエリ違いを含む）や再保存でも引用を重複追加しません。コードブロック・インラインコードはRedmineのMarkdown・Textile整形結果に従って除外します。取得できない場合は元の本文のまま保存します。
@@ -875,6 +891,9 @@ YAML を変更した場合は Redmine と Sidekiq の両方を再起動してく
 ```yaml
 slack:
   link_cards:
+    enabled: true
+    redmine_enabled: true
+    mail_enabled: true
     color: '#6D5DFB'
 ```
 
@@ -949,6 +968,7 @@ ruby -Itest test/thread_comment_feedback_cleanup_test.rb
 
 | バージョン | 主な変更 |
 | --- | --- |
+| **1.2.1** | Slackリンクの本文取得・引用保存・カード表示全体と、Redmine画面のカード表示をそれぞれOFFにできる設定を追加。メンションを無効にする設定方法も追記。 |
 | **1.2.0** | 会話を読みやすくするため、コメント保存の確認メッセージを非表示・一定時間後に自動削除できる任意設定を追加。 |
 | **1.1.0** | 同じユーザーの連続したSlackスレッド返信をまとめて保存する任意設定を追加。新しいDBテーブルやキャッシュバッファを使わず、元の時系列・リンク・添付を保持します。デフォルトは即時保存、設定例は待機60秒・最大300秒。取り込んだコメントの通常Slack通知を切り替える設定も追加しました。 |
 | **1.0.0** | Slackmineとして最初のメジャーリリース。文書・ファイル・フォーラムの追加／変更／削除通知を整備。メール抑制の判定をRedmineで有効なメール発生条件に合わせました。 |

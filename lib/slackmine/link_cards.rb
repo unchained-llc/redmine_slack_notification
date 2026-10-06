@@ -8,6 +8,14 @@ module Slackmine
   module LinkCards
     module_function
 
+    def enabled?(project)
+      Slackmine.effective_config(project).dig('slack', 'link_cards', 'enabled') != false
+    end
+
+    def redmine_enabled?(project)
+      enabled?(project) && Slackmine.effective_config(project).dig('slack', 'link_cards', 'redmine_enabled') != false
+    end
+
     # Only parse Slack permalinks; never fetch the supplied URL itself.
     def parse(value)
       return unless value.is_a?(String) && value.length <= 2048
@@ -51,6 +59,8 @@ module Slackmine
 
     # Used at save time after authorizing the edited source, including new records.
     def fetch_for_project(project, url, api_cache: nil, deadline: nil)
+      return unless enabled?(project)
+
       target = parse(url)
       return unless target
       Slackmine.with_project(project) do

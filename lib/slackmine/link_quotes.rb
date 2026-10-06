@@ -111,6 +111,8 @@ module Slackmine
     end
 
     def import(text, issue, viewer)
+      return text unless LinkCards.enabled?(issue.project)
+
       return text unless text.to_s.match?(/\.slack\.com\/archives\//i) && editable_source?(issue, viewer)
       existing = blocks(text)
       scan_text = text.to_s.dup

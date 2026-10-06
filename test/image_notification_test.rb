@@ -222,6 +222,23 @@ class AutomaticUserMappingTest < Minitest::Test
     end
   end
 
+  def test_null_mappings_show_plain_name_with_automatic_name_matching_disabled
+    user = User.new
+    user.login = 'alice'
+    user.mail = 'alice@example.com'
+    user.name = 'Alice'
+    settings = { 'users' => { 'alice' => nil, 'alice@example.com' => nil },
+                 'slack' => { 'auto_map_users_by_name' => false,
+                              'auto_map_users_by_email' => true, 'auto_map_channels_by_name' => true } }
+    Slackmine.stub(:config, settings) do
+      Slackmine.stub(:slack_user_directory, -> { flunk 'Null mapping performed automatic name lookup' }) do
+        assert_equal 'Alice', Slackmine::Formatter.user_mention(user)
+        settings['users']['alice@example.com'] = 'U123'
+        assert_equal '<@U123>', Slackmine::Formatter.user_mention(user)
+      end
+    end
+  end
+
   def test_user_directory_paginates_and_ignores_non_human_accounts
     calls = []
     responses = [

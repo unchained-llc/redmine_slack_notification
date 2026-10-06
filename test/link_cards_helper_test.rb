@@ -64,6 +64,44 @@ class LinkCardsHelperTest < Minitest::Test
       assert_equal @view.html, @view.textilizable('preview text')
     end
   end
+
+  def test_disabled_web_cards_show_saved_quotes_as_text_and_do_not_fetch_live_links
+    @view.render_source = true
+    @view.define_singleton_method(:format_time) { |value| value.iso8601 }
+    card = { 'author' => 'Example', 'channel' => 'example', 'timestamp' => '2026-10-05T00:00:00Z', 'text' => 'Saved message' }
+    raw = LinkCardsTest::URL + Slackmine::LinkQuotes.encode(card, LinkCardsTest::URL)
+    %w[enabled redmine_enabled].each do |switch|
+      Slackmine.stub(:config, { 'slack' => { 'link_cards' => { switch => false } } }) do
+        Slackmine::LinkCards.stub(:source, raw) do
+          Slackmine::LinkCards.stub(:render_links, ->(*) { flunk 'Disabled web cards fetched live links' }) do
+            html = @view.textilizable(@issue, :description)
+            assert_includes html, 'Saved message'
+            assert_includes html, LinkCardsTest::URL
+            refute_includes html, 'class="slackmine-link-card"'
+            refute_includes html, '[slack-quote:'
+          end
+        end
+      end
+    end
+  end
+
+  def test_web_switch_does_not_disable_mail_but_master_switch_does
+    @view.controller_name = 'mailer'
+    @view.render_source = true
+    @view.define_singleton_method(:format_time) { |value| value.iso8601 }
+    card = { 'author' => 'Example', 'channel' => 'example', 'timestamp' => '2026-10-05T00:00:00Z', 'text' => 'Saved message' }
+    @issue.define_singleton_method(:description) { @description }
+    @issue.instance_variable_set(:@description, Slackmine::LinkQuotes.encode(card, LinkCardsTest::URL))
+    Slackmine.stub(:config, { 'slack' => { 'link_cards' => { 'redmine_enabled' => false } } }) do
+      assert_includes @view.textilizable(@issue, :description), 'class="slackmine-link-card"'
+    end
+    Slackmine.stub(:config, { 'slack' => { 'link_cards' => { 'enabled' => false, 'mail_enabled' => true } } }) do
+      html = @view.textilizable(@issue, :description)
+      assert_includes html, 'Saved message'
+      refute_includes html, 'class="slackmine-link-card"'
+      refute_includes html, '[slack-quote:'
+    end
+  end
   def test_mailer_view_without_controller_name_renders_normal_and_saved_notes
     mailer_view = Class.new(BaseView) do
       undef_method :controller_name

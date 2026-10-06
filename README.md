@@ -4,7 +4,7 @@
 
 ![Slackmine — Slack and Redmine integration](docs/assets/slackmine-icon.png)
 
-Version **1.2.0**.
+Version **1.2.1**.
 
 The plugin was renamed from **Redmine Event Notifications for Slack** (`redmine_slack_notification`) to **Slackmine** as it grew from notifications into a broader Slack–Redmine integration. Internal names, plugin ID, configuration filename and endpoints now use `slackmine`; the former names are no longer supported.
 
@@ -702,6 +702,18 @@ users:
 
 With `slack.auto_map_users_by_name: true`, the plugin can also match a Redmine **login** to exactly one active human Slack member's `profile.display_name` or account `name`, case-insensitively. Explicit mappings win. Missing or ambiguous matches stay as plain Redmine names. The directory is cached for ten minutes; an API failure also falls back to plain names. Automatic mapping requires `users:read` and an app reinstall after the scope is added. Assignee mention matching does not read email addresses and does not require `users:read.email`. Using automatic name matching for the [personal email preference](#personal-email-preference) additionally requires `users:read.email` to verify the recipient's identity.
 
+To stop mentioning an assignee, set their Redmine login mapping under `users` to `null` and use `slack.auto_map_users_by_name: false`. If their email address also maps to a Slack ID, set that mapping to `null` too. Without a matching Slack ID, the assignee appears as their plain Redmine name. This removes the explicit user mapping for other features as well; it is not a mention-only preference.
+
+```yaml
+slack:
+  auto_map_users_by_name: false
+users:
+  alice: null
+  'alice@example.com': null # if the email address was also mapped
+```
+
+`auto_map_users_by_email` identifies users for incoming Slack views and actions; `auto_map_channels_by_name` chooses notification channels. Both default to `false`, and neither needs to change to disable mentions.
+
 The new assignee uses Slack's `<@U0123456789>` mention format. Issue authors, Journal authors, Wiki updaters, and the actor in the Issue-update heading are displayed as names without automatic mentions.
 
 ## Create an Issue from a Slack message
@@ -877,6 +889,10 @@ A YAML change requires restarting both Redmine and Sidekiq. A successful job pos
 
 ## Slack message cards in issue text
 
+Set `slack.link_cards.enabled: false` to disable Slack link content retrieval, new quote imports, and card rendering in both Redmine and email. Existing saved quotes remain as readable plain text; they are not deleted.
+
+Set `slack.link_cards.redmine_enabled: false` to disable only Redmine web cards and live previews of unquoted links. Content retrieval and quote imports when saving, and email cards, continue. Use the existing `mail_enabled: false` to disable only email cards. All three options default to `true`, preserving current behavior, and support overrides under `projects.<identifier>.slack.link_cards`.
+
 ![Slack message cards in issue text](docs/images/features/slack-link-cards.webp)
 
 When an issue description or comment containing a Slack permalink such as `https://example.slack.com/archives/C123/p1791115675755579` is created or edited, the plugin retrieves the message and appends a quote to the **existing description/notes column**. No database migration, new table, index or background job is required. The quoted body and resolved mention labels are saved as plain searchable text, with card metadata in a delimited block. The original URL and source wording are retained. The quote is a snapshot of the message at save time: Slack edits/deletions do not alter it. Repeated URLs (including different query parameters for the same message) and repeated saves do not append duplicate quotes. Code blocks and inline code are excluded using the current Redmine Markdown/Textile formatter. Failed retrievals leave the source unchanged and do not prevent saving.
@@ -888,6 +904,9 @@ Configure the left border color globally or override it under `projects.<identif
 ```yaml
 slack:
   link_cards:
+    enabled: true
+    redmine_enabled: true
+    mail_enabled: true
     color: '#6D5DFB'
 ```
 
@@ -979,6 +998,7 @@ version numbers are editorial labels, not a record of published releases or Git 
 
 | Version | Highlights |
 | --- | --- |
+| **1.2.1** | Added switches to disable Slack link retrieval, quote imports, and all cards, or only Redmine web cards. Documented how to disable assignee mentions. |
 | **1.2.0** | Added options to hide or automatically clear comment-save confirmations to keep thread conversations readable. |
 | **1.1.0** | Added optional batching of consecutive Slack thread replies from the same user, preserving source order, links, and attachments without a new DB table or cache buffer. Replies save immediately by default; the example uses a 60-second wait and a 300-second maximum. Added a switch for normal Slack notifications of imported comments. |
 | **1.0.0** | First major release as Slackmine. Document, file, and forum notifications cover creation, editing, and deletion. Email suppression follows enabled Redmine mail triggers. |

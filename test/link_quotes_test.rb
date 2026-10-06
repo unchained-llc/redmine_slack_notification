@@ -44,6 +44,24 @@ class LinkQuotesTest < Minitest::Test
     assert_empty @calls
   end
 
+  def test_disabled_link_cards_preserve_source_and_saved_quotes_without_import
+    source = "<p><a href=\"#{URL}\">message</a></p>" + Q.encode(@card, URL)
+    Slackmine.stub(:config, { 'slack' => { 'link_cards' => { 'enabled' => false } } }) do
+      Redmine::WikiFormatting.stub(:to_html, ->(*) { flunk 'Disabled import formatted the source' }) do
+        assert_equal source, import(source)
+      end
+    end
+    assert_empty @calls
+  end
+
+  def test_disabling_redmine_display_keeps_quote_import_enabled
+    source = "<p><a href=\"#{URL}\">message</a></p>"
+    Slackmine.stub(:config, { 'slack' => { 'link_cards' => { 'redmine_enabled' => false } } }) do
+      assert_includes import(source), '[slack-quote:'
+    end
+    assert_equal [URL], @calls
+  end
+
   def test_quote_body_is_searchable_plain_text_and_round_trips
     source = "<p><a href=\"#{URL}\">message</a></p>"
     saved = import(source)

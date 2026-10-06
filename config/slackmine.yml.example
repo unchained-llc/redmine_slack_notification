@@ -6,6 +6,12 @@ slack:
   # Slack permalink cards in issue descriptions/comments. Six-digit hex color.
   # Override with projects.<identifier>.slack.link_cards.color.
   link_cards:
+    # false disables Slack link fetching, new quote imports, and all card displays.
+    # Existing saved quotes remain readable as plain text. Defaults to true.
+    enabled: true
+    # Redmine web cards/live previews only; quote imports and mail remain enabled.
+    # Defaults to true. All link_cards switches support project overrides.
+    redmine_enabled: true
     link_text: 'Open in Slack'
     # HTML email quote cards and inline Slack logo. Omitted defaults to true.
     # false keeps quotes as plain text; Redmine cards are unaffected.
@@ -20,6 +26,7 @@ slack:
   default_channel_id: 'C0123456789'
   # Requires users:read and an app reinstall. Ambiguous names are not mentioned.
   auto_map_users_by_name: false
+  # User email matching and channel name matching below do not control mentions.
   # Authorize Work Object details/thread replies using a unique active Redmine
   # user with a matching registered email. Explicit users mappings take priority.
   # Requires users:read + users:read.email and an app reinstall.
@@ -645,6 +652,10 @@ projects:
     channel_id: 'C0234567890'
 
 users:
+  # A null mapping shows the Redmine name when neither login nor email maps to
+  # a Slack ID and auto_map_users_by_name is false. This also removes that
+  # explicit mapping for other features; auto_map_users_by_email is independent.
+  # example-user: null
   # Redmine login name or email address: Slack member ID. Overrides automatic matching.
   alice: 'U0123456789'
   bob: 'U0234567890'
