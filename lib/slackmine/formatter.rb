@@ -95,6 +95,8 @@ module Slackmine
         'watch' => 'Watch',
         'unwatch' => 'Unwatch',
         'add_comment' => 'Add comment',
+        'reply' => 'Reply',
+        'reply_hint' => 'Return to the most recent former assignee and add a comment. If reassignment is unavailable, only the comment is added.',
         'comment_placeholder' => 'Enter a comment',
         'edit_title' => 'Edit issue #%{id}',
         'save' => 'Save',

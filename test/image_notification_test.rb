@@ -2555,6 +2555,89 @@ class WorkObjectDetailsTest < Minitest::Test
     assert_equal ['Comment from card'], @issue.notes
   end
 
+  def test_reply_button_opens_comment_modal_and_reassigns_with_the_comment
+    prepare_action_issue
+    @settings['slack']['work_object_buttons'] = { 'reply' => true }
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_reply' }])
+    button['container']['type'] = 'message_attachment'
+    view = capture_interaction(button).first[1]['view']
+    assert_equal 'slackmine_reply', view['callback_id']
+    assert_equal ['new_comment'], view['blocks'].select { |b| b['type'] == 'input' }.map { |b| b['block_id'] }
+    assert_equal false, view['blocks'].last['optional']
+    assert_empty @issue.notes
+    edit = action_payload('view_submission', 'view')
+    edit['view'] = view.merge('state' => { 'values' => {
+      'new_comment' => { 'new_comment' => { 'value' => 'Reply from card' } },
+      'assignee' => { 'assignee' => { 'selected_option' => { 'value' => '999' } } },
+      'status' => { 'status' => { 'selected_option' => { 'value' => '3' } } }
+    } })
+    WORK.stub(:previous_assignee_id, @user.id) { capture_interaction(edit) }
+    assert_equal @user.id, @issue.assigned_to_id
+    assert_equal ['Reply from card'], @issue.notes
+    assert_equal [:journal, :attributes], @issue.events
+    assert_equal 2, @issue.status_id
+    @settings['slack']['work_object_buttons']['reply'] = false
+    assert_empty capture_interaction(edit)
+    assert_equal ['Reply from card'], @issue.notes
+  end
+
+  def test_reply_without_assignment_permission_saves_only_the_comment
+    prepare_action_issue
+    @issue.define_singleton_method(:attributes_editable?) { |_| false }
+    previous = User.current
+    Slackmine.stub(:config, @settings) do
+      WORK.stub(:previous_assignee_id, ->(*) { raise 'History should not be queried' }) do
+        assert_equal :saved, WORK.update_issue(@issue, @user, reply: true, comment: 'Reply')
+      end
+    end
+    assert_equal 4, @issue.assigned_to_id
+    assert_equal ['Reply'], @issue.notes
+    assert_same previous, User.current
+  end
+
+  def test_reply_without_an_assignable_active_previous_owner_saves_only_the_comment
+    [nil, 999, @user.id].each do |previous_id|
+      prepare_action_issue
+      @issue.instance_variable_set(:@notes, [])
+      @issue.define_singleton_method(:assignable_users) { [OpenStruct.new(id: 3, active?: false)] }
+      Slackmine.stub(:config, @settings) do
+        WORK.stub(:previous_assignee_id, previous_id) do
+          assert_equal :saved, WORK.update_issue(@issue, @user, reply: true, comment: 'Reply')
+        end
+      end
+      assert_equal 4, @issue.assigned_to_id
+      assert_equal ['Reply'], @issue.notes
+    end
+  end
+
+  def test_reply_without_comment_permission_or_text_cannot_reassign
+    prepare_action_issue
+    Slackmine.stub(:config, @settings) do
+      assert_equal :restricted, WORK.update_issue(@issue, @user, reply: true, comment: '  ')
+      @issue.define_singleton_method(:notes_addable?) { |_| false }
+      assert_equal :restricted, WORK.update_issue(@issue, @user, reply: true, comment: 'Reply')
+    end
+    assert_equal 4, @issue.assigned_to_id
+    assert_empty @issue.notes
+  end
+
+  def test_reply_history_uses_the_latest_former_assignee_and_excludes_current_and_empty_values
+    prepare_action_issue
+    query = Minitest::Mock.new
+    chain = Minitest::Mock.new
+    journals = Minitest::Mock.new
+    journals.expect(:joins, query, [:details])
+    query.expect(:where, query, [{ journal_details: { property: 'attr', prop_key: 'assigned_to_id' } }])
+    query.expect(:where, chain)
+    chain.expect(:not, query, [{ journal_details: { old_value: [nil, '', '4'] } }])
+    query.expect(:order, query, ['journals.created_on DESC, journals.id DESC, journal_details.id DESC'])
+    query.expect(:limit, query, [1])
+    query.expect(:pluck, ['3'], ['journal_details.old_value'])
+    @issue.journals = journals
+    assert_equal 3, WORK.previous_assignee_id(@issue)
+    [journals, chain, query].each(&:verify)
+  end
+
   def test_configured_buttons_follow_order_and_use_overflow
     prepare_action_issue
     @settings['slack']['work_object_buttons'] = {

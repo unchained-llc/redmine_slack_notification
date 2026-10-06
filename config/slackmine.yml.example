@@ -44,6 +44,7 @@ slack:
   # At most 7 can be displayed. Unlisted buttons are hidden when this map is set.
   work_object_buttons:
     add_comment: false
+    reply: false
     open_issue: false
     edit_issue: false
     change_assignee: false
@@ -495,6 +496,8 @@ messages:
     watch: 'Watch'
     unwatch: 'Unwatch'
     add_comment: 'Add comment'
+    reply: 'Reply'
+    reply_hint: 'Return to the most recent former assignee and add a comment. If reassignment is unavailable, only the comment is added.'
     comment_placeholder: 'Enter a comment'
     edit_title: 'Edit issue #%{id}'
     save: 'Save'

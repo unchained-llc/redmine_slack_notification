@@ -426,6 +426,7 @@ slack:
   work_object_actions: true
   work_object_buttons:
     add_comment: false
+    reply: false
     open_issue: false
     edit_issue: false
     change_assignee: false
@@ -441,11 +442,25 @@ slack:
 
 The example enables only Start work and Complete work, using status IDs 3 and 5. Adjust these IDs to your Redmine workflow.
 
-Supported keys: `add_comment` (comment-only modal), `open_issue` (source issue URL), `edit_issue` (edit modal), `change_assignee` (assignee-only modal), `assign_to_me`, `start_work`, `complete_work`, `log_time`, `watch` (both watch and unwatch).
+Supported keys: `add_comment` (comment-only modal), `reply` (return to the most recent former assignee and add a comment), `open_issue` (source issue URL), `edit_issue` (edit modal), `change_assignee` (assignee-only modal), `assign_to_me`, `start_work`, `complete_work`, `log_time`, `watch` (both watch and unwatch).
 
 The first two available actions are primary buttons and the next five are overflow actions. Only seven are displayed; additional actions are omitted with a warning log. `start_work` requires `work_object_start_status_id`; `complete_work` requires `work_object_complete_status_id` and both validate the current workflow on submission. Each is hidden when its target ID is unset or already reached. When both buttons are enabled, only Start work is shown before starting; only Complete work is shown at the configured start status. Both buttons are hidden at the completion status or any Redmine closed status. Configure both status IDs. A single enabled button retains its independent behavior. Choose your actual completion status ID; no status is inferred from its name. `log_time` opens the Redmine time-entry form, where permissions and required fields are enforced. Watch actions affect only the acting user and are idempotent.
 
 Detail panes filter actions for the viewer's permissions, assignee, and watcher state. Shared cards cannot personalize buttons per viewer, so permissions and personal state are checked when invoked. Labels use the corresponding `messages.work_objects` keys.
+
+Enable `reply: true` to show a Reply button. It selects the most recent different former assignee from assignment history and saves reassignment with the comment. If history is unavailable, the former assignee is inactive or not assignable, or the viewer cannot change the assignee, it adds only the comment. Comment permission is required. Opening the modal does not change the issue; history and permissions are checked again when saving. `add_comment: true` adds only a comment. Customize the Reply label and modal explanation with `messages.work_objects.reply` and `reply_hint`.
+
+To show both buttons:
+
+If a button is missing, check that `add_comment` / `reply` is `true`, including any project override. A `false` or omitted entry in the button map hides that action independently of the seven-action limit. Put comment and reply first, as below, to prioritize them as the two primary buttons. Existing cards may retain older actions; check a new notification or reload the card.
+
+```yaml
+slack:
+  work_object_actions: true
+  work_object_buttons:
+    reply: true
+    add_comment: true
+```
 
 Description editing is available in the Work Object detail pane and the Issue edit modal when Redmine allows the acting user to edit `description`. The full raw text is used, including whitespace and Markdown. Slack text inputs support at most 3,000 characters: longer existing descriptions remain read-only and the modal links to the full Redmine edit form. Long descriptions are never shortened for saving. Clearing an editable description saves an empty value. Saves recheck permissions and record changes through the normal Redmine journal and notification path.
 

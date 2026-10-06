@@ -76,7 +76,7 @@ module Slackmine
     end
 
     BUTTON_IDS = {
-      'add_comment' => 'slackmine_add_comment', 'edit_issue' => 'slackmine_edit_issue',
+      'add_comment' => 'slackmine_add_comment', 'reply' => 'slackmine_reply', 'edit_issue' => 'slackmine_edit_issue',
       'open_issue' => 'slackmine_open_issue', 'change_assignee' => 'slackmine_edit_assignee',
       'assign_to_me' => 'slackmine_assign_to_me', 'start_work' => 'slackmine_start_work',
       'complete_work' => 'slackmine_complete_work',
@@ -110,7 +110,7 @@ module Slackmine
         return true unless viewer
         issue.attributes_editable?(viewer) && issue.safe_attribute?('status_id', viewer) &&
           issue.new_statuses_allowed_to(viewer).any? { |status| status.id == target }
-      when 'add_comment'
+      when 'add_comment', 'reply'
         !viewer || issue.notes_addable?(viewer)
       when 'edit_issue'
         !viewer || !!edit_modal(issue, viewer, {})
@@ -252,10 +252,12 @@ module Slackmine
       [{ 'value' => 'none', 'text' => { 'type' => 'plain_text', 'text' => Formatter.message('values', 'unassigned') } }] + select_options(users)
     end
 
-    def edit_modal(issue, viewer, source, assignee_only: false, comment_only: false)
+    def edit_modal(issue, viewer, source, assignee_only: false, comment_only: false, reply: false)
+      comment_only ||= reply
       return unless comment_only ? issue.notes_addable?(viewer) : issue.attributes_editable?(viewer)
 
       blocks = []
+      blocks << Formatter.section_text(work_object_message('reply_hint')) if reply
       if !comment_only && !assignee_only && issue.safe_attribute?('description', viewer)
         if issue.description.to_s.length <= 3000
           element = { 'type' => 'plain_text_input', 'action_id' => 'description', 'multiline' => true, 'max_length' => 3000 }
@@ -300,8 +302,10 @@ module Slackmine
       return if blocks.empty?
 
       context = source.slice('entity_url', 'external_ref', 'channel_id', 'message_ts', 'is_ephemeral', 'app_home')
-      { 'type' => 'modal', 'callback_id' => comment_only ? 'slackmine_add_comment' : 'slackmine_edit_issue',
-        'title' => { 'type' => 'plain_text', 'text' => comment_only ? Formatter.message('work_objects', 'add_comment') : work_object_message('edit_title', id: issue.id) },
+      callback = reply ? 'slackmine_reply' : (comment_only ? 'slackmine_add_comment' : 'slackmine_edit_issue')
+      title = reply ? work_object_message('reply') : (comment_only ? Formatter.message('work_objects', 'add_comment') : work_object_message('edit_title', id: issue.id))
+      { 'type' => 'modal', 'callback_id' => callback,
+        'title' => { 'type' => 'plain_text', 'text' => title },
         'submit' => { 'type' => 'plain_text', 'text' => Formatter.message('work_objects', 'save') },
         'close' => { 'type' => 'plain_text', 'text' => Formatter.message('work_objects', 'cancel') },
         'private_metadata' => JSON.generate(context), 'blocks' => blocks }
@@ -434,7 +438,7 @@ module Slackmine
       return unless payload.is_a?(Hash) && %w[block_actions view_submission].include?(payload['type'])
       source = payload['type'] == 'block_actions' ? payload['container'] : payload['view']
       return unless source.is_a?(Hash)
-      modal = source['type'] == 'modal' && %w[slackmine_edit_issue slackmine_add_comment slackmine_watch_settings].include?(source['callback_id'])
+      modal = source['type'] == 'modal' && %w[slackmine_edit_issue slackmine_add_comment slackmine_reply slackmine_watch_settings].include?(source['callback_id'])
       return unless modal || source['type'] == 'entity_detail' || source['type'] == 'message_attachment'
       # Slack omits entity identity on ephemeral Work Object button payloads.
       # Resolve our explicit button value, then apply the same object authorization.
@@ -478,9 +482,9 @@ module Slackmine
               'trigger_id' => payload['trigger_id'], 'view' => form
             }, Slackmine.bot_token(issue.project), form: true)
           end
-          if %w[slackmine_edit_issue slackmine_edit_assignee slackmine_add_comment].include?(action['action_id']) && %w[message_attachment entity_detail].include?(source['type'])
+          if %w[slackmine_edit_issue slackmine_edit_assignee slackmine_add_comment slackmine_reply].include?(action['action_id']) && %w[message_attachment entity_detail].include?(source['type'])
             form = edit_modal(issue, viewer, source, assignee_only: action['action_id'] == 'slackmine_edit_assignee',
-                              comment_only: action['action_id'] == 'slackmine_add_comment')
+                              comment_only: action['action_id'] == 'slackmine_add_comment', reply: key == 'reply')
             return unless form && payload['trigger_id'].to_s != ''
             return Slackmine.slack_api('views.open', {
               'trigger_id' => payload['trigger_id'], 'view' => form
@@ -502,7 +506,11 @@ module Slackmine
           outcome = update_watch(issue, viewer, context['watching'])
         else
           if modal && Slackmine.effective_config(issue.project).dig('slack', 'work_object_buttons').is_a?(Hash)
-            requested = source['callback_id'] == 'slackmine_add_comment' ? ['add_comment'] : %w[edit_issue change_assignee]
+            requested = case source['callback_id']
+                        when 'slackmine_add_comment' then ['add_comment']
+                        when 'slackmine_reply' then ['reply']
+                        else %w[edit_issue change_assignee]
+                        end
             return if (button_keys(issue, detail: true) & requested).empty?
           end
           values = source.dig('state', 'values')
@@ -525,13 +533,14 @@ module Slackmine
           return unless due_date.nil? || due_date == '' || valid_date?(due_date)
           return unless comment.nil? || (comment.is_a?(String) && comment.length <= 3000)
           return unless description.nil? || (description.is_a?(String) && description.length <= 3000)
-          if modal && source['callback_id'] == 'slackmine_add_comment'
+          reply = modal && source['callback_id'] == 'slackmine_reply'
+          if modal && %w[slackmine_add_comment slackmine_reply].include?(source['callback_id'])
             return if comment.to_s.strip.empty?
             status = priority = assignee = due_date = nil
             description = nil
           end
           outcome = update_issue(issue, viewer, assigned_to_id: assignee, status_id: status,
-                                 priority_id: priority, due_date: due_date, comment: comment, description: description)
+                                 priority_id: priority, due_date: due_date, comment: comment, description: description, reply: reply)
         end
         Rails.logger&.info("Slackmine: Work Object interaction issue=#{issue.id} result=#{outcome}")
         if modal && AppHome::FILTERS.include?(context['app_home'])
@@ -599,12 +608,34 @@ module Slackmine
       false
     end
 
-    def update_issue(issue, viewer, assigned_to_id: nil, status_id: nil, priority_id: nil, due_date: nil, comment: nil, description: nil)
+    def previous_assignee_id(issue)
+      # Ignore clears and the current assignee; use the most recent former owner.
+      value = issue.journals.joins(:details)
+        .where(journal_details: { property: 'attr', prop_key: 'assigned_to_id' })
+        .where.not(journal_details: { old_value: [nil, '', issue.assigned_to_id.to_s] })
+        .order('journals.created_on DESC, journals.id DESC, journal_details.id DESC')
+        .limit(1).pluck('journal_details.old_value').first
+      value.to_s.match?(/\A[1-9]\d*\z/) ? value.to_i : nil
+    end
+
+    def reply_assignee_id(issue, viewer)
+      return unless issue.attributes_editable?(viewer) && issue.safe_attribute?('assigned_to_id', viewer)
+
+      id = previous_assignee_id(issue)
+      target = issue.assignable_users.find { |user| user.id == id } if id
+      target.id if target && target.active?
+    end
+
+    def update_issue(issue, viewer, assigned_to_id: nil, status_id: nil, priority_id: nil, due_date: nil, comment: nil, description: nil, reply: false)
       previous_user = User.current
       User.current = viewer
       issue.with_lock do
         next :restricted unless issue.project.active? && !issue.is_private? && issue.visible?(viewer) &&
                                 actions_enabled?(issue)
+        if reply
+          next :restricted if comment.to_s.strip.empty? || !issue.notes_addable?(viewer)
+          assigned_to_id = reply_assignee_id(issue, viewer)
+        end
         attrs = {}
         unless description.nil?
           next :restricted unless description.is_a?(String) && description.length <= 3000 && issue.description.to_s.length <= 3000 &&
