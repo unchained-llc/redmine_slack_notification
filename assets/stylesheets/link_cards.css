@@ -21,3 +21,17 @@
 .slackmine-link-card > a:last-child::before { content: ""; display: inline-block; width: 1em; height: 1em; margin-right: .35em; vertical-align: -.15em; background: url("../images/slack-mark.svg") center / contain no-repeat; }
 
 .slackmine-link-card-files { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; overflow-wrap: anywhere; }
+
+/* Override mail-compatible inline borders in the Redmine view; preserve the accent. */
+.slackmine-link-card {
+  border-top-color: rgba(128,128,128,.3) !important;
+  border-right-color: rgba(128,128,128,.3) !important;
+  border-bottom-color: rgba(128,128,128,.3) !important;
+  border-top-color: color-mix(in srgb, currentColor 18%, transparent) !important;
+  border-right-color: color-mix(in srgb, currentColor 18%, transparent) !important;
+  border-bottom-color: color-mix(in srgb, currentColor 18%, transparent) !important;
+}
+.slackmine-thread-parent {
+  border-left-color: rgba(128,128,128,.3) !important;
+  border-left-color: color-mix(in srgb, currentColor 18%, transparent) !important;
+}
