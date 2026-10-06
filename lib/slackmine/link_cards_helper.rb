@@ -55,14 +55,14 @@ module Slackmine
         quote_paragraphs.each { |node| node.remove if node.text.strip.empty? && node.element_children.all? { |child| child.name == 'br' } }
         html = fragment.to_html
       end
+      html = LinkCards.place_reply_images(html, quotes.map(&:last), attachments: issue.attachments) if journal_id
+      html = LinkCards.place_reply_files(html, quotes.map(&:last), attachments: issue.attachments) if journal_id
       return html.html_safe unless card_view
       @slack_link_card_state ||= { api: {}, cards: {}, count: 0,
                                    deadline: Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5 }
       html = LinkCards.render_links(html, issue, User.current, journal_id, @slack_link_card_state,
                              time_formatter: time_formatter,
                              quoted_urls: quotes.map { |_, card| card['url'] })
-      html = LinkCards.place_reply_images(html, quotes.map(&:last), attachments: issue.attachments) if journal_id
-      html = LinkCards.place_reply_files(html, quotes.map(&:last), attachments: issue.attachments) if journal_id
       html.html_safe
     end
   end

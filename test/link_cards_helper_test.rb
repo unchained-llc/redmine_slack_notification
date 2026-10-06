@@ -275,6 +275,40 @@ class LinkCardsHelperTest < Minitest::Test
     assert_equal url, fragment.at_css('pre a').text
   end
 
+  def test_mail_places_imported_reply_image_and_file_before_slack_link
+    @view.controller_name = 'mailer'
+    @view.define_singleton_method(:format_time) { |value| value.iso8601 }
+    image = OpenStruct.new(id: 41)
+    file = OpenStruct.new(id: 42, filename: 'report.pdf')
+    @issue.define_singleton_method(:attachments) { [image, file] }
+    url = LinkCardsTest::URL
+    card = { 'author' => 'Example', 'channel' => 'example', 'timestamp' => '2026-10-05T00:00:00Z',
+             'text' => 'Reply', 'thread_image_ids' => [41], 'thread_file_ids' => [42] }
+    journal = Journal.new
+    journal.define_singleton_method(:id) { 7 }
+    issue = @issue
+    journal.define_singleton_method(:journalized) { issue }
+    source = Slackmine::LinkQuotes.encode(card, url)
+    journal.define_singleton_method(:notes) { source }
+    image_url = Slackmine::Formatter.url('/attachments/download/41/screen.png')
+    file_url = Slackmine::Formatter.url('/attachments/42')
+    @view.source_formatter = ->(source) do
+      "<p>#{CGI.escapeHTML(source)}</p><p><img src=\"#{image_url}\" width=\"344\" height=\"805\"></p><p><a href=\"#{file_url}\">report.pdf</a></p>"
+    end
+    Slackmine::LinkCards.stub(:source, ->(*) { flunk 'mail must not fetch Slack' }) do
+      doc = Nokogiri::HTML.fragment(@view.textilizable(journal, :notes, only_path: false))
+      quote = doc.at_css('.slackmine-link-card')
+      assert_equal %w[slackmine-link-card-header slackmine-link-card-text slackmine-link-card-images slackmine-link-card-files],
+                   quote.element_children.first(4).map { |node| node['class'] }
+      assert_equal 'Open in Slack', quote.element_children.last.text
+      assert_equal image_url, quote.at_css('.slackmine-link-card-images img')['src']
+      assert_equal '344', quote.at_css('.slackmine-link-card-images img')['width']
+      assert_equal file_url, quote.at_css('.slackmine-link-card-files a')['href']
+      assert_equal 1, doc.css('.slackmine-link-card-images img').size
+      assert_equal 1, doc.css('.slackmine-link-card-files a').size
+    end
+  end
+
   def test_explicit_imported_images_move_inside_card_and_preserve_sizing
     url = LinkCardsTest::URL
     card = { 'author' => 'Example', 'channel' => 'example', 'text' => 'Reply', 'url' => url,

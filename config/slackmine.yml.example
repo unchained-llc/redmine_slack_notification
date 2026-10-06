@@ -85,6 +85,10 @@ slack:
   # Up to 10 files,
   # 10 MiB each (or Redmine's lower attachment limit), 50 MiB total per reply.
   thread_comments: false
+  # Suppress outgoing Slack notifications for comments imported from Slack threads.
+  # Defaults to true; false sends normal notifications (event switches still apply).
+  # Independent of thread_comments and personal email suppression; project overrides supported.
+  suppress_thread_comment_notifications: true
   # Publish personal open-issue lists in the shared Slack app's Home tab.
   # Enable App Home > Home Tab and subscribe to app_home_opened at the Events URL.
   # Requires shared slack.events, bot_token and user mappings (or email matching).

@@ -891,6 +891,36 @@ class EventConfigurationTest < Minitest::Test
     refute captured[1].key?('_slackmine_comment_issue_id')
   end
 
+  def test_imported_thread_comment_notification_suppression_is_configurable
+    previous = Thread.current[:slackmine_thread_comment]
+    Thread.current[:slackmine_thread_comment] = true
+    [nil, true, false].each do |value|
+      captured = []
+      settings = { 'slack' => {} }
+      settings['slack']['suppress_thread_comment_notifications'] = value unless value.nil?
+      Slackmine.stub(:config, settings) do
+        Slackmine::Formatter.stub(:journal_payload, ->(*) { { 'text' => 'Comment' } }) do
+          Slackmine.stub(:enqueue, ->(payload, **_options) { captured << payload }) do
+            item = journal
+            item.details = []
+            item.send(:notify_slack_journal_created)
+          end
+        end
+      end
+      assert_equal(value == false ? 1 : 0, captured.size)
+    end
+    Slackmine.stub(:config, { 'slack' => { 'suppress_thread_comment_notifications' => false },
+                             'events' => { 'comment_added' => false } }) do
+      Slackmine.stub(:enqueue, ->(*) { flunk 'Disabled comment event was enqueued' }) do
+        item = journal
+        item.details = []
+        item.send(:notify_slack_journal_created)
+      end
+    end
+  ensure
+    Thread.current[:slackmine_thread_comment] = previous
+  end
+
   def test_both_disabled_send_nothing
     Slackmine.stub(:config, { 'events' => { 'comment_added' => false, 'issue_updated' => false } }) do
       Slackmine.stub(:enqueue, ->(*) { flunk 'disabled journal was enqueued' }) do

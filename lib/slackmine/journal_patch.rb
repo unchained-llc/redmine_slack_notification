@@ -18,9 +18,10 @@ module Slackmine
     end
 
     def notify_slack_journal_created
-      return if Thread.current[:slackmine_thread_comment]
       issue = journalized
       return unless issue.is_a?(Issue)
+      return if Thread.current[:slackmine_thread_comment] &&
+                Slackmine.effective_config(issue.project).dig('slack', 'suppress_thread_comment_notifications') != false
       return if issue.is_private? || private_notes?
 
       comment_enabled = !notes.to_s.strip.empty? && Slackmine.event_enabled?(issue.project, 'comment_added')

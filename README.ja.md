@@ -540,6 +540,14 @@ messages:
 
 保存結果は同じスレッドに返します。文言は `messages.thread_comments.saved`（`%{id}` と `%{product_name}` を利用可）と `messages.thread_comments.restricted` で変更できます。ファイルの拒否時は `messages.thread_comments.image_failed` を使います。成功コメントの通常のSlack通知は抑制しますが、Redmineの標準メール通知等は通常どおり動きます。Bot投稿・Slackでの編集／削除は同期しません。取得不能・サイズ超過・無効なファイルを含む返信は全体を拒否します。Slackのメンションやリンク表記をRedmine形式へ変換する処理も含みません。保存後の結果返信に失敗してもコメントは残り、ログに記録します。スイッチをOFFにしても既に登録されたコメントは残ります。
 
+`slack.suppress_thread_comment_notifications: false` にすると、Slackから取り込んだコメントも通常のSlack通知を送ります。省略時・`true` は従来どおり抑制します。イベントスイッチと `comment_notifications_in_threads` の設定も適用され、保存結果の返信は別途送ります。`projects.<identifier>.slack.suppress_thread_comment_notifications` でプロジェクト別に上書きできます。メール通知の扱いは変更しません。YAML変更後はRedmineとワーカーを再起動してください。
+
+```yaml
+slack:
+  thread_comments: true
+  suppress_thread_comment_notifications: false
+```
+
 コード・YAMLの反映後、RedmineとSidekiqを再起動してください。テスト用チケットの通知へ返信し、本人名義のコメント本文と成功返信を確認します。権限のないユーザー、Bot返信、Slack側での編集も試し、コメントが増えないことを確認してください。
 
 ### 本文の差分

@@ -560,6 +560,14 @@ These settings affect new notifications and freshly requested details. Existing 
 
 The result is posted to the same thread. Customize the text with `messages.thread_comments.saved` (supports `%{id}` and `%{product_name}`) and `messages.thread_comments.restricted`. File rejection feedback uses `messages.thread_comments.image_failed`. The normal Slack notification for the newly saved comment is suppressed; standard Redmine email notifications and other callbacks still run. Bot messages and Slack edits/deletions are not synchronized. Replies containing inaccessible, oversized or invalid files are rejected in full. Slack mentions and link syntax are not converted to Redmine markup. If result feedback fails after saving, the comment remains saved and the failure is logged. Disabling the feature keeps previously saved comments.
 
+Set `slack.suppress_thread_comment_notifications: false` to send normal Slack notifications for imported comments. Omitted or `true` keeps suppression enabled. Event switches and `comment_notifications_in_threads` still apply; saving feedback is sent independently. Override per project under `projects.<identifier>.slack.suppress_thread_comment_notifications`. This switch does not change email notification behavior. Restart Redmine and the worker after changing YAML.
+
+```yaml
+slack:
+  thread_comments: true
+  suppress_thread_comment_notifications: false
+```
+
 After deploying code and YAML, restart Redmine and Sidekiq. Reply to a test Issue notification and verify the author, exact comment text, and success response. Also check unauthorized users, bot replies, and Slack edits to ensure they do not add comments.
 
 ### Body diffs
