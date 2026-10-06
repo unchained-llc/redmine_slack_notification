@@ -124,8 +124,12 @@ class LinkCardsHelperTest < Minitest::Test
       doc = Nokogiri::HTML.fragment(@view.textilizable(@issue, :description, only_path: false))
       assert_equal 1, doc.css('.slackmine-link-card').size
       assert_equal ['Open in Slack'], doc.css('a').map(&:text)
-      assert_equal '28', doc.at_css('.slackmine-link-card-header img')['width']
-      assert_equal '28', doc.at_css('.slackmine-link-card-header img')['height']
+      avatar = doc.at_css('.slackmine-link-card-header img')
+      assert_equal({ 'src' => card['avatar'], 'alt' => '', 'width' => '28', 'height' => '28', 'class' => 'slackmine-mail-avatar' }, avatar.attributes.transform_values(&:value))
+      assert_includes avatar.parent['style'], 'display: table-cell; vertical-align: middle; padding-right: 6px'
+      metadata_cell = doc.at_css('.slackmine-mail-header-layout').element_children.last
+      assert_includes metadata_cell['style'], 'display: table-cell; vertical-align: middle; line-height: 20px'
+      assert_equal card['author'], metadata_cell.at_css('strong').text
       assert_includes doc.at_css('.slackmine-link-card')['style'], 'border-left: 4px solid'
       assert_includes doc.at_css('.slackmine-link-card > a')['style'], 'font-weight: 700'
       assert_equal 'Test', doc.at_css('.slackmine-link-card-text strong').text
