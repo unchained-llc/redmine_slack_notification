@@ -84,6 +84,102 @@ class LinkCardsHelperTest < Minitest::Test
     end
   end
 
+  def test_mail_saved_quote_preserves_markup_without_web_stylesheet_or_slack_fetch
+    @view.controller_name = 'mailer'
+    @view.render_source = true
+    @view.define_singleton_method(:format_time) { |value| value.iso8601 }
+    source = "1. *First*\n    ◦ Child\n\n4. *Next*\n    - Detail <img src=x>"
+    card = { 'author' => 'Example', 'channel' => 'example', 'timestamp' => '2026-10-05T00:00:00Z', 'text' => source,
+             'thread_reply' => true, 'parent_url' => LinkCardsTest::URL,
+             'parent' => { 'author' => 'Parent', 'timestamp' => '2026-10-05T00:00:00Z', 'text' => "*Topic*\n  ◦ Context" } }
+    @issue.define_singleton_method(:description) { @description }
+    @issue.instance_variable_set(:@description, Slackmine::LinkQuotes.encode(card, LinkCardsTest::URL))
+    Slackmine::LinkCards.stub(:source, ->(*) { flunk 'mail must not fetch Slack' }) do
+      doc = Nokogiri::HTML.fragment(@view.textilizable(@issue, :description, only_path: false))
+      assert_includes doc.at_css('.slackmine-link-card')['style'], 'border-left: 4px solid'
+      assert_includes doc.at_css('.slackmine-link-card-header')['style'], 'display: block'
+      texts = doc.css('.slackmine-link-card-text')
+      assert_equal 2, texts.size
+      assert_equal "Topic\n  ◦ Context", texts.first.text
+      assert_equal source.gsub('*First*', 'First').gsub('*Next*', 'Next'), texts.last.text
+      texts.each do |node|
+        assert_includes node['style'], 'white-space: pre-wrap'
+        assert_includes node['style'], 'display: block'
+      end
+      assert_equal ['First', 'Next'], texts.last.css('strong').map(&:text)
+      assert_empty texts.last.css('img, script, ol, ul, li')
+    end
+  end
+
+  def test_mail_saved_card_has_inline_styles_and_replaces_original_url
+    @view.controller_name = 'mailer'
+    @view.define_singleton_method(:format_time) { |value| value.iso8601 }
+    card = { 'author' => 'Example', 'channel' => 'example', 'timestamp' => '2026-10-05T00:00:00Z',
+             'avatar' => 'https://example.com/avatar.png', 'text' => '*Test*' }
+    @issue.define_singleton_method(:description) { @description }
+    url = LinkCardsTest::URL
+    @issue.instance_variable_set(:@description, url + "\n\n" + Slackmine::LinkQuotes.encode(card, url))
+    @view.source_formatter = ->(source) { "<p>#{CGI.escapeHTML(source).sub(url, '<a href="' + url + '">' + url + '</a>')}</p>" }
+    Slackmine::LinkCards.stub(:source, ->(*) { flunk 'mail must not fetch Slack' }) do
+      doc = Nokogiri::HTML.fragment(@view.textilizable(@issue, :description, only_path: false))
+      assert_equal 1, doc.css('.slackmine-link-card').size
+      assert_equal ['Open in Slack'], doc.css('a').map(&:text)
+      assert_equal '28', doc.at_css('.slackmine-link-card-header img')['width']
+      assert_equal '28', doc.at_css('.slackmine-link-card-header img')['height']
+      assert_includes doc.at_css('.slackmine-link-card')['style'], 'border-left: 4px solid'
+      assert_includes doc.at_css('.slackmine-link-card > a')['style'], 'font-weight: 700'
+      assert_equal 'Test', doc.at_css('.slackmine-link-card-text strong').text
+      icon = doc.at_css('.slackmine-link-card > a img')
+      assert_equal '16', icon['width']
+      assert_equal 'slackmine-bundled-logo.png', icon['src']
+    end
+  end
+
+  def test_link_text_is_shared_by_web_and_mail_and_escaped
+    card = { 'author' => 'Example', 'channel' => 'example', 'text' => 'Message' }
+    [nil, '<img class="slackmine-mail-icon" src="slackmine-bundled-logo.png">'].each do |icon|
+      ['Slackで開く', '<script> & "quoted"', nil, '', '  ', false].each do |value|
+        Slackmine.stub(:effective_config, { 'slack' => { 'link_cards' => { 'link_text' => value } } }) do
+          html = Slackmine::LinkCards.render_card(card, LinkCardsTest::URL, @issue.project, icon_html: icon)
+          doc = Nokogiri::HTML.fragment(html)
+          expected = value.is_a?(String) && !value.strip.empty? ? value : 'Open in Slack'
+          assert_equal expected, doc.at_css('.slackmine-link-card > a').text
+          assert_empty doc.css('script')
+          assert_equal icon ? 1 : 0, doc.css('.slackmine-mail-icon').size
+        end
+      end
+    end
+  end
+
+  def test_mail_cards_can_be_disabled_without_hiding_quote_text_or_web_cards
+    card = { 'author' => 'Example', 'channel' => 'example', 'timestamp' => '2026-10-05T00:00:00Z', 'text' => '*Saved message*' }
+    url = LinkCardsTest::URL
+    source = url + "\n\n" + Slackmine::LinkQuotes.encode(card, url)
+    @issue.define_singleton_method(:description) { @description }
+    @issue.instance_variable_set(:@description, source)
+    @view.render_source = true
+    @view.define_singleton_method(:format_time) { |value| value.iso8601 }
+    Slackmine.stub(:effective_config, { 'slack' => { 'link_cards' => { 'mail_enabled' => false } } }) do
+      @view.controller_name = 'mailer'
+      Slackmine::LinkCards.stub(:source, ->(*) { flunk 'mail must not fetch Slack' }) do
+        doc = Nokogiri::HTML.fragment(@view.textilizable(@issue, :description))
+        assert_empty doc.css('.slackmine-link-card, img')
+        assert_includes doc.text, url
+        assert_includes doc.text, '*Saved message*'
+        refute_includes doc.text, '[slack-quote:'
+      end
+      @view.controller_name = 'issues'
+      User.stub(:current, Object.new) do
+        Slackmine::LinkCards.stub(:source, source) do
+          Slackmine::LinkCards.stub(:render_links, ->(html, *) { html }) do
+            doc = Nokogiri::HTML.fragment(@view.textilizable(@issue, :description))
+            assert_equal 1, doc.css('.slackmine-link-card').size
+          end
+        end
+      end
+    end
+  end
+
   def test_saved_quote_renders_without_network_and_preserves_private_note_gate
     card = { 'author' => 'Example', 'channel' => 'test', 'timestamp' => '2026-10-05T00:00:00Z',
              'text' => 'Searchable <script>alert(1)</script> {{include(private)}}', 'names' => {} }

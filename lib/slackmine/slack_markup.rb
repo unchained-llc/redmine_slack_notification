@@ -103,9 +103,6 @@ module Slackmine
         case line
         when /^(?:>|&gt;)\s?(.*)$/
           %(<span class="slack-markdown-quote">#{inline(Regexp.last_match(1), names)}</span>)
-        when /^\s*(?:[-*•]|(\d+)\.)\s+(.+)$/
-          number, body = Regexp.last_match(1), Regexp.last_match(2)
-          %(<span class="slack-markdown-list-item">#{number ? number + '.' : '•'} #{inline(body, names)}</span>)
         when /^\#{1,6}\s+(.+)$/
           %(<strong class="slack-markdown-heading">#{inline(Regexp.last_match(1), names)}</strong>)
         else

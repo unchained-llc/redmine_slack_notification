@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+require_relative 'mail_inline_icon'
 
 module Slackmine
   module UserPreferencePatch
@@ -21,6 +22,7 @@ module Slackmine
         next unless content.include?('[slack-quote:')
         part.body = LinkQuotes.plain_source(content)
       end
+      MailInlineIcon.embed(message)
       message
     end
 

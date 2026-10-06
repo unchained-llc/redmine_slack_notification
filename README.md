@@ -842,6 +842,22 @@ Access follows Redmine issue and private-note permissions. Viewers do not need a
 
 Slack `mrkdwn` emphasis, strike-through, links, quotes and code are rendered, along with basic Markdown headings, lists, bold text and links. Standard emoji shortcodes become Unicode; custom emoji retain their shortcode. Raw HTML stays literal and links allow only HTTP, HTTPS and mailto. A reply not found in history is attempted through `conversations.replies`; API restrictions or failure may leave it as a normal link. Files are not imported.
 
+Set `slack.link_cards.link_text` to customize the **Open in Slack** label for
+both Redmine and email. Omitted or blank values use `Open in Slack`; the value is
+plain text, not HTML.
+
+Set `slack.link_cards.mail_enabled: false` to disable HTML email quote cards and
+the inline logo, keeping the original Slack link and plain quote text. Omitted or
+`true` enables them. Project overrides use
+`projects.<identifier>.slack.link_cards.mail_enabled`; Redmine cards are unaffected.
+
+Saved quotes in HTML email use inline card styles, preserve hand-typed list markers,
+indentation and line breaks, and render supported emphasis. The Slack mark beside
+**Open in Slack** is a bundled PNG attached inline and referenced by `cid:`;
+it does not require access to the authenticated Redmine website. Plain-text
+parts and existing attachments are preserved. The PNG is derived from the
+attributed `assets/images/slack-mark.svg` and remains a Slack trademark.
+
 At most 20 unique links are considered per save, with a five-second budget for starting API calls and short network timeouts; links beyond the budget remain ordinary links. API results are reused only within that import, scoped by bot token. The same bounded retrieval remains for legacy live previews. Quotes are saved inside the source column; no shared HTML cache is used. Redmine issue/private-note permissions apply to the stored source and to normal Redmine search results. **The saved quote text is searchable through Redmine's existing issue-description and journal-note search** (disable “titles only” to include bodies). No separate search index is needed. Original unquoted links are not searchable by Slack message wording until imported. Snapshots can be edited or removed with the source text; removing only the original URL does not remove the stored quote. All ordinary Redmine notifications/history apply to these saved text changes.
 
 ## Privacy and development

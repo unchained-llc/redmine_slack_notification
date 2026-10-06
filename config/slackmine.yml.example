@@ -6,6 +6,10 @@ slack:
   # Slack permalink cards in issue descriptions/comments. Six-digit hex color.
   # Override with projects.<identifier>.slack.link_cards.color.
   link_cards:
+    link_text: 'Open in Slack'
+    # HTML email quote cards and inline Slack logo. Omitted defaults to true.
+    # false keeps quotes as plain text; Redmine cards are unaffected.
+    mail_enabled: true
     color: '#6D5DFB'
   # Register this command in Slack with Request URL /slackmine/commands.
   # Requires the commands scope and an app reinstall. Omit to disable.
