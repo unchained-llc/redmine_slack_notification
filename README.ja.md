@@ -4,7 +4,7 @@
 
 ![Slackmine — SlackとRedmineの連携](docs/assets/slackmine-icon.png)
 
-バージョン **1.1.0**。
+バージョン **1.2.0**。
 
 通知機能からSlackとRedmineの統合へ機能が広がったため、**Redmine Event Notifications for Slack**（`redmine_slack_notification`）から **Slackmine** に改名しました。内部名・プラグインID・設定ファイル名・エンドポイントも `slackmine` に統一し、旧名の互換対応は設けていません。
 
@@ -576,9 +576,14 @@ slack:
   thread_comment_batch:
     wait_seconds: 60      # 省略・0なら即時保存
     max_wait_seconds: 300
+  thread_comment_feedback_cleanup_seconds: -1
 ```
 
 プロジェクト別に上書きできます。遅延ジョブに元のイベントを渡し、実行時に `conversations.replies` でSlackのスレッドを取得します。新しいDBテーブルやキャッシュへの蓄積は行いません。ActiveJobの遅延ジョブに対応したワーカー（Sidekiq等）と、対象チャンネルの返信APIを取得できるBot権限が必要です。待機中はSlackへ投稿せず、保存済みのコメントはまとめ直しません。スレッド取得は最大1000投稿とし、超過時は不完全な取り込みをせずエラーにします。YAML変更後はRedmineとワーカーを再起動してください。
+
+Slackのスレッドで会話を続けていると、返信のたびに「コメントを追加しました」という確認メッセージが入り、会話の流れを追いづらくなることがあります。保存結果を確認する時間を残しつつ、会話を読みやすく保つために、Botの結果メッセージを一定時間後に自動削除できます。たとえば `slack.thread_comment_feedback_cleanup_seconds: 60` なら、結果を表示してから60秒後に片付けます。成功・権限拒否・ファイル拒否の結果メッセージが対象です。
+
+`slack.thread_comment_feedback_cleanup_seconds` は削除までの秒数です。省略時・`-1` は削除しない、`0` は結果メッセージを投稿しません（成功・拒否・失敗すべて）。不正な値も削除しない設定として扱います。`projects.<identifier>.slack` で上書きできます。元のSlack返信やRedmineのコメントは削除しません。正の値による自動削除には予約ジョブを実行できるワーカー（Sidekiq等）が必要で、実際の削除時刻はジョブの処理状況により遅れる場合があります。削除実行前に `-1` に変更すると、予約済みの削除も実行しません。
 
 保存結果は同じスレッドに返します。文言は `messages.thread_comments.saved`（`%{id}` と `%{product_name}` を利用可）と `messages.thread_comments.restricted` で変更できます。ファイルの拒否時は `messages.thread_comments.image_failed` を使います。成功コメントの通常のSlack通知は抑制しますが、Redmineの標準メール通知等は通常どおり動きます。Bot投稿・Slackでの編集／削除は同期しません。取得不能・サイズ超過・無効なファイルを含む返信は全体を拒否します。Slackのメンションやリンク表記をRedmine形式へ変換する処理も含みません。保存後の結果返信に失敗してもコメントは残り、ログに記録します。スイッチをOFFにしても既に登録されたコメントは残ります。
 
@@ -895,6 +900,7 @@ ruby -Itest test/slash_commands_cache_test.rb
 ruby -Itest test/slash_commands_edit_test.rb
 ruby -Itest test/app_home_test.rb
 ruby -Itest test/thread_images_test.rb
+ruby -Itest test/thread_comment_feedback_cleanup_test.rb
 ```
 
 テストはスタブを使って通知の整形と配信ロジックを確認します。追加の `ruby -Itest test/thread_comments_persistence_test.rb` は ActiveRecord と sqlite3 が利用できる環境で実行し、メモリ内のテスト用チケット・コメントテーブルで保存、重複抑制、権限拒否、通知ループ抑制を確認します。追加の `ruby -Itest test/notification_transactions_test.rb` は ActiveRecord と sqlite3 のある環境で別プロセスで実行し、Issue削除と汎用通知モデルのcommit・rollbackを確認します。対応表と実環境での未確認事項は [通知監査](#通知の対応範囲と検証) を参照してください。本番DBやRedisへ接続せず、Slackへの投稿や稼働中のRedmine環境も検証しません。
@@ -943,6 +949,7 @@ ruby -Itest test/thread_images_test.rb
 
 | バージョン | 主な変更 |
 | --- | --- |
+| **1.2.0** | 会話を読みやすくするため、コメント保存の確認メッセージを非表示・一定時間後に自動削除できる任意設定を追加。 |
 | **1.1.0** | 同じユーザーの連続したSlackスレッド返信をまとめて保存する任意設定を追加。新しいDBテーブルやキャッシュバッファを使わず、元の時系列・リンク・添付を保持します。デフォルトは即時保存、設定例は待機60秒・最大300秒。取り込んだコメントの通常Slack通知を切り替える設定も追加しました。 |
 | **1.0.0** | Slackmineとして最初のメジャーリリース。文書・ファイル・フォーラムの追加／変更／削除通知を整備。メール抑制の判定をRedmineで有効なメール発生条件に合わせました。 |
 | **0.9.0** | プラグイン名・設定・エンドポイント・タスクをSlackmineに統一。スレッド返信を画像・PDF・その他ファイルに拡張し、添付のプレビューとリンクに対応しました。 |

@@ -124,19 +124,40 @@ module Slackmine
     end
 
     def feedback(issue, event, result)
+      return if feedback_cleanup_seconds(issue.project).zero?
+
       key = result == :saved ? 'saved' : (result == :image_failed ? 'image_failed' : 'restricted')
       text = Formatter.interpolate(Formatter.message('thread_comments', key), { id: issue.id, product_name: Formatter.message('work_objects', 'product_name') },
                                    fallback: Formatter::DEFAULT_MESSAGES.dig('thread_comments', key))
       text = Formatter.link_issue_reference(text, issue.id)
-      Slackmine.slack_api('chat.postMessage', {
+      response = Slackmine.slack_api('chat.postMessage', {
         'channel' => event['channel'], 'thread_ts' => event['thread_ts'], 'text' => text,
         'unfurl_links' => false, 'unfurl_media' => false
       }, Slackmine.bot_token(issue.project))
+      schedule_feedback_cleanup(issue.project, event, response)
     rescue StandardError => e
       # Saving already succeeded. Feedback failure must not replay a note.
       Rails.logger&.error("Slackmine: thread comment feedback failed: #{e.class}")
     ensure
       Rails.logger&.info("Slackmine: thread comment issue=#{issue.id} result=#{result}")
+    end
+
+    def feedback_cleanup_seconds(project)
+      value = Slackmine.effective_config(project).dig('slack', 'thread_comment_feedback_cleanup_seconds')
+      return -1 if value == -1
+      value.is_a?(Numeric) && value.finite? && value >= 0 ? value : -1
+    end
+
+    def schedule_feedback_cleanup(project, event, response)
+      wait = feedback_cleanup_seconds(project)
+      return if wait == -1
+      timestamp = response['ts']
+      return unless posted_at(timestamp) && timestamp != event['ts'] && timestamp != event['thread_ts']
+
+      # Queue only the Bot's result message, never the original reply or token.
+      SlackmineThreadCommentFeedbackCleanupJob.set(wait: wait).perform_later(project.id, event['channel'], timestamp)
+    rescue StandardError => e
+      Rails.logger&.error("Slackmine: thread comment feedback cleanup scheduling failed: #{e.class}")
     end
 
     def source_marker(team_id, event)

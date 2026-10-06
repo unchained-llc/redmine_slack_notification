@@ -97,6 +97,11 @@ slack:
   thread_comment_batch:
     wait_seconds: 60
     max_wait_seconds: 300
+  # Keep conversations readable: show the import result, then clear Bot feedback.
+  # Delete result messages after this many seconds (default: -1; e.g. 60).
+  # -1 keeps them; 0 suppresses feedback entirely. Original replies and Redmine notes remain.
+  # Requires a scheduled-job worker. Project overrides are supported.
+  thread_comment_feedback_cleanup_seconds: -1
   # Publish personal open-issue lists in the shared Slack app's Home tab.
   # Enable App Home > Home Tab and subscribe to app_home_opened at the Events URL.
   # Requires shared slack.events, bot_token and user mappings (or email matching).

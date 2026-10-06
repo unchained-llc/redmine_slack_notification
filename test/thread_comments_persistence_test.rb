@@ -499,6 +499,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
   end
 
   def test_processing_fetches_only_parent_and_does_not_post_feedback_twice
+    cleanups = []
     @settings['messages'] = { 'work_objects' => { 'product_name' => 'Example Tracker' },
                               'thread_comments' => { 'saved' => '✅ %{product_name} #%{id} にコメントを追加しました。' } }
     calls = []
@@ -515,7 +516,9 @@ class ThreadCommentsPersistenceTest < Minitest::Test
         Slackmine::WorkObjects.stub(:viewer_for, @viewer) do
           Slackmine.stub(:slack_api, api) do
             Slackmine::LinkQuotes.stub(:import, ->(text, *) { text }) do
-              2.times { COMMENTS.process('ATEST', 'TTEST', @event) }
+              COMMENTS.stub(:schedule_feedback_cleanup, ->(*args) { cleanups << args }) do
+                2.times { COMMENTS.process('ATEST', 'TTEST', @event) }
+              end
             end
           end
         end
@@ -523,6 +526,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     end
     assert_equal 1, Journal.count
     assert_equal 1, calls.count { |call| call[0] == 'chat.postMessage' }
+    assert_equal [[@issue.project, @event, { 'ts' => '1791001000.000004' }]], cleanups
     feedback = calls.find { |call| call[0] == 'chat.postMessage' }
     assert_equal "✅ Example Tracker <https://redmine.example.com/issues/#{@issue.id}|##{@issue.id}> にコメントを追加しました。", feedback[1]['text']
     history = calls.first[1]

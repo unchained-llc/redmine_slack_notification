@@ -4,7 +4,7 @@
 
 ![Slackmine — Slack and Redmine integration](docs/assets/slackmine-icon.png)
 
-Version **1.1.0**.
+Version **1.2.0**.
 
 The plugin was renamed from **Redmine Event Notifications for Slack** (`redmine_slack_notification`) to **Slackmine** as it grew from notifications into a broader Slack–Redmine integration. Internal names, plugin ID, configuration filename and endpoints now use `slackmine`; the former names are no longer supported.
 
@@ -595,9 +595,14 @@ slack:
   thread_comment_batch:
     wait_seconds: 60      # omitted or 0 saves immediately
     max_wait_seconds: 300
+  thread_comment_feedback_cleanup_seconds: -1
 ```
 
 Project overrides are supported. Delayed jobs carry the source event, then fetch the thread from Slack with `conversations.replies`; there is no new DB table or cache buffer. The worker must support ActiveJob delayed jobs (e.g. Sidekiq), and the Bot needs access to the replies API for the channel. No Slack message is posted while waiting. Existing replies are not retroactively combined. History retrieval is limited to 1000 messages; larger threads fail rather than saving an incomplete batch. Restart Redmine and the worker after changing YAML.
+
+During an ongoing Slack thread conversation, a “Comment added” confirmation after every reply can make the exchange harder to follow. Optional automatic cleanup gives participants time to check the result, then removes the Bot’s feedback to keep the conversation easy to read. For example, `slack.thread_comment_feedback_cleanup_seconds: 60` removes feedback 60 seconds after it is posted. This applies to success, permission-denial, and file-rejection messages.
+
+`slack.thread_comment_feedback_cleanup_seconds` controls the delay before deletion. The default is `-1` (keep messages); `0` skips posting all result messages, including success, denial, and failure feedback and a positive value specifies the delay in seconds. Invalid values also disable cleanup. Override it under `projects.<identifier>.slack`. Original Slack replies and Redmine comments remain. Automatic deletion with a positive delay requires a worker supporting scheduled jobs (such as Sidekiq); deletion may run later depending on worker availability. Changing the setting to `-1` before a queued deletion runs also cancels that deletion.
 
 The result is posted to the same thread. Customize the text with `messages.thread_comments.saved` (supports `%{id}` and `%{product_name}`) and `messages.thread_comments.restricted`. File rejection feedback uses `messages.thread_comments.image_failed`. The normal Slack notification for the newly saved comment is suppressed; standard Redmine email notifications and other callbacks still run. Bot messages and Slack edits/deletions are not synchronized. Replies containing inaccessible, oversized or invalid files are rejected in full. Slack mentions and link syntax are not converted to Redmine markup. If result feedback fails after saving, the comment remains saved and the failure is logged. Disabling the feature keeps previously saved comments.
 
@@ -925,6 +930,7 @@ ruby -Itest test/slash_commands_edit_test.rb
 ruby -Itest test/app_home_test.rb
 ruby -Itest test/message_shortcuts_test.rb
 ruby -Itest test/thread_images_test.rb
+ruby -Itest test/thread_comment_feedback_cleanup_test.rb
 ```
 
 These tests exercise notification formatting and delivery logic with stubs. Additionally, run `ruby -Itest test/thread_comments_persistence_test.rb` where ActiveRecord and sqlite3 are available to check persistence, duplicate suppression, permission denial, and notification-loop suppression using in-memory Issue/Journal fixture tables. Run `ruby -Itest test/notification_transactions_test.rb` separately with ActiveRecord and sqlite3 to verify commit/rollback behavior for Issue deletion and generic notification models. See [notification audit](#notification-coverage-and-verification) for the coverage matrix and remaining runtime checks. These tests do not connect to production databases or Redis, post to Slack, or verify a live Redmine installation.
@@ -973,6 +979,7 @@ version numbers are editorial labels, not a record of published releases or Git 
 
 | Version | Highlights |
 | --- | --- |
+| **1.2.0** | Added options to hide or automatically clear comment-save confirmations to keep thread conversations readable. |
 | **1.1.0** | Added optional batching of consecutive Slack thread replies from the same user, preserving source order, links, and attachments without a new DB table or cache buffer. Replies save immediately by default; the example uses a 60-second wait and a 300-second maximum. Added a switch for normal Slack notifications of imported comments. |
 | **1.0.0** | First major release as Slackmine. Document, file, and forum notifications cover creation, editing, and deletion. Email suppression follows enabled Redmine mail triggers. |
 | **0.9.0** | Renamed the plugin and its configuration, endpoints, and tasks to Slackmine. Extended thread replies to images, PDFs, and other files, with attachment previews and links. |
