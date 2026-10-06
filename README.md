@@ -4,7 +4,7 @@
 
 ![Slackmine — Slack and Redmine integration](docs/assets/slackmine-icon.png)
 
-Version **1.0.0**.
+Version **1.1.0**.
 
 The plugin was renamed from **Redmine Event Notifications for Slack** (`redmine_slack_notification`) to **Slackmine** as it grew from notifications into a broader Slack–Redmine integration. Internal names, plugin ID, configuration filename and endpoints now use `slackmine`; the former names are no longer supported.
 
@@ -558,7 +558,7 @@ messages:
 
 These settings affect new notifications and freshly requested details. Existing notification cards are not rewritten. Slack-owned UI text such as “Details” and “Conversations” follows Slack’s language settings.
 
-Replies are saved immediately by default (`wait_seconds` omitted or `0`). The example below enables batching: consecutive replies from the same Slack user in the same thread are combined into one Redmine comment after 60 seconds of silence, or at most 300 seconds from the first reply. Omitted `max_wait_seconds` defaults to 300. A reply from another user closes the preceding group, so A → A → B → A becomes three comments in source order; Bot feedback does not split human turns. Each source link is retained and attachments are imported together; saving feedback is sent once. Different users, threads, apps and workspaces are kept separate. At most 20 messages are combined; the existing text/file limits apply to the whole batch. These timings are scheduled deadlines; a busy worker can save later.
+Replies are saved immediately by default (`wait_seconds` omitted or `0`). The example below enables batching: consecutive replies from the same Slack user in the same thread are combined into one Redmine comment after 60 seconds of silence, or at most 300 seconds from the first reply. Omitted `max_wait_seconds` defaults to 300. A reply from another user closes the preceding group, so A → A → B → A becomes three comments in source order; Bot feedback does not split human turns. The batch is displayed in one card with a single author/time header and the combined text. Short replies are separated by a single line break, and the card has one Open in Slack link. All source URLs are retained in the saved quote data and attachments are imported together; saving feedback is sent once. Different users, threads, apps and workspaces are kept separate. At most 20 messages are combined; the existing text/file limits apply to the whole batch. These timings are scheduled deadlines; a busy worker can save later.
 
 ```yaml
 slack:
@@ -942,6 +942,7 @@ version numbers are editorial labels, not a record of published releases or Git 
 
 | Version | Highlights |
 | --- | --- |
+| **1.1.0** | Added optional batching of consecutive Slack thread replies from the same user, preserving source order, links, and attachments without a new DB table or cache buffer. Replies save immediately by default; the example uses a 60-second wait and a 300-second maximum. Added a switch for normal Slack notifications of imported comments. |
 | **1.0.0** | First major release as Slackmine. Document, file, and forum notifications cover creation, editing, and deletion. Email suppression follows enabled Redmine mail triggers. |
 | **0.9.0** | Renamed the plugin and its configuration, endpoints, and tasks to Slackmine. Extended thread replies to images, PDFs, and other files, with attachment previews and links. |
 | **0.6.0** | Added Slack notification-thread replies as Redmine comments and saved Slack message quotes with links back to the original conversation. |

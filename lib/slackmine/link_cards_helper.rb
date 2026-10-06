@@ -32,7 +32,7 @@ module Slackmine
       prepared = raw.to_s.dup
       quotes.each do |block, card|
         token = "SLACKQUOTE#{SecureRandom.hex(16)}"
-        quote_urls[token] = card['url']
+        quote_urls[token] = card['source_urls'] || card['url']
         replacements[token] = if options[:formatting] == false || (!card_view && !mail_cards)
                                 %(<span style="white-space: pre-wrap">#{SlackMarkup.escape(LinkQuotes.plain_source(block))}</span>)
                               else
@@ -62,7 +62,7 @@ module Slackmine
                                    deadline: Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5 }
       html = LinkCards.render_links(html, issue, User.current, journal_id, @slack_link_card_state,
                              time_formatter: time_formatter,
-                             quoted_urls: quotes.map { |_, card| card['url'] })
+                             quoted_urls: quotes.flat_map { |_, card| Array(card['source_urls'] || card['url']) })
       html.html_safe
     end
   end
@@ -152,13 +152,19 @@ module Slackmine
       quote_urls.each do |token, url|
         anchors = fragment.css('a[href]').select do |anchor|
           next false if anchor.ancestors.any? { |node| %w[pre code].include?(node.name) || node['class'].to_s.split.include?('slackmine-link-card') }
-          LinkQuotes.identity(anchor['href']) == LinkQuotes.identity(url)
+          Array(url).any? { |source| LinkQuotes.identity(anchor['href']) == LinkQuotes.identity(source) }
         end
         next if anchors.empty?
         replace_link_with_card(anchors.first, replacements[token])
         replacements[token] = ''
         # Keep additional references compact without repeating the saved body.
-        anchors.drop(1).each { |anchor| anchor.content = 'Slack ↗' if anchor.text == anchor['href'] }
+        anchors.drop(1).each do |anchor|
+          if url.is_a?(Array)
+            replace_link_with_card(anchor, '')
+          else
+            anchor.content = 'Slack ↗' if anchor.text == anchor['href']
+          end
+        end
       end
     end
 

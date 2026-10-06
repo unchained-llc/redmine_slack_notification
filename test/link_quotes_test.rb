@@ -191,8 +191,21 @@ class LinkQuotesTest < Minitest::Test
       raise Slackmine::SlackApiError.new(method, '403', { 'error' => 'missing_scope' })
     }) do
       cards = Q.blocks(import(%(<a href="#{URL}">first</a><a href="#{second_url}">second</a>))).map(&:last)
-      assert_equal ['First short message', 'Second short message'], cards.map { |card| card['text'] }
-      assert_equal [[41], [42]], cards.map { |card| card['thread_file_ids'] }
+      assert_equal 1, cards.size
+      assert_equal "First short message\nSecond short message", cards.first['text']
+      assert_equal [41, 42], cards.first['thread_file_ids']
+      assert_equal [URL, second_url], cards.first['source_urls']
+      assert_includes Q.plain_source(Q.encode(cards.first, URL)), second_url
+      rendered = Slackmine::LinkCards.render_card(cards.first, URL, @issue.project)
+      fragment = Nokogiri::HTML.fragment(%(<p><a href="#{URL}">first</a></p><p><a href="#{second_url}">second</a></p>))
+      Slackmine::LinkCards.place_saved_cards(fragment, { 'BATCH' => rendered }, { 'BATCH' => [URL, second_url] })
+      assert_equal 1, fragment.css('.slackmine-link-card').size
+      assert_equal 1, fragment.css('.slackmine-link-card-header').size
+      assert_equal [URL], fragment.css('a[href]').map { |a| a['href'] }
+      assert_equal "First short message\nSecond short message", fragment.at_css('.slackmine-link-card-text').text
+      assert_empty fragment.css('a a')
+      assert_includes fragment.text, 'First short message'
+      assert_includes fragment.text, 'Second short message'
     end
   ensure
     Thread.current[:slackmine_thread_comment] = origin

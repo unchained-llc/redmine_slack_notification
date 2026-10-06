@@ -36,6 +36,12 @@ module Slackmine
       data = JSON.parse(Base64.strict_decode64(metadata))
       return unless data.is_a?(Hash) && LinkCards.parse(data['url'])
       return unless %w[author channel timestamp].all? { |key| data[key].is_a?(String) }
+      if data.key?('source_urls')
+        urls = data['source_urls']
+        target = identity(data['url'])
+        return unless urls.is_a?(Array) && urls.size.between?(1, 20) && urls.first == data['url'] &&
+                      urls.all? { |url| url.is_a?(String) && identity(url)&.first(2) == target.first(2) }
+      end
       Time.iso8601(data['timestamp'])
       return unless data['names'].nil? || valid_names?(data['names'])
       %w[thread_image_ids thread_file_ids].each do |key|
@@ -95,7 +101,7 @@ module Slackmine
         next raw unless card
         parent = card['parent']
         prefix = parent ? "Thread parent: #{parent['author']}\n#{parent['text']}\n\nThread reply\n" : ''
-        "Slack — #{card['author']} · ##{card['channel']} · #{card['timestamp']}\n#{card['url']}\n#{prefix}#{card['text']}"
+        "Slack — #{card['author']} · ##{card['channel']} · #{card['timestamp']}\n#{Array(card['source_urls'] || card['url']).join("\n")}\n#{prefix}#{card['text']}"
       end
     end
 
@@ -114,10 +120,11 @@ module Slackmine
       links = Nokogiri::HTML.fragment(html).css('a[href]').reject do |anchor|
         anchor.ancestors.any? { |node| %w[pre code].include?(node.name) }
       end.map { |anchor| anchor['href'] }.select { |url| LinkCards.parse(url) }
-      imported = existing.map { |_, card| identity(card['url']) }
+      imported = existing.flat_map { |_, card| Array(card['source_urls'] || card['url']).map { |url| identity(url) } }
       cache = {}
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
       quotes = []
+      batch_cards = []
       links.uniq.first(20).each do |url|
         key = identity(url)
         next if imported.include?(key)
@@ -144,7 +151,19 @@ module Slackmine
         quote = encode(card, url)
         next if blocks(quote).empty?
         quotes << quote
+        batch_cards << [card, url] if snapshot
         imported << key
+      end
+      if batch_cards.size > 1 && batch_cards.size == quotes.size
+        combined = batch_cards.first.first.merge(
+          'text' => batch_cards.map { |card, _| resolved_text(card) }.join("\n"),
+          'names' => {}, 'source_urls' => batch_cards.map(&:last))
+        %w[thread_image_ids thread_file_ids].each do |key|
+          ids = batch_cards.flat_map { |card, _| Array(card[key]) }.uniq
+          combined[key] = ids unless ids.empty?
+        end
+        quote = encode(combined, batch_cards.first.last)
+        quotes = [quote] unless blocks(quote).empty?
       end
       quotes.empty? ? text : text.to_s.rstrip + "\n\n" + quotes.join("\n\n")
     end
