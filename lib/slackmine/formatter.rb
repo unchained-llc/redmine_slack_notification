@@ -286,13 +286,13 @@ module Slackmine
       "<#{url("/issues/#{issue.id}")}|#{issue_title(issue)}>"
     end
 
-    def payload(message, blocks: nil)
+    def payload(message, blocks: nil, noun: nil, action: nil)
       return { 'text' => message } if blocks.nil? || blocks.empty?
 
       {
         'attachments' => [{
           'fallback' => message,
-          'color' => attachment_color,
+          'color' => event_color(noun, action),
           'blocks' => blocks
         }]
       }
@@ -301,6 +301,14 @@ module Slackmine
     def attachment_color
       color = Slackmine.effective_config.dig('slack', 'attachment_color')
       color.is_a?(String) && color.match?(/\A#[0-9a-fA-F]{6}\z/) ? color : '#6D5DFB'
+    end
+
+    def event_color(noun, action)
+      configured = Slackmine.effective_config['messages']
+      ['colors', event_key(noun), action].each do |key|
+        configured = configured.is_a?(Hash) ? configured[key] : nil
+      end
+      configured.is_a?(String) && configured.match?(/\A#[0-9a-fA-F]{6}\z/) ? configured : attachment_color
     end
 
     def due_reminder_color(group)
@@ -424,7 +432,7 @@ module Slackmine
         append_metadata(blocks, 'issue', metadata_fields(issue, actor, action), action: action)
       end
 
-      result = payload(title, blocks: blocks)
+      result = payload(title, blocks: blocks, noun: 'Issue', action: action)
       action == 'deleted' ? result : with_issue_work_object(result, issue, actor: actor, action: action)
     end
 
@@ -475,7 +483,10 @@ module Slackmine
         blocks.concat(change_field_blocks(changes))
       end
       append_metadata(blocks, 'issue', metadata_fields(issue, actor, 'updated'), action: 'updated') if combined_update
-      result = with_issue_work_object(payload(fallback, blocks: blocks), issue, actor: actor, action: 'updated')
+      result = with_issue_work_object(payload(fallback, blocks: blocks,
+                                             noun: combined_update ? 'Issue' : 'Comment',
+                                             action: combined_update ? 'updated' : comment_action),
+                                      issue, actor: actor, action: 'updated')
       if !combined_update && Slackmine.effective_config.dig('slack', 'comment_notifications_in_threads') == true
         body = comment_action == 'added' ? mrkdwn_sections(nil, notes.to_s) : blocks.drop(3)
         header_key = "#{comment_action}_header"
@@ -708,7 +719,7 @@ module Slackmine
         ['updater', text(actor&.name || message('values', 'unknown'))],
         ['location', text(title)]
       ])
-      payload(fallback, blocks: blocks)
+      payload(fallback, blocks: blocks, noun: 'Wiki page', action: action)
     end
 
     def generic_payload(project:, **options)
@@ -753,7 +764,7 @@ module Slackmine
           blocks.insert(2, section_text("*#{text(section_label('comment'))}*\n> #{mrkdwn(notes.to_s).gsub("\n", "\n> ")}"))
         end
       end
-      payload(fallback, blocks: blocks)
+      payload(fallback, blocks: blocks, noun: noun, action: action)
     end
 
     def event_label(noun, action)

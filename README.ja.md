@@ -207,6 +207,21 @@ slack:
 
 初期値は `'#6D5DFB'` です。6 桁の 16 進カラーコードを引用符で囲んで指定してください。無効な値は初期値に戻ります。Markdown のリストや画像があっても、Slack の attachment はカードの左線とセクションを維持します。
 
+`messages.colors` は `messages.icons` と同じ種別・操作の単位で左線の色を指定します。省略・無効な値は `slack.attachment_color` を使います。`projects.<identifier>.messages.colors` でプロジェクトごとに上書きできます。コメントと項目変更を同時に行った通知は、アイコンと同じく `issue.updated` を使います。期日リマインダーは既存の `due_reminders.colors` を使います。
+
+```yaml
+messages:
+  colors:
+    issue:
+      created: '#2E7D32'
+      updated: '#1565C0'
+      deleted: '#C62828'
+    comment:
+      added: '#6D5DFB'
+      updated: '#F79009'
+      deleted: '#C62828'
+```
+
 Issue には、作成・更新の両方に共通する `slack.metadata.issue` マップを 1 つ使います。項目を `true` にすると、変更の有無にかかわらず、どちらの通知でも表示します。初期状態では `project`、`updater`、`tracker`、`category`、`priority` を表示し、その他の Issue 項目は非表示です。未設定の単一値は `Not set`、空のリストは `None` と表示します。その他の通知種別では、`slack.metadata.<type>.<field>` を `false` にすると項目を非表示にでき、省略した項目は表示されます。指定できる項目は次のとおりです。
 
 | 種別 | 項目 |
@@ -596,12 +611,13 @@ slack:
 
 ### 文言とテンプレート
 
-最上位の `messages` ツリーで通知文言を変更できます。イベントを送るかどうかは制御しません。すべてのキーは任意です。省略した値や空文字列には組み込みの初期値を使います。[設定例](config/slackmine.yml.example)には、使用できるすべてのキーとサンプル値を掲載しています。
+最上位の `messages` ツリーで通知文言・アイコン・色を変更できます。イベントを送るかどうかは制御しません。すべてのキーは任意です。省略した値や空文字列には組み込みの初期値を使います。[設定例](config/slackmine.yml.example)には、使用できるすべてのキーとサンプル値を掲載しています。
 
 | グループ | 設定対象 |
 | --- | --- |
 | `messages.events` | `Issue updated` などのイベント名 |
 | `messages.icons` | イベントの絵文字 |
+| `messages.colors` | イベントごとのカードの左線の色 |
 | `messages.sections` | カードのセクション見出し |
 | `messages.fields` | メタデータと変更項目のラベル |
 | `messages.relations` | 関連の名称 |

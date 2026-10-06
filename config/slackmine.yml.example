@@ -354,6 +354,51 @@ messages:
       deleted: '🗑️'
     project:
       updated: '🗂️'
+  # Optional card colors: same type/action keys as icons. Omitted or invalid
+  # values fall back to slack.attachment_color. Project overrides are supported.
+  # colors:
+  #   document:
+  #     created: '#6D5DFB'
+  #     updated: '#6D5DFB'
+  #     deleted: '#6D5DFB'
+  #   file:
+  #     added: '#6D5DFB'
+  #     updated: '#6D5DFB'
+  #     deleted: '#6D5DFB'
+  #   message:
+  #     posted: '#6D5DFB'
+  #     updated: '#6D5DFB'
+  #     deleted: '#6D5DFB'
+  #   issue:
+  #     created: '#6D5DFB'
+  #     updated: '#6D5DFB'
+  #     deleted: '#6D5DFB'
+  #   comment:
+  #     added: '#6D5DFB'
+  #     updated: '#6D5DFB'
+  #     deleted: '#6D5DFB'
+  #   wiki:
+  #     created: '#6D5DFB'
+  #     updated: '#6D5DFB'
+  #     deleted: '#6D5DFB'
+  #   news:
+  #     created: '#6D5DFB'
+  #     updated: '#6D5DFB'
+  #     deleted: '#6D5DFB'
+  #   news_comment:
+  #     added: '#6D5DFB'
+  #     updated: '#6D5DFB'
+  #     deleted: '#6D5DFB'
+  #   time_entry:
+  #     created: '#6D5DFB'
+  #     updated: '#6D5DFB'
+  #     deleted: '#6D5DFB'
+  #   version:
+  #     created: '#6D5DFB'
+  #     updated: '#6D5DFB'
+  #     deleted: '#6D5DFB'
+  #   project:
+  #     updated: '#6D5DFB'
   sections:
     content: Content
     comment: Comment

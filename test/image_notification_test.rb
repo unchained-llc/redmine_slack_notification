@@ -409,6 +409,84 @@ class ProjectConfigurationTest < Minitest::Test
   end
 end
 
+class NotificationColorTest < Minitest::Test
+  def test_notification_builders_select_the_same_event_as_the_icon
+    colors = Slackmine::Formatter::DEFAULT_MESSAGES['icons'].transform_values do |actions|
+      actions.transform_values { '#123456' }
+    end
+    colors['issue']['updated'] = '#654321'
+    settings = { 'messages' => { 'colors' => colors } }
+    project = OpenStruct.new(name: 'Example', identifier: 'example')
+    issue = OpenStruct.new(id: 42, subject: 'Example', description: '', project: project,
+                           tracker: OpenStruct.new(name: 'Task'))
+    content = OpenStruct.new(page: OpenStruct.new(title: 'Example'), comments: '')
+    Slackmine.stub(:effective_config, settings) do
+      Slackmine::Formatter.stub(:metadata_fields, []) do
+        Slackmine::Formatter.stub(:change_fields, []) do
+          assert_equal '#123456', Slackmine::Formatter.build_issue_payload(issue, actor: nil, action: 'created').dig('attachments', 0, 'color')
+          assert_equal '#123456', Slackmine::Formatter.build_journal_payload(issue, actor: nil, notes: '').dig('attachments', 0, 'color')
+          combined = Slackmine::Formatter.build_journal_payload(issue, actor: nil, notes: '',
+            details: [OpenStruct.new(property: 'attr', prop_key: 'subject')])
+          assert_equal '#654321', combined.dig('attachments', 0, 'color')
+          assert_equal '#123456', Slackmine::Formatter.build_wiki_payload(content, project, actor: nil, action: 'created').dig('attachments', 0, 'color')
+          %w[Document File Message News].zip(%w[created added posted created]).each do |noun, action|
+            card = Slackmine::Formatter.build_generic_payload(noun: noun, action: action, subject: 'Example',
+              url: 'https://example.com/record', project: project, actor: nil)
+            assert_equal '#123456', card.dig('attachments', 0, 'color'), noun
+          end
+        end
+      end
+    end
+  end
+
+  def test_every_icon_type_and_action_accepts_a_color_without_changing_blocks
+    Slackmine::Formatter::DEFAULT_MESSAGES['icons'].each do |key, actions|
+      noun = Slackmine::Formatter::EVENT_NOUN_KEYS.key(key)
+      actions.each_key do |action|
+        settings = { 'messages' => { 'colors' => { key => { action => '#123AbC' } } } }
+        blocks = [Slackmine::Formatter.section_text('Event')]
+        Slackmine.stub(:effective_config, settings) do
+          card = Slackmine::Formatter.payload('Fallback', blocks: blocks, noun: noun, action: action)
+          assert_equal '#123AbC', card.dig('attachments', 0, 'color'), "#{key}.#{action}"
+          assert_equal blocks, card.dig('attachments', 0, 'blocks')
+        end
+      end
+    end
+  end
+
+  def test_missing_invalid_and_malformed_event_colors_use_the_existing_default
+    [nil, false, '#123', 'red', '', {}, 123].each do |color|
+      settings = { 'slack' => { 'attachment_color' => '#654321' },
+                   'messages' => { 'colors' => { 'comment' => { 'added' => color } } } }
+      Slackmine.stub(:effective_config, settings) do
+        assert_equal '#654321', Slackmine::Formatter.event_color('Comment', 'added')
+        assert_equal '#654321', Slackmine::Formatter.event_color('Comment', 'deleted')
+      end
+    end
+    [nil, false, 'invalid', { 'colors' => false }, { 'colors' => { 'comment' => false } }].each do |messages|
+      Slackmine.stub(:effective_config, { 'messages' => messages }) do
+        assert_equal '#6D5DFB', Slackmine::Formatter.event_color('Comment', 'added')
+      end
+    end
+  end
+
+  def test_project_event_color_overrides_do_not_leak_to_other_projects
+    settings = {
+      'messages' => { 'colors' => { 'comment' => { 'added' => '#111111', 'deleted' => '#222222' } } },
+      'projects' => { 'example' => { 'messages' => { 'colors' => { 'comment' => { 'added' => '#333333' } } } } }
+    }
+    Slackmine.stub(:config, settings) do
+      Slackmine.with_project(OpenStruct.new(identifier: 'example')) do
+        assert_equal '#333333', Slackmine::Formatter.event_color('Comment', 'added')
+        assert_equal '#222222', Slackmine::Formatter.event_color('Comment', 'deleted')
+      end
+      Slackmine.with_project(OpenStruct.new(identifier: 'other')) do
+        assert_equal '#111111', Slackmine::Formatter.event_color('Comment', 'added')
+      end
+    end
+  end
+end
+
 class EventConfigurationTest < Minitest::Test
   class TestJournal < Journal
     attr_accessor :journalized, :notes, :details, :user, :id, :updated_by, :previous_notes, :previous_private_notes

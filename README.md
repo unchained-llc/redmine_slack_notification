@@ -239,6 +239,21 @@ slack:
 
 The default is `'#6D5DFB'`. Use a quoted six-digit hex value; invalid values fall back to the default. Slack attachments preserve the card border and sections when Markdown lists or images appear.
 
+`messages.colors` sets the left border color using the same type/action keys as `messages.icons`. Omitted or invalid values fall back to `slack.attachment_color`. Override colors per project under `projects.<identifier>.messages.colors`. A comment combined with field changes uses `issue.updated`, matching the icon. Due reminders continue to use `due_reminders.colors`.
+
+```yaml
+messages:
+  colors:
+    issue:
+      created: '#2E7D32'
+      updated: '#1565C0'
+      deleted: '#C62828'
+    comment:
+      added: '#6D5DFB'
+      updated: '#F79009'
+      deleted: '#C62828'
+```
+
 For Issues, use one `slack.metadata.issue` map for both creation and updates. A field set to `true` appears whenever either notification is sent, even if it did not change. By default, `project`, `updater`, `tracker`, `category`, and `priority` are visible; the other Issue fields are hidden. Unset scalar values show `Not set`; empty lists show `None`. For other notification types, set `slack.metadata.<type>.<field>` to `false` to hide a field; unspecified fields remain visible. Available fields are:
 
 | Type | Fields |
@@ -616,12 +631,13 @@ To share a newly uploaded private file with the channel, the plugin posts a temp
 
 ### Wording and templates
 
-The top-level `messages` tree changes notification wording; it does not control whether an event is sent. All keys are optional. Omitted or empty strings use built-in defaults. The [example YAML](config/slackmine.yml.example) lists every available key with sample values:
+The top-level `messages` tree changes notification wording, icons, and colors; it does not control whether an event is sent. All keys are optional. Omitted or empty strings use built-in defaults. The [example YAML](config/slackmine.yml.example) lists every available key with sample values:
 
 | Group | Controls |
 | --- | --- |
 | `messages.events` | Visible event labels such as `Issue updated` |
 | `messages.icons` | Event emoji |
+| `messages.colors` | Event card border colors |
 | `messages.sections` | Card section headings |
 | `messages.fields` | Metadata and changed-field labels |
 | `messages.relations` | Relation names |
