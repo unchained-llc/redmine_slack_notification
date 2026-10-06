@@ -174,6 +174,32 @@ class LinkQuotesTest < Minitest::Test
     assert_nil Q.blocks(Q.encode(@card, URL)).first.last['avatar']
   end
 
+  def test_batch_snapshots_preserve_text_and_per_message_attachments_without_refetching_replies
+    origin = Thread.current[:slackmine_thread_comment]
+    previous = Thread.current[:slackmine_thread_messages]
+    files = Thread.current[:slackmine_thread_files]
+    second_url = URL.sub(/p\d+/, 'p1791001000000003')
+    Thread.current[:slackmine_thread_comment] = true
+    Thread.current[:slackmine_thread_messages] = [
+      { url: URL, message: { 'ts' => '1791001000.000002', 'user' => 'U123', 'channel' => 'C123', 'text' => 'First short message' } },
+      { url: second_url, message: { 'ts' => '1791001000.000003', 'user' => 'U123', 'channel' => 'C123', 'text' => 'Second short message' } }
+    ]
+    Thread.current[:slackmine_thread_files] = [{ url: URL, ids: [41] }, { url: second_url, ids: [42] }]
+    Slackmine.stub(:slack_api, ->(method, *_args, **_options) {
+      refute_includes %w[conversations.history conversations.replies], method
+      # Profile lookups may fail, but accepted text must still be saved.
+      raise Slackmine::SlackApiError.new(method, '403', { 'error' => 'missing_scope' })
+    }) do
+      cards = Q.blocks(import(%(<a href="#{URL}">first</a><a href="#{second_url}">second</a>))).map(&:last)
+      assert_equal ['First short message', 'Second short message'], cards.map { |card| card['text'] }
+      assert_equal [[41], [42]], cards.map { |card| card['thread_file_ids'] }
+    end
+  ensure
+    Thread.current[:slackmine_thread_comment] = origin
+    Thread.current[:slackmine_thread_messages] = previous
+    Thread.current[:slackmine_thread_files] = files
+  end
+
   def test_callbacks_import_only_changed_fields_and_attach_before_validation
     callback_class = Class.new do
       class << self

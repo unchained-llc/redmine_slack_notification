@@ -558,6 +558,17 @@ messages:
 
 These settings affect new notifications and freshly requested details. Existing notification cards are not rewritten. Slack-owned UI text such as “Details” and “Conversations” follows Slack’s language settings.
 
+Replies are saved immediately by default (`wait_seconds` omitted or `0`). The example below enables batching: consecutive replies from the same Slack user in the same thread are combined into one Redmine comment after 60 seconds of silence, or at most 300 seconds from the first reply. Omitted `max_wait_seconds` defaults to 300. A reply from another user closes the preceding group, so A → A → B → A becomes three comments in source order; Bot feedback does not split human turns. Each source link is retained and attachments are imported together; saving feedback is sent once. Different users, threads, apps and workspaces are kept separate. At most 20 messages are combined; the existing text/file limits apply to the whole batch. These timings are scheduled deadlines; a busy worker can save later.
+
+```yaml
+slack:
+  thread_comment_batch:
+    wait_seconds: 60      # omitted or 0 saves immediately
+    max_wait_seconds: 300
+```
+
+Project overrides are supported. Delayed jobs carry the source event, then fetch the thread from Slack with `conversations.replies`; there is no new DB table or cache buffer. The worker must support ActiveJob delayed jobs (e.g. Sidekiq), and the Bot needs access to the replies API for the channel. No Slack message is posted while waiting. Existing replies are not retroactively combined. History retrieval is limited to 1000 messages; larger threads fail rather than saving an incomplete batch. Restart Redmine and the worker after changing YAML.
+
 The result is posted to the same thread. Customize the text with `messages.thread_comments.saved` (supports `%{id}` and `%{product_name}`) and `messages.thread_comments.restricted`. File rejection feedback uses `messages.thread_comments.image_failed`. The normal Slack notification for the newly saved comment is suppressed; standard Redmine email notifications and other callbacks still run. Bot messages and Slack edits/deletions are not synchronized. Replies containing inaccessible, oversized or invalid files are rejected in full. Slack mentions and link syntax are not converted to Redmine markup. If result feedback fails after saving, the comment remains saved and the failure is logged. Disabling the feature keeps previously saved comments.
 
 Set `slack.suppress_thread_comment_notifications: false` to send normal Slack notifications for imported comments. Omitted or `true` keeps suppression enabled. Event switches and `comment_notifications_in_threads` still apply; saving feedback is sent independently. Override per project under `projects.<identifier>.slack.suppress_thread_comment_notifications`. This switch does not change email notification behavior. Restart Redmine and the worker after changing YAML.

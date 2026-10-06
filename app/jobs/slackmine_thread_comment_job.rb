@@ -3,7 +3,11 @@
 class SlackmineThreadCommentJob < ApplicationJob
   queue_as :slack
 
-  def perform(app_id, team_id, event)
-    Slackmine::ThreadComments.process(app_id, team_id, event)
+  def perform(app_id, team_id, event, batch_ready = false)
+    if batch_ready
+      Slackmine::ThreadComments.process(app_id, team_id, event, batch_ready: true)
+    else
+      Slackmine::ThreadComments.process(app_id, team_id, event)
+    end
   end
 end

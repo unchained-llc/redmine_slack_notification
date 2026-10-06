@@ -109,6 +109,10 @@ class ApplicationJob
 
   def self.perform_later(*)
   end
+
+  def self.set(**)
+    self
+  end
 end
 
 class Project
@@ -1628,7 +1632,9 @@ class WorkObjectNotificationTest < Minitest::Test
                   Slackmine.stub(:slack_api, ->(method, body, _token, **_options) {
                     calls << [method, body]
                     method == 'conversations.history' ? { 'messages' => [parent] } : { 'ok' => true }
-                  }) { resolver.process('ATEST', 'T123', event) }
+                  }) do
+                    Slackmine::ThreadCommentBatch.stub(:timing, [0, 60]) { resolver.process('ATEST', 'T123', event) }
+                  end
                 end
               end
             end

@@ -121,7 +121,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     User.current = @previous_user
     @event = { 'type' => 'message', 'user' => 'U123', 'channel' => 'C123', 'text' => 'Reply from Slack',
                'thread_ts' => '1791001000.000001', 'ts' => '1791001000.000002' }
-    @settings = { 'slack' => { 'thread_comments' => true, 'bot_token' => 'test-token',
+    @settings = { 'slack' => { 'thread_comments' => true, 'thread_comment_batch' => { 'wait_seconds' => 0 }, 'bot_token' => 'test-token',
                               'default_channel_id' => 'C123', 'events' => {
                                 'app_id' => 'ATEST', 'team_id' => 'TTEST', 'signing_secret' => 'test-secret' } } }
     @parent = { 'ts' => @event['thread_ts'], 'bot_id' => 'B123', 'app_id' => 'ATEST', 'attachments' => [
@@ -134,7 +134,7 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     "https://example.slack.com/archives/C123/p#{timestamp.delete('.')}"
   end
 
-  def persist
+  def persist(events: nil)
     Slackmine::WorkObjects.stub(:viewer_for, @viewer) do
       Slackmine.stub(:config, @settings) do
         Slackmine.stub(:enqueue, ->(*) { flunk 'Comment notification loop' }) do
@@ -144,7 +144,11 @@ class ThreadCommentsPersistenceTest < Minitest::Test
           }) do
             # Card acquisition is tested separately from persistence.
             Slackmine::LinkQuotes.stub(:import, ->(text, *) { text }) do
-              COMMENTS.persist_reply(@issue, @event, 'TTEST')
+              if events
+                COMMENTS.persist_reply(@issue, events.first, 'TTEST', events: events)
+              else
+                COMMENTS.persist_reply(@issue, @event, 'TTEST')
+              end
             end
           end
         end
@@ -164,6 +168,67 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     @event['ts'] = '1791001000.000003'
     assert_equal :saved, persist
     assert_equal 2, Journal.count
+  end
+
+  def test_batch_preserves_each_source_and_is_saved_only_once
+    events = [@event, @event.merge('ts' => '1791001000.000003', 'text' => 'Second message')]
+    assert_equal :saved, persist(events: events)
+    assert_equal 1, Journal.count
+    events.each { |event| assert_includes Journal.first.notes, reply_url(event['ts']) }
+    assert_equal :duplicate, persist(events: events)
+    assert_equal 1, Journal.count
+    assert_nil Thread.current[:slackmine_thread_comment]
+  end
+
+  def test_reverse_job_completion_keeps_a_a_b_a_in_source_time_order
+    first = [@event.merge('text' => 'A first'), @event.merge('ts' => '1791001000.000003', 'text' => 'A second')]
+    middle = [@event.merge('user' => 'U456', 'ts' => '1791001000.000004', 'text' => 'B turn')]
+    last = [@event.merge('ts' => '1791001000.000005', 'text' => 'A last')]
+    # All turns occur in the same second. Preserve Slack's microseconds,
+    # even if workers complete them in exactly the opposite order.
+    @viewer = OpenStruct.new(id: 3, logged?: true)
+    assert_equal :saved, persist(events: last)
+    @viewer = OpenStruct.new(id: 4, logged?: true)
+    assert_equal :saved, persist(events: middle)
+    @viewer = OpenStruct.new(id: 3, logged?: true)
+    assert_equal :saved, persist(events: first)
+    assert_equal [3, 4, 3], Journal.order(:id).pluck(:user_id)
+    history = Journal.order(:created_on, :id).to_a
+    assert_equal [first.first, middle.first, last.first].map { |event| COMMENTS.posted_at(event['ts']) }, history.map(&:created_on)
+    assert_includes history[0].notes, reply_url(first[0]['ts'])
+    assert_includes history[0].notes, reply_url(first[1]['ts'])
+    assert_includes history[1].notes, reply_url(middle[0]['ts'])
+    assert_includes history[2].notes, reply_url(last[0]['ts'])
+    assert_equal :duplicate, persist(events: first)
+    assert_equal 3, Journal.count
+  end
+
+  def test_batch_combines_files_and_binds_them_to_their_own_source
+    events = [@event.merge('files' => [{ 'id' => 'F123' }]),
+              @event.merge('ts' => '1791001000.000003', 'files' => [{ 'id' => 'F456' }])]
+    files = [image_upload('F123-screen.png'), image_upload('F456-other.png')]
+    captured = nil
+    Slackmine::ThreadFiles.stub(:download, ->(event, *) {
+      assert_equal [{ 'id' => 'F123' }, { 'id' => 'F456' }], event['files']
+      files
+    }) do
+      # persist normally stubs the quote importer; inspect the maps at save time instead.
+      @issue.define_singleton_method(:save!) do
+        captured_maps = Thread.current[:slackmine_thread_images]
+        @captured_batch_maps = captured_maps
+        super()
+      end
+      assert_equal :saved, persist(events: events)
+      captured = @issue.instance_variable_get(:@captured_batch_maps)
+    end
+    assert_equal 2, Attachment.count
+    assert_equal 1, Journal.count
+    assert_equal 2, captured.size
+    assert_equal [Attachment.find_by(filename: 'F123-screen.png').id], captured[0][:ids]
+    assert_equal [Attachment.find_by(filename: 'F456-other.png').id], captured[1][:ids]
+    assert_includes captured[0][:url], events[0]['ts'].delete('.')
+    assert_includes captured[1][:url], events[1]['ts'].delete('.')
+    assert_nil Thread.current[:slackmine_thread_images]
   end
 
   def image_upload(name = 'F123-screen.png')

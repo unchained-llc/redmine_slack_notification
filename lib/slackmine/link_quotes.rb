@@ -121,18 +121,23 @@ module Slackmine
       links.uniq.first(20).each do |url|
         key = identity(url)
         next if imported.include?(key)
-        break if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
-        card = LinkCards.fetch_for_project(issue.project, url, api_cache: cache, deadline: deadline)
+        snapshot = thread_attachments(:slackmine_thread_messages, url) if Thread.current[:slackmine_thread_comment]
+        break if !snapshot && Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        card = if snapshot
+                 thread_message_card(snapshot[:message], issue.project, cache, deadline)
+               else
+                 LinkCards.fetch_for_project(issue.project, url, api_cache: cache, deadline: deadline)
+               end
         next unless card
         # Notification replies already have their parent comment in Redmine.
         if Thread.current[:slackmine_thread_comment]
           card = card.reject { |key, _| %w[thread_reply parent parent_url].include?(key) }
-          images = Thread.current[:slackmine_thread_images]
+          images = thread_attachments(:slackmine_thread_images, url)
           if images && !images[:ids].empty? && identity(images[:url]) == identity(url)
             card = card.merge('thread_image_ids' => images[:ids])
           end
         end
-        files = Thread.current[:slackmine_thread_files] if Thread.current[:slackmine_thread_comment]
+        files = thread_attachments(:slackmine_thread_files, url) if Thread.current[:slackmine_thread_comment]
         if files && !files[:ids].empty? && identity(files[:url]) == identity(url)
           card = card.merge('thread_file_ids' => files[:ids])
         end
@@ -142,6 +147,26 @@ module Slackmine
         imported << key
       end
       quotes.empty? ? text : text.to_s.rstrip + "\n\n" + quotes.join("\n\n")
+    end
+
+    def thread_attachments(key, url)
+      entries = Thread.current[key]
+      entries = [entries] if entries.is_a?(Hash)
+      Array(entries).find { |entry| identity(entry[:url]) == identity(url) }
+    end
+
+    def thread_message_card(message, project, cache, deadline)
+      token = Slackmine.bot_token(project)
+      call = lambda do |method, body|
+        key = [token, method, body]
+        next cache[key] if cache.key?(key)
+        remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        raise Timeout::Error if remaining <= 0
+        cache[key] = Slackmine.slack_api(method, body, token, form: true,
+          open_timeout: [2, remaining].min, read_timeout: [3, remaining].min)
+      end
+      info = LinkCards.optional_call(call, 'conversations.info', { 'channel' => message['channel'] })['channel'] || {}
+      LinkCards.message_card(message, call).merge('channel' => info['name'] || message['channel'])
     end
 
     def identity(url)

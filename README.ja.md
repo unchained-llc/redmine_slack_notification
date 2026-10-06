@@ -538,6 +538,17 @@ messages:
 
 設定変更は新しい通知と再取得した詳細に反映されます。既存の通知カードは書き換えません。「詳細」「会話」などSlack側のUI文言はSlackの言語設定に従います。
 
+既定では即時保存します（`wait_seconds` の省略時・`0`）。下の設定例ではまとめ保存を有効にし、同じSlackユーザーによる同じスレッド内の連続した返信だけを、最後の返信から60秒、最初の返信から最大300秒で1つのRedmineコメントにまとめます。`max_wait_seconds` の省略時は300秒です。別のユーザーが投稿したら直前のまとまりを区切るため、A→A→B→Aは発言順を保った3コメントになります。Botの結果返信では区切りません。各投稿のリンクを残し、添付もまとめて取り込み、保存結果は1回返します。投稿者・スレッド・アプリ・ワークスペースが違う返信は分けます。1回に最大20投稿までまとめ、既存の本文・添付の上限はまとめた全体に適用します。時間はジョブの実行予定で、ワーカーが混雑すると保存が遅れることがあります。
+
+```yaml
+slack:
+  thread_comment_batch:
+    wait_seconds: 60      # 省略・0なら即時保存
+    max_wait_seconds: 300
+```
+
+プロジェクト別に上書きできます。遅延ジョブに元のイベントを渡し、実行時に `conversations.replies` でSlackのスレッドを取得します。新しいDBテーブルやキャッシュへの蓄積は行いません。ActiveJobの遅延ジョブに対応したワーカー（Sidekiq等）と、対象チャンネルの返信APIを取得できるBot権限が必要です。待機中はSlackへ投稿せず、保存済みのコメントはまとめ直しません。スレッド取得は最大1000投稿とし、超過時は不完全な取り込みをせずエラーにします。YAML変更後はRedmineとワーカーを再起動してください。
+
 保存結果は同じスレッドに返します。文言は `messages.thread_comments.saved`（`%{id}` と `%{product_name}` を利用可）と `messages.thread_comments.restricted` で変更できます。ファイルの拒否時は `messages.thread_comments.image_failed` を使います。成功コメントの通常のSlack通知は抑制しますが、Redmineの標準メール通知等は通常どおり動きます。Bot投稿・Slackでの編集／削除は同期しません。取得不能・サイズ超過・無効なファイルを含む返信は全体を拒否します。Slackのメンションやリンク表記をRedmine形式へ変換する処理も含みません。保存後の結果返信に失敗してもコメントは残り、ログに記録します。スイッチをOFFにしても既に登録されたコメントは残ります。
 
 `slack.suppress_thread_comment_notifications: false` にすると、Slackから取り込んだコメントも通常のSlack通知を送ります。省略時・`true` は従来どおり抑制します。イベントスイッチと `comment_notifications_in_threads` の設定も適用され、保存結果の返信は別途送ります。`projects.<identifier>.slack.suppress_thread_comment_notifications` でプロジェクト別に上書きできます。メール通知の扱いは変更しません。YAML変更後はRedmineとワーカーを再起動してください。

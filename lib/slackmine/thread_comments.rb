@@ -85,7 +85,7 @@ module Slackmine
       Issue.find_by(id: reference[1].to_i)
     end
 
-    def process(app_id, team_id, event)
+    def process(app_id, team_id, event, batch_ready: false)
       return unless reply_event?(event)
       tried_tokens = []
       contexts(app_id, team_id, event['channel']).each do |context|
@@ -103,27 +103,40 @@ module Slackmine
                     Slackmine.bot_token(issue.project) == token
 
         Slackmine.with_project(issue.project) do
-          result = persist_reply(issue, event, team_id)
-          # A duplicate never creates a second Journal or a second feedback post.
-          return if result == :duplicate
-          key = result == :saved ? 'saved' : (result == :image_failed ? 'image_failed' : 'restricted')
-          text = Formatter.interpolate(Formatter.message('thread_comments', key), { id: issue.id, product_name: Formatter.message('work_objects', 'product_name') },
-                                       fallback: Formatter::DEFAULT_MESSAGES.dig('thread_comments', key))
-          text = Formatter.link_issue_reference(text, issue.id)
-          begin
-            Slackmine.slack_api('chat.postMessage', {
-              'channel' => event['channel'], 'thread_ts' => event['thread_ts'], 'text' => text,
-              'unfurl_links' => false, 'unfurl_media' => false
-            }, token)
-          rescue StandardError => e
-            # Saving already succeeded. Feedback failure must not replay a note.
-            Rails.logger&.error("Slackmine: thread comment feedback failed: #{e.class}")
+          wait = ThreadCommentBatch.timing(issue.project).first
+          unless batch_ready || wait.zero?
+            return ThreadCommentBatch.schedule(app_id, team_id, event, wait)
           end
-          Rails.logger&.info("Slackmine: thread comment issue=#{issue.id} result=#{result}")
+          events = batch_ready ? ThreadCommentBatch.collect(issue, app_id, team_id, event) : [event]
+          return :waiting unless events
+          result = if events.size == 1
+                     persist_reply(issue, events.first, team_id)
+                   else
+                     persist_reply(issue, events.first, team_id, events: events)
+                   end
+          # A duplicate never creates a second Journal or a second feedback post.
+          feedback(issue, events.first, result) if result != :duplicate
+          return result
         end
         return
       end
       nil
+    end
+
+    def feedback(issue, event, result)
+      key = result == :saved ? 'saved' : (result == :image_failed ? 'image_failed' : 'restricted')
+      text = Formatter.interpolate(Formatter.message('thread_comments', key), { id: issue.id, product_name: Formatter.message('work_objects', 'product_name') },
+                                   fallback: Formatter::DEFAULT_MESSAGES.dig('thread_comments', key))
+      text = Formatter.link_issue_reference(text, issue.id)
+      Slackmine.slack_api('chat.postMessage', {
+        'channel' => event['channel'], 'thread_ts' => event['thread_ts'], 'text' => text,
+        'unfurl_links' => false, 'unfurl_media' => false
+      }, Slackmine.bot_token(issue.project))
+    rescue StandardError => e
+      # Saving already succeeded. Feedback failure must not replay a note.
+      Rails.logger&.error("Slackmine: thread comment feedback failed: #{e.class}")
+    ensure
+      Rails.logger&.info("Slackmine: thread comment issue=#{issue.id} result=#{result}")
     end
 
     def source_marker(team_id, event)
@@ -138,14 +151,17 @@ module Slackmine
       Time.at(match[1].to_i, match[2].ljust(6, '0').to_i, :microsecond).utc
     end
 
-    def persist_reply(issue, event, team_id)
+    def persist_reply(issue, event, team_id, events: [event])
       previous_user = User.current
       previous_origin = Thread.current[:slackmine_thread_comment]
       previous_files = Thread.current[:slackmine_thread_files]
       previous_images = Thread.current[:slackmine_thread_images]
+      previous_messages = Thread.current[:slackmine_thread_messages]
       original_project = issue.project.identifier
       Thread.current[:slackmine_thread_comment] = true
       uploads = []
+      event = event.merge('text' => events.map { |item| item['text'].to_s }.join("\n\n"),
+                          'files' => events.flat_map { |item| Array(item['files']) }.uniq)
       timestamp = posted_at(event['ts'])
       return :restricted unless timestamp
 
@@ -166,21 +182,24 @@ module Slackmine
         next :duplicate if issue.journals.exists?(user_id: viewer.id, created_on: timestamp)
         next :restricted if Array(event['files']).any? && !issue.attachments_addable?(viewer)
 
-        response = Slackmine.slack_api('chat.getPermalink',
-          { 'channel' => event['channel'], 'message_ts' => event['ts'] },
-          Slackmine.bot_token(issue.project), form: true)
-        url = response['permalink'].to_s
-        target = LinkCards.parse(url)
-        next :restricted unless target && target['channel'] == event['channel'] &&
-                                posted_at(target['ts']) == timestamp
-
-        # History omits thread replies; preserve the parent timestamp so the
-        # existing quote importer can retrieve this reply through replies API.
-        uri = URI.parse(url)
-        uri.query = URI.encode_www_form(URI.decode_www_form(uri.query.to_s).reject { |key, _| key == 'thread_ts' } +
-                                       [['thread_ts', event['thread_ts']]])
+        urls = events.map do |item|
+          response = Slackmine.slack_api('chat.getPermalink',
+            { 'channel' => item['channel'], 'message_ts' => item['ts'] },
+            Slackmine.bot_token(issue.project), form: true)
+          url = response['permalink'].to_s
+          target = LinkCards.parse(url)
+          unless target && target['channel'] == item['channel'] && posted_at(target['ts']) == posted_at(item['ts'])
+            return :restricted
+          end
+          # Keep the thread timestamp so quote retrieval uses replies API.
+          uri = URI.parse(url)
+          uri.query = URI.encode_www_form(URI.decode_www_form(uri.query.to_s).reject { |key, _| key == 'thread_ts' } +
+                                         [['thread_ts', item['thread_ts']]])
+          uri.to_s
+        end
+        notes = urls.join("\n\n")
         User.current = viewer
-        journal = issue.init_journal(viewer, uri.to_s)
+        journal = issue.init_journal(viewer, notes)
         uploads = ThreadFiles.download(event, Slackmine.bot_token(issue.project))
         # The Issue row lock's transaction includes both attachments and Journal.
         # Validate every file before saving any, then use the Issue association
@@ -199,14 +218,25 @@ module Slackmine
             end
             Setting.text_formatting == 'textile' ? "!#{path}!" : "![](#{path})"
           end
-          journal.notes = uri.to_s + "\n\n" + references.join("\n\n")
+          journal.notes = notes + "\n\n" + references.join("\n\n")
         end
         journal.created_on = timestamp
         # A new imported note is not an edit. Redmine displays "edited" when
         # updated_on differs from created_on; later edits keep normal timestamps.
         journal.updated_on = timestamp
-        Thread.current[:slackmine_thread_images] = { url: uri.to_s, ids: attachments.select { |a| ThreadFiles::TYPES.key?(a.content_type) }.map(&:id) }
-        Thread.current[:slackmine_thread_files] = { url: uri.to_s, ids: attachments.reject { |a| ThreadFiles::TYPES.key?(a.content_type) }.map(&:id) }
+        image_maps = []
+        file_maps = []
+        events.zip(urls).each do |item, url|
+          file_ids = Array(item['files']).map { |file| file['id'] }
+          own = attachments.select { |attachment| file_ids.any? { |id| attachment.filename.start_with?("#{id}-") } }
+          image_maps << { url: url, ids: own.select { |a| ThreadFiles::TYPES.key?(a.content_type) }.map(&:id) }
+          file_maps << { url: url, ids: own.reject { |a| ThreadFiles::TYPES.key?(a.content_type) }.map(&:id) }
+        end
+        Thread.current[:slackmine_thread_images] = events.size == 1 ? image_maps.first : image_maps
+        Thread.current[:slackmine_thread_files] = events.size == 1 ? file_maps.first : file_maps
+        # Batch history already supplied each message. Quote those snapshots
+        # instead of fetching every reply again within the import time budget.
+        Thread.current[:slackmine_thread_messages] = events.zip(urls).map { |item, url| { url: url, message: item } } if events.size > 1
         issue.save!
         raise 'Slack reply Journal was not persisted' unless journal.persisted?
         :saved
@@ -222,6 +252,7 @@ module Slackmine
       Thread.current[:slackmine_thread_comment] = previous_origin
       Thread.current[:slackmine_thread_images] = previous_images
       Thread.current[:slackmine_thread_files] = previous_files
+      Thread.current[:slackmine_thread_messages] = previous_messages
     end
   end
 end
