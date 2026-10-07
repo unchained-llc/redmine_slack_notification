@@ -93,6 +93,8 @@ slack:
   # Up to 10 files,
   # 10 MiB each (or Redmine's lower attachment limit), 50 MiB total per reply.
   thread_comments: false
+  # Bot posts and human replies addressed to Bot/app users are always excluded.
+  # Mention recipient checks require users:read; excluded replies get no feedback.
   # Suppress outgoing Slack notifications for comments imported from Slack threads.
   # Defaults to true; false sends normal notifications (event switches still apply).
   # Independent of thread_comments and personal email suppression; project overrides supported.

@@ -13,6 +13,8 @@ class ThreadCommentBatchTest < Minitest::Test
                               'thread_comment_batch' => { 'wait_seconds' => 15, 'max_wait_seconds' => 60 } } }
     @event = reply(0)
     @scheduled = []
+    @members = {}
+    @mention_lookups = []
   end
 
   def reply(seconds, user = 'U123')
@@ -22,7 +24,11 @@ class ThreadCommentBatchTest < Minitest::Test
 
   def collect(messages, now, event = @event)
     Slackmine.stub(:config, @settings) do
-      Slackmine.stub(:slack_api, ->(_method, body, *_args, **_options) {
+      Slackmine.stub(:slack_api, ->(method, body, *_args, **_options) {
+        if method == 'users.info'
+          @mention_lookups << body['user']
+          next { 'user' => @members.fetch(body['user']) }
+        end
         assert_equal 'C123', body['channel']
         { 'messages' => messages }
       }) do
@@ -62,6 +68,19 @@ class ThreadCommentBatchTest < Minitest::Test
     messages = [reply(0), reply(3), reply(5, 'UOTHER'), reply(8)]
     groups = messages.map { |message| collect(messages, 30, message) }.uniq
     assert_equal [messages.first(2), [messages[2]], [messages[3]]], groups
+  end
+
+  def test_bot_directed_posts_are_excluded_from_batches_but_human_mentions_remain
+    @members = { 'UBOT' => { 'id' => 'UBOT', 'is_bot' => true },
+                 'UHUMAN' => { 'id' => 'UHUMAN', 'is_bot' => false } }
+    first = reply(0).merge('text' => 'Hello <@UHUMAN>')
+    request = reply(5).merge('text' => 'Please report this <@UBOT>')
+    last = reply(10).merge('text' => 'Thanks <@UHUMAN>')
+    assert_equal [first, last], collect([first, request, last], 26, first)
+    assert_equal %w[UHUMAN UBOT], @mention_lookups
+    @mention_lookups.clear
+    assert_equal [], collect([first, request, last], 26, request)
+    assert_equal ['UBOT'], @mention_lookups
   end
 
   def test_silence_starts_a_new_batch_and_missing_source_uses_accepted_event

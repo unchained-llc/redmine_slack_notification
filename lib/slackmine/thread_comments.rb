@@ -43,6 +43,20 @@ module Slackmine
       reply_event?(event) && !contexts(app_id, team_id, event['channel']).empty?
     end
 
+    def addressed_to_bot?(event, project, cache: {})
+      ids = event['text'].to_s.scan(/<@([UW][A-Z0-9]+)(?:\|[^>]+)?>/).flatten.uniq
+      ids.any? do |id|
+        unless cache.key?(id)
+          member = Slackmine.slack_api('users.info', { 'user' => id }, Slackmine.bot_token(project),
+                                      form: true, open_timeout: 2, read_timeout: 3)['user']
+          # Do not import a Bot request when its recipient could not be verified.
+          raise IOError, 'Slack mention identity unavailable' unless member.is_a?(Hash) && member['id'] == id
+          cache[id] = member['is_bot'] == true || member['is_app_user'] == true
+        end
+        cache[id]
+      end
+    end
+
     def issue_from_parent(message, app_id, thread_ts)
       return unless message.is_a?(Hash) && message['ts'] == thread_ts && message['bot_id'] &&
                     (message['app_id'] || message.dig('bot_profile', 'app_id')) == app_id
@@ -103,12 +117,15 @@ module Slackmine
                     Slackmine.bot_token(issue.project) == token
 
         Slackmine.with_project(issue.project) do
+          return :ignored if addressed_to_bot?(event, issue.project)
+
           wait = ThreadCommentBatch.timing(issue.project).first
           unless batch_ready || wait.zero?
             return ThreadCommentBatch.schedule(app_id, team_id, event, wait)
           end
           events = batch_ready ? ThreadCommentBatch.collect(issue, app_id, team_id, event) : [event]
           return :waiting unless events
+          return :ignored if events.empty?
           result = if events.size == 1
                      persist_reply(issue, events.first, team_id)
                    else

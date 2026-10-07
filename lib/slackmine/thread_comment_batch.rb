@@ -22,6 +22,9 @@ module Slackmine
     end
 
     def collect(issue, app_id, team_id, event)
+      mention_cache = {}
+      return [] if ThreadComments.addressed_to_bot?(event, issue.project, cache: mention_cache)
+
       wait, maximum = timing(issue.project)
       return [event] if wait.zero?
       # Slack is the buffer. Every job reconstructs the same deterministic
@@ -42,6 +45,7 @@ module Slackmine
       replies = messages.select { |message| message.is_a?(Hash) }.map do |message|
         message.merge('type' => 'message', 'channel' => event['channel'], 'thread_ts' => event['thread_ts'])
       end.select { |message| ThreadComments.reply_event?(message) }
+         .reject { |message| ThreadComments.addressed_to_bot?(message, issue.project, cache: mention_cache) }
          .uniq { |message| message['ts'] }.sort_by { |message| ThreadComments.posted_at(message['ts']) }
       # The accepted event remains authoritative if Slack history has changed.
       return [event] unless replies.any? { |reply| reply['ts'] == event['ts'] }
