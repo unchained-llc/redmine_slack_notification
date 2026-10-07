@@ -832,6 +832,8 @@ The selected message is temporarily stored in the existing `Rails.cache`, bound 
 
 ## Connect a Slack thread to an existing Issue
 
+![Message menu shortcuts: create an Issue or connect a thread](docs/images/features/message-menu.webp)
+
 From a message's **More actions** menu, choose **Connect a thread to an existing Issue** and enter the Issue number. **Save past conversation too** is selected by default. Review the past posts and deselect any you do not want to import. Confirming the connection saves the selected history as one comment under the connecting user's Redmine identity, preserving the original speakers, timestamps, and Slack links. Future replies and files are saved under each mapped user's Redmine identity.
 
 Use **Create an Issue from a message** for the creation shortcut and **Connect a thread to an existing Issue** for this connection shortcut. Creation copies only the selected message; connection applies to the whole thread. Rename shortcut labels without changing their callback IDs.
