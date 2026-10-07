@@ -30,6 +30,99 @@ class LinkCardsHelperTest < Minitest::Test
     @issue.define_singleton_method(:attachments) { [] }
   end
 
+  def test_history_import_renders_distinct_speakers_in_web_and_mail_without_fetching
+    @view.render_source = true
+    @view.define_singleton_method(:format_time) { |value| value.iso8601 }
+    cards = [['Alice', 'First message'], ['Bob', '<script>Reply</script>']].each_with_index.map do |(author, body), index|
+      card = { 'author' => author, 'channel' => 'discussion', 'timestamp' => '2026-10-07T01:00:00Z', 'text' => body,
+               'thread_connection_nonce' => 'a' * 32 }
+      Slackmine::LinkQuotes.encode(card, LinkCardsTest::URL.sub('755579', "75557#{index}"))
+    end
+    source = "Slackスレッドから取り込み（接続前の会話）\n\n" + cards.join("\n\n")
+    @issue.define_singleton_method(:description) { @description }
+    @issue.instance_variable_set(:@description, source)
+    %w[issues mailer].each do |surface|
+      @view.controller_name = surface
+      Slackmine.stub(:slack_api, ->(*) { flunk 'Saved history must render offline' }) do
+        Slackmine::LinkCards.stub(:source, source) do
+          doc = Nokogiri::HTML.fragment(@view.textilizable(@issue, :description))
+          assert_equal 2, doc.css('.slackmine-link-card').size
+          assert_includes doc.css('.slackmine-link-card-header').first.text, 'Alice'
+          assert_includes doc.css('.slackmine-link-card-header').last.text, 'Bob'
+          assert_equal ['First message', '<script>Reply</script>'], doc.css('.slackmine-link-card-text').map(&:text)
+          assert_empty doc.css('script')
+          refute_includes doc.to_html, '[slack-quote:'
+        end
+      end
+    end
+  end
+
+  def test_conversation_grouping_preserves_import_boundaries_and_intervening_text
+    card = { 'author' => 'Example', 'channel' => 'discussion', 'text' => 'Saved message', 'timestamp' => '2026-10-07T01:00:00Z',
+             'thread_connection_nonce' => 'a' * 32 }
+    first = Slackmine::LinkQuotes.encode(card, LinkCardsTest::URL)
+    second = Slackmine::LinkQuotes.encode(card, LinkCardsTest::URL.sub('755579', '755580'))
+    third = Slackmine::LinkQuotes.encode(card.merge('thread_connection_nonce' => 'b' * 32), LinkCardsTest::URL)
+    other_speaker = Slackmine::LinkQuotes.encode(card.merge('author' => 'Other'), LinkCardsTest::URL)
+    [ ["#{first}\n\n#{second}", [2]],
+      ["#{first}\nIntervening note\n#{second}", [1, 1]],
+      ["#{first}\n\n#{third}", [1, 1]],
+      ["#{first}\n\n#{other_speaker}\n\n#{second}", [1, 1, 1]],
+      ["#{first}\n\n#{Slackmine::LinkQuotes.encode(card.reject { |key, _| key == 'thread_connection_nonce' }, LinkCardsTest::URL)}", [1, 1]]
+    ].each do |raw, sizes|
+      assert_equal sizes, Slackmine::LinkCards.quote_groups(raw, Slackmine::LinkQuotes.blocks(raw)).map(&:size)
+    end
+  end
+
+  def test_history_import_matches_normal_pickup_for_consecutive_messages_in_web_and_mail
+    @view.render_source = true
+    @view.define_singleton_method(:format_time) { |value| value.iso8601 }
+    bodies = ['First post', 'Second post', 'Third post']
+    source = bodies.each_with_index.map do |body, index|
+      card = { 'author' => 'Alice', 'channel' => 'discussion', 'text' => body,
+               'timestamp' => "2026-10-07T12:0#{index}:00Z", 'thread_connection_nonce' => 'a' * 32 }
+      Slackmine::LinkQuotes.encode(card, LinkCardsTest::URL.sub('755579', "75557#{index}"))
+    end.join("\n\n")
+    @issue.define_singleton_method(:description) { source }
+    %w[issues mailer].each do |surface|
+      @view.controller_name = surface
+      Slackmine.stub(:slack_api, ->(*) { flunk 'Saved history must render offline' }) do
+        Slackmine::LinkCards.stub(:source, source) do
+          doc = Nokogiri::HTML.fragment(@view.textilizable(@issue, :description))
+          assert_equal 1, doc.css('.slackmine-link-card').size
+          assert_equal 1, doc.css('.slackmine-link-card-header').size
+          assert_equal bodies.join("\n"), doc.at_css('.slackmine-link-card-text').text
+          assert_includes doc.at_css('.slackmine-link-card-header').text, '#discussion'
+          assert_equal 1, doc.css('.slackmine-link-card > a').size
+          assert_equal 'Open in Slack', doc.at_css('.slackmine-link-card > a').text
+          assert_empty doc.css('.slackmine-thread-conversation')
+        end
+      end
+    end
+  end
+
+  def test_grouped_conversation_keeps_attachments_with_their_message
+    first = { 'author' => 'Alice', 'channel' => 'discussion', 'text' => 'Image', 'url' => LinkCardsTest::URL,
+              'thread_image_ids' => [41] }
+    second = first.merge('author' => 'Alice', 'text' => 'File', 'url' => LinkCardsTest::URL.sub('755579', '755580'),
+                         'thread_image_ids' => nil, 'thread_file_ids' => [42])
+    second.delete('thread_image_ids')
+    attachments = [OpenStruct.new(id: 41), OpenStruct.new(id: 42, filename: 'report.pdf')]
+    image = '/attachments/download/41/screen.png'
+    combined = Slackmine::LinkCards.combine_conversation([first, second])
+    html = Slackmine::LinkCards.render_card(combined, combined['url'], @issue.project) +
+           %(<p><img src="#{image}" width="344"></p>)
+    html = Slackmine::LinkCards.place_reply_images(html, [combined], attachments: attachments)
+    html = Slackmine::LinkCards.place_reply_files(html, [combined], attachments: attachments)
+    doc = Nokogiri::HTML.fragment(html)
+    entry = doc.at_css('.slackmine-link-card')
+    assert_equal 1, doc.css('.slackmine-link-card').size
+    assert_equal image, entry.at_css('.slackmine-link-card-images img')['src']
+    assert_equal 'report.pdf', entry.at_css('.slackmine-link-card-files a').text
+    assert_equal first['url'], entry.element_children.last['href']
+    assert_equal "Image\nFile", entry.at_css('.slackmine-link-card-text').text
+  end
+
   def test_hook_renders_after_normal_formatting_and_keeps_source_permission_check
     rendered = false
     User.stub(:current, Object.new) do

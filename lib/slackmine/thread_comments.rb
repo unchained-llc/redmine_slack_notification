@@ -40,7 +40,9 @@ module Slackmine
     end
 
     def accepted_reply?(app_id, team_id, event)
-      reply_event?(event) && !contexts(app_id, team_id, event['channel']).empty?
+      return false unless reply_event?(event)
+      return true if ThreadConnections.receives?(app_id, team_id)
+      !contexts(app_id, team_id, event['channel']).empty?
     end
 
     def addressed_to_bot?(event, project, cache: {})
@@ -101,6 +103,13 @@ module Slackmine
 
     def process(app_id, team_id, event, batch_ready: false)
       return unless reply_event?(event)
+      if ThreadConnections.receives?(app_id, team_id)
+        return :ignored if addressed_to_bot?(event, nil)
+        source = { 'channel' => event['channel'], 'ts' => event['thread_ts'] }
+        messages = ThreadConnections.history(source)
+        connection = ThreadConnections.connection(app_id, team_id, source, messages)
+        return ThreadConnections.process_reply(connection, app_id, team_id, event) if connection
+      end
       tried_tokens = []
       contexts(app_id, team_id, event['channel']).each do |context|
         token = Slackmine.bot_token(context)
@@ -195,7 +204,7 @@ module Slackmine
       Time.at(match[1].to_i, match[2].ljust(6, '0').to_i, :microsecond).utc
     end
 
-    def persist_reply(issue, event, team_id, events: [event])
+    def persist_reply(issue, event, team_id, events: [event], connected: false, import_viewer: nil, history_cards: nil, import_timestamp: nil)
       previous_user = User.current
       previous_origin = Thread.current[:slackmine_thread_comment]
       previous_files = Thread.current[:slackmine_thread_files]
@@ -206,24 +215,33 @@ module Slackmine
       uploads = []
       event = event.merge('text' => events.map { |item| item['text'].to_s }.join("\n\n"),
                           'files' => events.flat_map { |item| Array(item['files']) }.uniq)
-      timestamp = posted_at(event['ts'])
+      timestamp = history_cards ? (import_timestamp || Time.now.utc) : posted_at(event['ts'])
       return :restricted unless timestamp
 
       issue.with_lock do
-        next :restricted unless issue.project.identifier == original_project && enabled?(issue.project)
+        next :restricted unless issue.project.identifier == original_project &&
+          (connected ? ThreadConnections.enabled?(issue.project) : enabled?(issue.project))
         # Keep recognizing the initial version's visible markers on retries.
         marker = source_marker(team_id, event)
         legacy_duplicate = issue.journals.where('notes LIKE ?', "%#{marker}%").any? do |journal|
           journal.notes.to_s.end_with?("\n\n#{marker}")
         end
-        next :duplicate if legacy_duplicate
-        viewer = WorkObjects.viewer_for(event['user'])
+        next :duplicate if legacy_duplicate && !history_cards
+        viewer = import_viewer || WorkObjects.viewer_for(event['user'])
         allowed = viewer && issue.project.active? && !issue.is_private? && issue.visible?(viewer) &&
                   issue.notes_addable?(viewer) && event['text'].to_s.length <= 10_000
         next :restricted unless allowed
         # The existing comment author and original posting time identify a
         # retry, even after the comment text has been edited in Redmine.
-        next :duplicate if issue.journals.exists?(user_id: viewer.id, created_on: timestamp)
+        if history_cards
+          nonce = history_cards.first['card']['thread_connection_nonce']
+          duplicate = issue.journals.where(user_id: viewer.id, created_on: timestamp).any? do |entry|
+            LinkQuotes.blocks(entry.notes).any? { |_, card| nonce && card['thread_connection_nonce'] == nonce }
+          end
+          next :duplicate if duplicate
+        else
+          next :duplicate if issue.journals.exists?(user_id: viewer.id, created_on: timestamp)
+        end
         restrict_transfer = Slackmine.files_transfer_restricted?(issue.project)
         next :restricted if !restrict_transfer && Array(event['files']).any? && !issue.attachments_addable?(viewer)
 
@@ -242,7 +260,7 @@ module Slackmine
                                          [['thread_ts', item['thread_ts']]])
           uri.to_s
         end
-        notes = urls.join("\n\n")
+        notes = history_cards ? 'Slackスレッドから取り込み（接続前の会話）' : urls.join("\n\n")
         User.current = viewer
         journal = issue.init_journal(viewer, notes)
         unless restrict_transfer
@@ -280,6 +298,18 @@ module Slackmine
           own = attachments.select { |attachment| file_ids.any? { |id| attachment.filename.start_with?("#{id}-") } }
           image_maps << { url: url, ids: own.select { |a| ThreadFiles::TYPES.key?(a.content_type) }.map(&:id) }
           file_maps << { url: url, ids: own.reject { |a| ThreadFiles::TYPES.key?(a.content_type) }.map(&:id) }
+        end
+        if history_cards
+          # Encode individual speakers as separate snapshots inside ONE Journal.
+          # Saved quotes render without a fresh API fetch and remain searchable.
+          quotes = history_cards.each_with_index.map do |entry, index|
+            card = entry['card'].dup
+            card['thread_image_ids'] = image_maps[index][:ids] unless image_maps[index][:ids].empty?
+            card['thread_file_ids'] = file_maps[index][:ids] unless file_maps[index][:ids].empty?
+            LinkQuotes.encode(card, urls[index])
+          end
+          journal.notes = notes + "\n\n" + quotes.join("\n\n")
+          journal.notes += "\n\n" + references.join("\n\n") unless attachments.empty?
         end
         Thread.current[:slackmine_thread_images] = events.size == 1 ? image_maps.first : image_maps
         Thread.current[:slackmine_thread_files] = events.size == 1 ? file_maps.first : file_maps

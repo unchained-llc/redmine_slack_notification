@@ -1,0 +1,281 @@
+# frozen_string_literal: true
+require_relative 'message_shortcuts_test'
+require_relative '../app/jobs/slackmine_thread_connection_job'
+
+class ThreadConnectionsTest < Minitest::Test
+  CONNECTIONS = Slackmine::ThreadConnections
+
+  def setup
+    @integration = { 'app_id' => 'ATEST', 'team_id' => 'TTEST', 'signing_secret' => 'test-secret' }
+    @settings = { 'slack' => { 'bot_token' => 'token', 'events' => @integration } }
+    @viewer = OpenStruct.new(id: 3)
+    @issue = OpenStruct.new(id: 7, subject: 'Example issue', project: OpenStruct.new(active?: true, identifier: 'example'))
+    @issue.define_singleton_method(:is_private?) { false }
+    @issue.define_singleton_method(:visible?) { |*| true }
+    @issue.define_singleton_method(:notes_addable?) { |*| true }
+    @calls = []
+    @jobs = []
+    @saved = []
+    @member = @bot_member = true
+    @payload = { 'type' => 'message_action', 'callback_id' => CONNECTIONS::CALLBACK,
+      'user' => { 'id' => 'U123' }, 'channel' => { 'id' => 'C123' }, 'trigger_id' => 'fresh',
+      'message' => { 'ts' => '1791001000.000002', 'thread_ts' => '1791001000.000001' } }
+    @source = { 'channel' => 'C123', 'ts' => '1791001000.000001', 'slack_user' => 'U123',
+      'user_id' => 3, 'nonce' => 'a' * 32, 'issue_id' => 7, 'cutoff' => '1791001000.000010' }
+    @messages = [
+      { 'ts' => '1791001000.000001', 'user' => 'U123', 'text' => 'Parent message' },
+      { 'ts' => '1791001000.000002', 'user' => 'U456', 'text' => 'Reply message' },
+      { 'ts' => '1791001000.000003', 'user' => 'U123', 'bot_id' => 'B123', 'text' => 'Bot feedback' }
+    ]
+    @api = lambda do |method, body, *|
+      @calls << [method, body]
+      case method
+      when 'views.open' then { 'view' => { 'id' => 'V123' } }
+      when 'conversations.info' then { 'channel' => { 'id' => 'C123', 'name' => 'discussion', 'is_member' => @bot_member } }
+      when 'conversations.members' then { 'members' => @member ? ['U123'] : [] }
+      when 'conversations.replies' then { 'messages' => @messages, 'has_more' => !!@incomplete }
+      when 'users.info' then { 'user' => { 'id' => body['user'], 'profile' => { 'display_name' => body['user'] == 'U123' ? 'Alice' : 'Bob' } } }
+      when 'chat.postMessage'
+        ts = CONNECTIONS.timestamp_now
+        @messages << body.merge('ts' => ts, 'bot_id' => 'B123', 'app_id' => 'ATEST')
+        { 'ts' => ts }
+      else {}
+      end
+    end
+  end
+
+  def context
+    Slackmine.stub(:config, @settings) do
+      Slackmine::WorkObjects.stub(:viewer_for, @viewer) do
+        Slackmine::WorkObjects.stub(:integration_for, @integration) do
+          Issue.stub(:find_by, @issue) do
+            SlackmineThreadConnectionJob.stub(:perform_later, ->(*args) { @jobs << args }) do
+              Slackmine.stub(:slack_api, @api) do
+                Slackmine::ThreadComments.stub(:persist_reply, ->(*args, **opts) { @saved << [args, opts]; :saved }) do
+                  Slackmine::ThreadComments.stub(:feedback, ->(*) {}) { yield }
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  def submitted(view, values)
+    { 'type' => 'view_submission', 'user' => { 'id' => 'U123' }, 'view' => view.merge('id' => 'V123', 'state' => { 'values' => values }) }
+  end
+
+  def preview(history: true)
+    CONNECTIONS.prepare_preview('ATEST', 'TTEST', @source.merge('history' => history), 'V123')
+    @calls.last[1]['view']
+  end
+
+  def confirmation(view, selected: [0, 1])
+    values = { 'issue' => { 'issue' => { 'value' => '7' } } }
+    selected.each { |i| values["post_#{i}"] = { "post_#{i}" => { 'selected_options' => [{ 'value' => i.to_s }] } } }
+    CONNECTIONS.save('ATEST', 'TTEST', @viewer, submitted(view, values))
+  end
+
+  def test_default_true_and_project_override_false
+    context do
+      assert CONNECTIONS.enabled?
+      @settings['projects'] = { 'example' => { 'slack' => { 'thread_connections' => false } } }
+      refute CONNECTIONS.enabled?(@issue.project)
+      @settings['slack']['thread_connections'] = false
+      assert_equal({}, CONNECTIONS.interaction('ATEST', 'TTEST', @payload))
+      assert_empty @calls
+    end
+  end
+
+  def test_shortcut_ack_only_opens_loading_modal_and_queues_work
+    context do
+      assert_equal({}, CONNECTIONS.interaction('ATEST', 'TTEST', @payload))
+      assert_equal ['views.open'], @calls.map(&:first)
+      assert_equal 'picker', @jobs.last.last
+      source = @jobs.last[2]
+      assert_equal @source['ts'], source['ts']
+      CONNECTIONS.prepare_picker('ATEST', 'TTEST', source, 'V123')
+      picker = @calls.last[1]['view']
+      assert_equal CONNECTIONS::PICK_CALLBACK, picker['callback_id']
+      assert_equal 'history', picker['blocks'].last['element']['initial_options'].first['value']
+    end
+  end
+
+  def test_preview_has_separate_authors_and_selected_posts_reach_one_import
+    context do
+      view = preview
+      assert_includes view.to_json, 'Parent message'
+      assert_includes view.to_json, 'Reply message'
+      assert_includes view.to_json, 'Alice'
+      assert_includes view.to_json, 'Bob'
+      refute_includes view.to_json, 'Bot feedback'
+      assert_equal({}, confirmation(view, selected: [1]))
+      @calls.clear
+      CONNECTIONS.finish(*@jobs.last)
+      assert_equal 1, @saved.size
+      opts = @saved.first.last
+      assert_equal @viewer, opts[:import_viewer]
+      assert_equal ['U456'], opts[:events].map { |e| e['user'] }
+      assert_equal ['Bob'], opts[:history_cards].map { |e| e['card']['author'] }
+      assert_equal Slackmine::ThreadComments.posted_at(@source['cutoff']), opts[:import_timestamp]
+      assert CONNECTIONS.connection('ATEST', 'TTEST', @source, @messages)['active']
+    end
+  end
+
+  def test_future_only_preview_does_not_fetch_history
+    context do
+      assert_equal CONNECTIONS::SAVE_CALLBACK, preview(history: false)['callback_id']
+      refute @calls.any? { |method, _| method == 'conversations.replies' }
+      assert @calls.any? { |method, _| method == 'conversations.members' }
+    end
+  end
+
+  def test_preview_denies_nonmembers_and_incomplete_history
+    context do
+      [-> { @member = false }, -> { @bot_member = false }, -> { @incomplete = true }].each do |deny|
+        @member = @bot_member = true
+        @incomplete = nil
+        deny.call
+        refute preview.key?('submit')
+      end
+    end
+  end
+
+  def test_signed_modal_is_bound_to_human_and_thread_and_cannot_be_modified
+    context do
+      view = preview
+      payload = submitted(view, {})
+      @viewer.id = 4
+      assert_nil CONNECTIONS.source_for('ATEST', 'TTEST', @viewer, payload)
+      @viewer.id = 3
+      envelope = JSON.parse(view['private_metadata'])
+      source = JSON.parse(Base64.strict_decode64(envelope['data']))
+      source['channel'] = 'COTHER'
+      envelope['data'] = Base64.strict_encode64(source.to_json)
+      payload['view']['private_metadata'] = envelope.to_json
+      assert_nil CONNECTIONS.source_for('ATEST', 'TTEST', @viewer, payload)
+      assert_equal 'errors', CONNECTIONS.save('ATEST', 'TTEST', @viewer, payload)['response_action']
+    end
+  end
+
+  def test_marker_rejects_human_copies_wrong_app_wrong_thread_and_modified_target
+    context do
+      CONNECTIONS.post_marker('ATEST', 'TTEST', @source, active: true)
+      marker = @messages.last
+      assert_equal 7, CONNECTIONS.connection('ATEST', 'TTEST', @source, [marker])['issue_id']
+      assert_nil CONNECTIONS.connection('ATEST', 'TTEST', @source, [marker.reject { |k, _| k == 'bot_id' }])
+      assert_nil CONNECTIONS.connection('ATEST', 'TTEST', @source.merge('channel' => 'COTHER'), [marker])
+      assert_nil CONNECTIONS.connection('ATEST', 'TTEST', @source, [marker.merge('app_id' => 'OTHER')])
+      forged = Marshal.load(Marshal.dump(marker))
+      block = forged['blocks'].first
+      block['block_id'] = block['block_id'].sub('slackmine_connection:', 'slackmine_connection:AAAA')
+      assert_nil CONNECTIONS.connection('ATEST', 'TTEST', @source, [forged])
+    end
+  end
+
+  def test_first_connection_wins_and_stale_disconnect_cannot_close_new_connection
+    context do
+      CONNECTIONS.post_marker('ATEST', 'TTEST', @source, active: true)
+      competing = @source.merge('nonce' => 'b' * 32)
+      CONNECTIONS.post_marker('ATEST', 'TTEST', competing, active: true)
+      assert_equal 'a' * 32, CONNECTIONS.connection('ATEST', 'TTEST', @source, @messages)['nonce']
+      CONNECTIONS.post_marker('ATEST', 'TTEST', @source, active: false)
+      refute CONNECTIONS.connection('ATEST', 'TTEST', @source, @messages)['active']
+      CONNECTIONS.post_marker('ATEST', 'TTEST', competing, active: true)
+      CONNECTIONS.post_marker('ATEST', 'TTEST', @source, active: false)
+      state = CONNECTIONS.connection('ATEST', 'TTEST', @source, @messages)
+      assert state['active']
+      assert_equal 'b' * 32, state['nonce']
+    end
+  end
+
+  def test_changed_selected_history_is_rejected_before_connecting
+    context do
+      view = preview
+      confirmation(view)
+      @messages.first['text'] = 'Edited after preview'
+      assert_raises(RuntimeError) { CONNECTIONS.finish(*@jobs.last) }
+      assert_empty @saved
+      assert_nil CONNECTIONS.connection('ATEST', 'TTEST', @source, @messages)
+    end
+  end
+
+  def test_reply_routing_ignores_old_posts_and_disconnected_state
+    context do
+      current = @source.merge('active' => true)
+      event = @messages.first.merge('type' => 'message', 'channel' => 'C123', 'thread_ts' => @source['ts'])
+      assert_equal :ignored, CONNECTIONS.process_reply(current, 'ATEST', 'TTEST', event)
+      event['ts'] = '1791001000.000011'
+      assert_equal :saved, CONNECTIONS.process_reply(current, 'ATEST', 'TTEST', event)
+      assert_equal :ignored, CONNECTIONS.process_reply(current.merge('active' => false), 'ATEST', 'TTEST', event)
+      assert_equal 1, @saved.size
+    end
+  end
+
+  def test_delayed_connect_job_cannot_resurrect_a_closed_request
+    context do
+      source = @source.merge('posts' => [], 'ready' => true)
+      CONNECTIONS.post_marker('ATEST', 'TTEST', source, active: true)
+      CONNECTIONS.post_marker('ATEST', 'TTEST', source, active: false)
+      other = source.merge('nonce' => 'b' * 32)
+      CONNECTIONS.post_marker('ATEST', 'TTEST', other, active: true)
+      CONNECTIONS.post_marker('ATEST', 'TTEST', other, active: false)
+      @calls.clear
+      CONNECTIONS.finish('ATEST', 'TTEST', source)
+      refute @calls.any? { |method, _| method == 'chat.postMessage' }
+      assert_empty @saved
+      refute CONNECTIONS.connection('ATEST', 'TTEST', source, @messages)['active']
+    end
+  end
+
+  def test_reply_worker_uses_signed_slack_state_and_stops_after_closure
+    context do
+      CONNECTIONS.post_marker('ATEST', 'TTEST', @source, active: true)
+      event = @messages.first.merge('type' => 'message', 'channel' => 'C123', 'thread_ts' => @source['ts'], 'ts' => '1791001000.000011')
+      assert Slackmine::ThreadComments.accepted_reply?('ATEST', 'TTEST', event)
+      assert_equal :saved, Slackmine::ThreadComments.process('ATEST', 'TTEST', event)
+      CONNECTIONS.post_marker('ATEST', 'TTEST', @source, active: false)
+      assert_equal :ignored, Slackmine::ThreadComments.process('ATEST', 'TTEST', event)
+      assert_equal 1, @saved.size
+    end
+  end
+
+  def test_project_token_override_is_rejected_even_inside_project_context
+    context do
+      @settings['projects'] = { 'example' => { 'slack' => { 'bot_token' => 'other-token' } } }
+      refute CONNECTIONS.allowed?(@issue, @viewer, 'ATEST', 'TTEST')
+      Slackmine.with_project(@issue.project) { refute CONNECTIONS.allowed?(@issue, @viewer, 'ATEST', 'TTEST') }
+    end
+  end
+
+  def test_more_than_twenty_human_posts_are_not_silently_truncated
+    context do
+      @messages = 21.times.map { |i| { 'ts' => "1791001000.#{format('%06d', i + 1)}", 'user' => 'U123', 'text' => "Post #{i}" } }
+      @source['cutoff'] = '1791001000.000100'
+      refute preview.key?('submit')
+    end
+  end
+
+  def test_signed_shortcut_without_app_id_routes_and_unsigned_does_not
+    @payload['team'] = { 'id' => 'TTEST' }
+    body = URI.encode_www_form('payload' => @payload.to_json)
+    timestamp = Time.now.to_i.to_s
+    signature = 'v0=' + OpenSSL::HMAC.hexdigest('SHA256', 'test-secret', "v0:#{timestamp}:#{body}")
+    controller = SlackmineEventsController.new
+    controller.request = OpenStruct.new(content_length: body.bytesize, raw_post: body, headers: {
+      'X-Slack-Request-Timestamp' => timestamp, 'X-Slack-Signature' => signature })
+    calls = []
+    context do
+      CONNECTIONS.stub(:interaction, ->(*args) { calls << args; {} }) do
+        controller.receive
+        assert_equal :ok, controller.status
+        assert_equal 'ATEST', calls.first.first
+        controller.request.headers['X-Slack-Signature'] = 'invalid'
+        controller.receive
+        assert_equal :unauthorized, controller.status
+        assert_equal 1, calls.size
+      end
+    end
+  end
+end

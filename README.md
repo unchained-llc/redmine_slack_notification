@@ -22,6 +22,7 @@ The plugin provides notifications, Work Object actions, and optional slash comma
 | [Issue Work Object previews](#ticket-work-object-previews) | Display Issue cards and details inside Slack, with configurable fields and current data fetched when details open. |
 | [Issue actions in Slack](#work-object-card-and-detail-actions) | Edit permitted status, assignee, priority, and due date; add comments; assign to yourself; start/complete work; watch/unwatch. The time-entry action opens the Redmine form. |
 | [Comment notification threads](#threaded-redmine-comment-notifications) | Group Redmine Issue comment notifications in a Slack thread. |
+| [Connect a conversation to an existing Issue](#connect-a-slack-thread-to-an-existing-issue) | Use a message shortcut, review/select past posts as one connecting-user comment, and import future replies/files under mapped users. Consecutive posts by the same speaker share one standard card with one header and Slack link; a speaker change starts another card, preserving conversation order. Disconnect from the same menu. Enabled by default; signed Bot posts in Slack hold the connection without a plugin table or migration. |
 | [Slack replies to Redmine comments](#add-redmine-comments-from-notification-threads) | Save text/file replies in supported notification threads as Redmine comments and attachments under the mapped user's identity. |
 | [Slash commands](#slash-command) | Find Issues, list your assigned/due Issues, request a personal reminder digest, create Issues, add comments, and change status or assignee through forms or direct command arguments. Single-Issue results can use Work Object cards, with text fallback when previews are disabled. |
 | [Create an Issue from a Slack message](#create-an-issue-from-a-slack-message) | Use a message shortcut, choose a permitted project, and review a new-Issue form prefilled with the selected message and its source link. |
@@ -819,13 +820,111 @@ The new assignee uses Slack's `<@U0123456789>` mention format. Issue authors, Jo
 
 ![Create an Issue from a Slack message](docs/images/features/message-to-issue.webp)
 
-In the Slack app's **Interactivity & Shortcuts**, enable Interactivity with Request URL `https://redmine.example.com/slackmine/interactions`, then create a **message shortcut** with callback ID `slackmine_message_create`. Use a label such as **Create Redmine issue**. Add the [`commands`](https://docs.slack.dev/reference/scopes/commands/) Bot scope and reinstall the app when scopes change. This feature reuses the [slash-command](#slash-command) integration: configure `slack.slash_command`, the global Bot Token, signing secret, app/team IDs, and user mapping. Work Object previews are optional.
+In the Slack app's **Interactivity & Shortcuts**, enable Interactivity with Request URL `https://redmine.example.com/slackmine/interactions`, then create a **message shortcut** with callback ID `slackmine_message_create`. Use the label **Create an Issue from a message**. Add the [`commands`](https://docs.slack.dev/reference/scopes/commands/) Bot scope and reinstall the app when scopes change. This feature reuses the [slash-command](#slash-command) integration: configure `slack.slash_command`, the global Bot Token, signing secret, app/team IDs, and user mapping. Work Object previews are optional.
+
+When also using [thread connections](#connect-a-slack-thread-to-an-existing-issue), name the other shortcut **Connect a thread to an existing Issue**. The two labels distinguish creating an Issue from the selected message from connecting the entire thread to an existing Issue.
 
 Open a message's **More actions** menu and choose the shortcut. Select a project, then review the tracker, subject, and description before saving. The first nonblank line becomes the subject; the description includes the message text and a permalink obtained with [`chat.getPermalink`](https://docs.slack.dev/reference/methods/chat.getPermalink/). Thread replies are supported, but only the selected message is copied. When the normal message text is empty, text from Block Kit sections and attachment cards (titles, bodies, and fields) is used instead. Attachment files, full thread history, and AI summaries are not imported. Slack's raw text formatting is retained. Subjects are limited to 255 characters, and descriptions to 3,000 characters with space reserved for the source link; review any shortened text before saving.
 
 The picker includes up to 100 active projects where the mapped user can create Issues and the configured app/team integration is authorized. Projects matching the source channel appear first. Permissions and allowed trackers are checked again in the next form and on save. No Issue is created by opening the shortcut or selecting a project. Required custom fields still use the full Redmine form link; opening that link does not transfer the draft. Saving follows the existing Issue-creation path and its cache-based retry protection and normal notifications.
 
 The selected message is temporarily stored in the existing `Rails.cache`, bound to the initiating user and app/team, for 30 minutes. After the picker changes to the creation form, the draft is held in the form. An expired or unavailable source cache requires reopening the shortcut. Multiple web workers need a shared cache or session affinity for this two-step flow. No new database tables or cache service are installed. Opening and updating modals is synchronous and subject to Slack's three-second response limit; test with the installed app after deployment. A private-channel or DM source can be copied into a project visible to other members: review the destination and draft before saving.
+
+## Connect a Slack thread to an existing Issue
+
+From a message's **More actions** menu, choose **Connect a thread to an existing Issue** and enter the Issue number. **Save past conversation too** is selected by default. Review the past posts and deselect any you do not want to import. Confirming the connection saves the selected history as one comment under the connecting user's Redmine identity, preserving the original speakers, timestamps, and Slack links. Future replies and files are saved under each mapped user's Redmine identity.
+
+Use **Create an Issue from a message** for the creation shortcut and **Connect a thread to an existing Issue** for this connection shortcut. Creation copies only the selected message; connection applies to the whole thread. Rename shortcut labels without changing their callback IDs.
+
+Open the same shortcut again to disconnect. Saved comments remain. Transient import failures are retried through the Slack queue. If the conversation changes after confirmation, disconnect and review it again. Reconnecting starts a new review; selecting the same history again creates another quoted comment, so deselect history when it is no longer needed.
+
+### Slack app setup for thread connections
+
+1. Enable **Interactivity & Shortcuts** and set Request URL to `https://redmine.example.com/slackmine/interactions`. Reuse the URL if already configured.
+2. Under **Shortcuts → Create New Shortcut → On messages**, register:
+   - Name: `Connect a thread to an existing Issue`
+   - Short Description: `Connect a conversation to an existing Issue and save past posts and future replies`
+   - Callback ID: **`slackmine_thread_connect`**
+3. Add the relevant **OAuth & Permissions → Bot Token Scopes**:
+
+   | Scope | Purpose |
+   | --- | --- |
+   | `commands` | Message shortcuts |
+   | `chat:write` | Connection, disconnection, and import-result messages |
+   | `channels:read` / `groups:read` | Public/private channel information and the connecting user's membership |
+   | `channels:history` / `groups:history` | Public/private thread history and reply events |
+   | `users:read` | Original speaker profiles and excluding messages addressed to bots |
+   | `files:read` | Importing attachments; unnecessary when file transfer is restricted |
+   | `users:read.email` | Only when using `auto_map_users_by_email` |
+
+4. **Install / Reinstall to Workspace** after adding scopes, and verify that the Bot Token matches your configuration.
+5. Enable **Event Subscriptions** with Request URL `https://redmine.example.com/slackmine/events`. Subscribe to **`message.channels`** for public channels and **`message.groups`** for private channels.
+6. Invite the bot to the source channel. Conversations outside the destination project's notification channels can be connected. DMs and group DMs are unsupported.
+
+No additional slash command, Options Load URL, or Work Object setup is required. If reply importing is already configured, the main additions are the message shortcut and any missing read scopes.
+
+Slack references: [message shortcuts](https://docs.slack.dev/interactivity/implementing-shortcuts/), [thread history](https://docs.slack.dev/reference/methods/conversations.replies/), and [channel membership](https://docs.slack.dev/reference/methods/conversations.members/).
+
+### Redmine setup for thread connections
+
+Deploy the code and configuration and restart Redmine and Sidekiq. No dedicated table, additional database, migration, or shared cache is required. Signed bot posts in Slack hold the connection state; Slack modals hold review information. Redmine stores only standard comments and attachments.
+
+Example `config/slackmine.yml`:
+
+```yaml
+slack:
+  thread_connections: true   # Default is true; false stops this feature
+  bot_token: 'xoxb-REPLACE-ME'
+  events:
+    app_id: 'A0123456789'
+    team_id: 'T0123456789'
+    signing_secret: 'REPLACE-ME'
+
+users:
+  alice: 'U0123456789'
+```
+
+`thread_comments` controls the existing notification-thread importer. Explicit connections are independently controlled by `thread_connections` and work even with `thread_comments: false`. Set `projects.<identifier>.slack.thread_connections: false` to disable connections for a project.
+
+Choose a destination project using the same Slack app/team and Bot Token as the global configuration. Configure explicit `users` mappings or `auto_map_users_by_email`; name-only matching does not authorize edits. The connecting user must be able to view and comment on the Issue, and attach files when importing attachments. Future replies check the same permissions for each speaker. Private Issues cannot be connected.
+
+Sidekiq must process the `slack` queue. Connection review and history fetching run in the queue so Slack receives a prompt acknowledgement.
+
+### Thread connection display and limits
+
+Past conversation uses the same cards as normal conversation pickup. Consecutive posts by the same speaker are joined with a single newline, with one speaker/timestamp header (using the first post's time) and one **Open in Slack** link. A speaker change starts a new card: A→A→B→A produces three cards in conversation order. Original post URLs remain in the saved data, and attachments appear in the corresponding card. This applies to both web and email, including previously saved connection-history imports.
+
+- Past history includes up to 20 human posts, including the parent. For longer history, deselect past-conversation importing. The whole thread is limited to 1,000 posts; incomplete history is rejected rather than silently truncated.
+- Each post and the combined selected text are limited to 10,000 characters. Slack's review-modal block limits also apply.
+- Bot posts and posts addressed to bots are excluded. Historical speakers need not have Redmine mappings to be included as quotations.
+- Replies added between review and confirmation are imported without duplicate saving when reply events overlap. If the thread exceeds 1,000 posts during catch-up, disconnect and review again.
+- Future replies are saved immediately. The notification-thread `thread_comment_batch` setting does not apply to explicit connections.
+- Existing attachment restrictions apply. Selected history is limited to 10 files and 50 MiB combined. Images appear in the quote; other files have download links. Restricted file transfer prevents downloads.
+- Existing Slack link cards render the quotations. When cards are disabled, speaker, timestamp, links, and text remain readable as plain text.
+- If selected text, speaker, or file IDs change after review, saving stops and requires a new review. Later Slack edits/deletions are not synchronized. Disconnecting does not delete saved comments or attachments.
+- Connection and disconnection bot posts are the connection state. Deletion or Slack retention expiry can make state unrecoverable; retain these posts. Reconnect existing threads after changing the Signing Secret.
+- Reply events are queued and connections are checked against Slack thread history, without a database mapping. This also adds history requests for normal notification threads.
+- Each thread connects to one Issue. Disabling the feature globally or for the project stops imports. Re-enabling does not automatically import all history from the disabled period.
+
+### Verify thread connections in a live installation
+
+Use a test Issue and channel to check:
+
+1. Opening the shortcut from the parent or another user's reply selects the same thread.
+2. Deselecting a historical post saves only the selected posts in one comment under the connecting user's identity.
+3. Future replies, images, and files use the speaker's identity and correct attachment placement in Redmine and email.
+4. Replies added during review are saved exactly once.
+5. Retries do not duplicate history, and disconnecting stops future replies and delayed jobs from saving.
+6. Unauthorized users, private Issues, and projects using different app/team/token settings cannot be connected.
+
+Connection tests stub Slack APIs and Redmine model operations without an additional database:
+
+```sh
+ruby -Itest test/thread_connections_test.rb
+ruby -Itest test/thread_connections_notes_test.rb
+```
+
+Stub tests do not verify live Slack/Redmine rendering or production delivery.
 
 ## App Home issue lists
 
@@ -1047,11 +1146,13 @@ ruby -Itest test/slash_commands_cache_test.rb
 ruby -Itest test/slash_commands_edit_test.rb
 ruby -Itest test/app_home_test.rb
 ruby -Itest test/message_shortcuts_test.rb
+ruby -Itest test/thread_connections_test.rb
+ruby -Itest test/thread_connections_notes_test.rb
 ruby -Itest test/thread_images_test.rb
 ruby -Itest test/thread_comment_feedback_cleanup_test.rb
 ```
 
-These tests exercise notification formatting and delivery logic with stubs. Additionally, run `ruby -Itest test/thread_comments_persistence_test.rb` where ActiveRecord and sqlite3 are available to check persistence, duplicate suppression, permission denial, and notification-loop suppression using in-memory Issue/Journal fixture tables. Run `ruby -Itest test/notification_transactions_test.rb` separately with ActiveRecord and sqlite3 to verify commit/rollback behavior for Issue deletion and generic notification models. See [notification audit](#notification-coverage-and-verification) for the coverage matrix and remaining runtime checks. These tests do not connect to production databases or Redis, post to Slack, or verify a live Redmine installation.
+These tests exercise notification formatting and delivery logic with stubs. Additionally, run `ruby -Itest test/thread_connections_test.rb` for signed Slack connection state, previews, and reply routing. Run `ruby -Itest test/thread_comments_persistence_test.rb` where ActiveRecord and sqlite3 are available to check persistence, duplicate suppression, permission denial, and notification-loop suppression using in-memory Issue/Journal fixture tables. Run `ruby -Itest test/notification_transactions_test.rb` separately with ActiveRecord and sqlite3 to verify commit/rollback behavior for Issue deletion and generic notification models. See [notification audit](#notification-coverage-and-verification) for the coverage matrix and remaining runtime checks. These tests do not connect to production databases or Redis, post to Slack, or verify a live Redmine installation.
 
 ## Notification coverage and verification
 

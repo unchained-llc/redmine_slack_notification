@@ -33,15 +33,18 @@ class SlackmineEventsController < ActionController::Base
       return render json: { challenge: payload['challenge'] } if payload['challenge'].is_a?(String)
       return head :bad_request
     end
-    # Message shortcuts omit api_app_id. Resolve only this known shortcut from
+    # Message shortcuts omit api_app_id. Resolve only known message shortcuts from
     # the verified signing secret, while still requiring the configured team.
     app_id = payload['api_app_id']
-    if app_id.nil? && form && payload['type'] == 'message_action' && Slackmine::MessageShortcuts.handles?(payload)
+    if app_id.nil? && form && payload['type'] == 'message_action' && (Slackmine::MessageShortcuts.handles?(payload) || Slackmine::ThreadConnections.handles?(payload))
       app_id = integration['app_id']
     end
     return head :forbidden unless app_id == integration['app_id'] && team_id == integration['team_id']
 
     if form
+      if Slackmine::ThreadConnections.handles?(payload)
+        return render json: Slackmine::ThreadConnections.interaction(app_id, team_id, payload)
+      end
       if Slackmine::AppHome.handles?(payload)
         return render json: Slackmine::AppHome.interaction(app_id, team_id, payload)
       end

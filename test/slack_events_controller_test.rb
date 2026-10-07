@@ -262,6 +262,8 @@ class SlackEventsControllerTest < Minitest::Test
   end
 
   def test_thread_reply_is_queued_only_when_enabled_and_for_the_configured_channel
+    # This test covers notification threads with explicit connections disabled.
+    @settings['slack']['thread_connections'] = false
     @settings['slack'].merge!('thread_comments' => true, 'default_channel_id' => 'C123')
     @payload['event'] = { 'type' => 'message', 'user' => 'U123', 'text' => 'Reply',
                           'channel' => 'C123', 'ts' => '1000.000002', 'thread_ts' => '1000.000001' }

@@ -32,16 +32,22 @@ module Slackmine
       replacements = {}
       quote_urls = {}
       prepared = raw.to_s.dup
-      quotes.each do |block, card|
+      rendered_quotes = []
+      LinkCards.quote_groups(raw, quotes).each do |group|
+        block, card = group.first
+        card = LinkCards.combine_conversation(group.map(&:last)) if group.size > 1
+        rendered_quotes << card
         token = "SLACKQUOTE#{SecureRandom.hex(16)}"
-        quote_urls[token] = card['source_urls'] || card['url']
+        quote_urls[token] = group.size == 1 ? (card['source_urls'] || card['url']) :
+                            group.flat_map { |_, entry| Array(entry['source_urls'] || entry['url']) }
         replacements[token] = if options[:formatting] == false || !render_cards
-                                %(<span style="white-space: pre-wrap">#{SlackMarkup.escape(LinkQuotes.plain_source(block))}</span>)
+                                %(<span style="white-space: pre-wrap">#{SlackMarkup.escape(group.map { |source, _| LinkQuotes.plain_source(source) }.join("\n\n"))}</span>)
                               else
                                 LinkCards.render_card(card, card['url'], issue.project,
                                                       time_formatter: time_formatter, icon_html: mail_icon)
                               end
         prepared = prepared.sub(block, token)
+        group.drop(1).each { |source, _| prepared = prepared.sub(source, '') }
       end
       html = quotes.empty? ? super : super(prepared, options.merge(object: object))
       unless replacements.empty?
@@ -57,8 +63,8 @@ module Slackmine
         quote_paragraphs.each { |node| node.remove if node.text.strip.empty? && node.element_children.all? { |child| child.name == 'br' } }
         html = fragment.to_html
       end
-      html = LinkCards.place_reply_images(html, quotes.map(&:last), attachments: issue.attachments) if journal_id
-      html = LinkCards.place_reply_files(html, quotes.map(&:last), attachments: issue.attachments) if journal_id
+      html = LinkCards.place_reply_images(html, rendered_quotes, attachments: issue.attachments) if journal_id
+      html = LinkCards.place_reply_files(html, rendered_quotes, attachments: issue.attachments) if journal_id
       return html.html_safe unless card_view && render_cards
       @slack_link_card_state ||= { api: {}, cards: {}, count: 0,
                                    deadline: Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5 }
@@ -71,6 +77,38 @@ module Slackmine
 
   module LinkCards
     module_function
+
+    # Match normal conversation pickup: combine adjacent messages by the same speaker.
+    def quote_groups(raw, quotes)
+      groups = []
+      previous_end = 0
+      quotes.each do |block, card|
+        position = raw.index(block, previous_end)
+        previous = groups.last && groups.last.last.last
+        nonce = card['thread_connection_nonce'].to_s
+        if previous && nonce.match?(/\A[a-f0-9]{32}\z/) &&
+           nonce == previous['thread_connection_nonce'] && card['channel'] == previous['channel'] &&
+           card['author'] == previous['author'] && card['avatar'] == previous['avatar'] &&
+           raw[previous_end...position].strip.empty?
+          groups.last << [block, card]
+        else
+          groups << [[block, card]]
+        end
+        previous_end = position + block.length
+      end
+      groups
+    end
+
+    def combine_conversation(cards)
+      combined = cards.first.merge('text' => cards.map { |card| LinkQuotes.resolved_text(card) }.join("\n"),
+                                   'names' => {},
+                                   'source_urls' => cards.flat_map { |card| Array(card['source_urls'] || card['url']) })
+      %w[thread_image_ids thread_file_ids].each do |key|
+        ids = cards.flat_map { |card| Array(card[key]) }.uniq
+        combined[key] = ids unless ids.empty?
+      end
+      combined
+    end
 
     # Only the importer records this association; never infer it from note text.
     # Move already formatted images, preserving Redmine's sizing and links.
