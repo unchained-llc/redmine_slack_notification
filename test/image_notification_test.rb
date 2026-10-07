@@ -132,6 +132,7 @@ class Tracker
 end
 
 require_relative '../app/jobs/slackmine_notification_job'
+require_relative '../app/jobs/slackmine_work_object_refresh_job'
 
 class User
   attr_accessor :login, :mail, :name
@@ -167,6 +168,8 @@ class News < OpenStruct
 end
 
 require_relative '../lib/slackmine'
+Slackmine.instance_variable_set(:@config, {})
+Slackmine.instance_variable_set(:@messages_config, {})
 
 class AutomaticUserMappingTest < Minitest::Test
   class MemoryCache
@@ -1874,7 +1877,7 @@ class WorkObjectNotificationTest < Minitest::Test
   end
 
   def test_example_documents_all_message_defaults
-    example = YAML.safe_load(File.read(File.expand_path('../config/slackmine.yml.example', __dir__)))
+    example = YAML.safe_load(File.read(File.expand_path('../config/slackmine.messages.yml.example', __dir__)))
     Slackmine::Formatter::DEFAULT_MESSAGES.each do |group, entries|
       entries.each do |key, value|
         if value.is_a?(Hash)
@@ -2601,15 +2604,21 @@ class WorkObjectDetailsTest < Minitest::Test
       } }.merge(extras)
   end
 
-  def capture_interaction(payload)
+  def capture_interaction(payload, drain: true)
     calls = []
+    @refresh_jobs = []
     Slackmine.stub(:config, @settings) do
       Issue.stub(:find_by, @issue) do
         User.stub(:find_by, @user) do
           Slackmine.stub(:slack_api, ->(method, body, token, **options) {
             calls << [method, body, token, options]
             method == 'conversations.replies' ? { 'messages' => [{ 'ts' => '123.456', 'text' => 'Original notification' }] } : { 'ok' => true }
-          }) { WORK.process_interaction('ATEST', 'TTEST', payload) }
+          }) do
+            SlackmineWorkObjectRefreshJob.stub(:perform_later, ->(*args) { @refresh_jobs << args }) do
+              WORK.process_interaction('ATEST', 'TTEST', payload)
+              @refresh_jobs.each { |args| WORK.refresh_after_interaction(*args) } if drain
+            end
+          end
         end
       end
     end
@@ -3195,6 +3204,28 @@ class WorkObjectDetailsTest < Minitest::Test
     calls = capture_interaction(button)
     assert_equal 3, @issue.assigned_to_id
     assert_equal %w[conversations.replies chat.update], calls.map(&:first)
+  end
+
+  def test_card_update_is_queued_after_saving
+    prepare_action_issue
+    button = action_payload('block_actions', 'container', 'actions' => [{ 'action_id' => 'slackmine_assign_to_me' }])
+    button['container'].merge!('type' => 'message_attachment', 'channel_id' => 'C123', 'message_ts' => '123.456')
+    calls = capture_interaction(button, drain: false)
+    assert_equal 3, @issue.assigned_to_id
+    assert_empty calls
+    assert_equal 1, @refresh_jobs.size
+    assert_equal 'saved', @refresh_jobs.first[-2]
+  end
+
+  def test_deferred_detail_edit_sends_result_without_expired_detail_trigger
+    prepare_action_issue
+    edit = action_payload('view_submission', 'view')
+    edit['view']['state'] = { 'values' => { 'new_comment' => { 'new_comment.input' => { 'value' => 'Example note' } } } }
+    edit['deferred'] = true
+    calls = capture_interaction(edit)
+    assert_equal 'Example note', @issue.notes.last
+    assert_equal ['chat.postMessage'], calls.map(&:first)
+    assert_equal 'U123', calls.first[1]['channel']
   end
 
   def test_failed_card_refresh_does_not_retry_saved_comment

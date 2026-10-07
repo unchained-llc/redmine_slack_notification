@@ -2,6 +2,7 @@
 
 require 'securerandom'
 require 'base64'
+require 'timeout'
 
 module Slackmine
   # Slack is the durable connection store. A signed block_id on our Bot's
@@ -16,6 +17,10 @@ module Slackmine
     MARKER_PREFIX = 'slackmine_connection:'
     MAX_HISTORY = 20
     MAX_SCAN = 1000
+    PREVIEW_DIRECT_SECONDS = 2
+    # Keep this outside StandardError so prepare_preview's error-view rescue
+    # cannot consume the deadline before pick can queue its fallback.
+    class PreviewDeadline < Exception; end
 
     def enabled?(project = nil)
       Slackmine.effective_config(project).dig('slack', 'thread_connections') != false
@@ -136,7 +141,12 @@ module Slackmine
                    'user_id' => viewer.id, 'nonce' => SecureRandom.hex(16) }
         loading = modal([section(message('loading_picker'))])
         result = Slackmine.slack_api('views.open', { 'trigger_id' => payload['trigger_id'], 'view' => loading }, Slackmine.bot_token(nil))
-        SlackmineThreadConnectionJob.set(wait: 1).perform_later(app, team, source, result.dig('view', 'id'), 'picker')
+        begin
+          job = SlackmineThreadConnectionJob.perform_later(app, team, source, result.dig('view', 'id'), 'picker')
+          preview_error(result.dig('view', 'id'), StandardError.new('Enqueue failed')) unless job
+        rescue StandardError => e
+          preview_error(result.dig('view', 'id'), e)
+        end
       else
         Slackmine.slack_api('views.open', { 'trigger_id' => payload['trigger_id'], 'view' => modal([section(message('unsupported_source'))]) }, Slackmine.bot_token(nil))
       end
@@ -256,11 +266,25 @@ module Slackmine
       issue = Issue.find_by(id: id) if id.match?(/\A[1-9]\d*\z/)
       return error(message('issue_denied', project: issue&.project)) unless allowed?(issue, viewer, app, team)
       source = source.merge('issue_id' => issue.id, 'history' => Array(state(payload, 'history')['selected_options']).any? { |o| o['value'] == 'history' }, 'cutoff' => timestamp_now)
-      SlackmineThreadConnectionJob.set(wait: 1).perform_later(app, team, source, payload.dig('view', 'id'), 'preview')
+      started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      begin
+        view = Timeout.timeout(PREVIEW_DIRECT_SECONDS, PreviewDeadline) { prepare_preview(app, team, source) }
+        Rails.logger&.info("Slackmine: connection preview direct duration_ms=#{((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000).round}")
+        return { 'response_action' => 'update', 'view' => view }
+      rescue PreviewDeadline
+        Rails.logger&.info("Slackmine: connection preview deferred after #{PREVIEW_DIRECT_SECONDS}s")
+      end
+      # A slow read falls back to the worker. Install the loading view before
+      # its views.update runs, so the acknowledgement cannot overwrite it.
+      job = SlackmineThreadConnectionJob.set(wait: 1).perform_later(app, team, source, payload.dig('view', 'id'), 'preview')
+      return error(message('submission_failed', project: issue.project)) unless job
       { 'response_action' => 'update', 'view' => modal([section(message('loading_preview', project: issue.project))], project: issue.project) }
+    rescue StandardError => e
+      Rails.logger&.error("Slackmine: connection preview enqueue failed: #{e.class}")
+      error(message('submission_failed', project: issue&.project))
     end
 
-    def prepare_preview(app, team, source, view_id)
+    def prepare_preview(app, team, source, view_id = nil)
       issue = Issue.find_by(id: source['issue_id'])
       viewer = WorkObjects.viewer_for(source['slack_user'])
       raise 'Permission denied' unless viewer && viewer.id == source['user_id'] && allowed?(issue, viewer, app, team)
@@ -287,7 +311,8 @@ module Slackmine
         blocks << input("post_#{index}", message('import', project: issue&.project), { 'type' => 'checkboxes', 'options' => [option], 'initial_options' => [option] }, optional: true)
       end
       raise 'Preview exceeds Slack block limit' if blocks.size > 100
-      update_view(view_id, modal(blocks, project: issue.project, app: app, team: team, source: source, callback: SAVE_CALLBACK, submit: message('connect', project: issue&.project)))
+      view = modal(blocks, project: issue.project, app: app, team: team, source: source, callback: SAVE_CALLBACK, submit: message('connect', project: issue&.project))
+      view_id ? update_view(view_id, view) : view
     rescue StandardError => e
       preview_error(view_id, e, project: issue&.project)
     end
@@ -297,8 +322,10 @@ module Slackmine
     end
 
     def preview_error(view_id, error, project: nil)
-      Rails.logger&.warn("Slackmine: connection preview failed: #{error.class}")
-      update_view(view_id, modal([section(message('preview_failed', project: project))], project: project))
+      reason = error.message == 'Past conversation exceeds 20 human posts' ? 'history_limit' : error.class.to_s
+      Rails.logger&.warn("Slackmine: connection preview failed: #{reason}")
+      view = modal([section(message('preview_failed', project: project))], project: project)
+      view_id ? update_view(view_id, view) : view
     end
 
     def save(app, team, viewer, payload)
@@ -306,13 +333,38 @@ module Slackmine
       return error(message('invalid_review')) unless source
       issue = Issue.find_by(id: source['issue_id'])
       return error(message('denied', project: issue&.project)) unless allowed?(issue, viewer, app, team)
-      return error(message('destination_changed', project: issue&.project)) unless state(payload, 'issue')['value'].to_s == issue.id.to_s
+      entered_id = state(payload, 'issue')['value'].to_s.strip.sub(/\A#/, '')
+      return error(message('destination_changed', project: issue&.project)) unless entered_id == issue.id.to_s
       return error(message('review_incomplete', project: issue&.project)) unless source['disconnect'] || source['ready']
       selected = Array(source['posts']).each_with_index.select do |_, index|
         Array(state(payload, "post_#{index}")['selected_options']).any? { |o| o['value'] == index.to_s }
       end.map(&:first)
-      SlackmineThreadConnectionJob.perform_later(app, team, source.merge('posts' => selected))
+      # Claim the signed confirmation before Slack writes or history imports.
+      # Keep an uncertain outcome claimed, so a redelivery cannot repeat it.
+      key = submission_key(app, team, viewer.id, source)
+      cache = Rails.cache
+      return {} if cache.read(key) == 'done'
+      return error(message('submission_pending', project: issue&.project)) unless cache.write(key, 'pending', unless_exist: true, expires_in: 86_400)
+      job = SlackmineThreadConnectionJob.perform_later(app, team, source.merge('posts' => selected), nil, 'save')
+      unless job
+        cache.delete(key)
+        return error(message('submission_failed', project: issue&.project))
+      end
       {}
+    rescue StandardError => e
+      Rails.logger&.error("Slackmine: connection submission failed: #{e.class}")
+      error(message('submission_failed', project: issue&.project))
+    end
+
+    def submission_key(app, team, user_id, source)
+      "slackmine:thread_connection:#{Digest::SHA256.hexdigest([app, team, user_id, source['nonce'], source['disconnect'] == true].join(':'))}"
+    end
+
+    def complete_submission(app, team, source)
+      key = submission_key(app, team, source['user_id'], source)
+      return if Rails.cache.read(key) == 'done'
+      finish(app, team, source)
+      Rails.cache.write(key, 'done', expires_in: 86_400)
     end
 
     def post_marker(app, team, source, active:)
@@ -361,7 +413,7 @@ module Slackmine
         messages = history(source)
         current = connection(app, team, source, messages)
         unless current && current['active'] && current['nonce'] == source['nonce']
-          # Only remove the losing confirmation created by this job.
+          # Only remove the losing confirmation created by this request.
           Slackmine.slack_api('chat.delete', { 'channel' => source['channel'], 'ts' => posted['ts'] }, Slackmine.bot_token(nil)) if ThreadComments.posted_at(posted['ts'])
           return failure_notice(source, message('connection_conflict', project: issue&.project))
         end

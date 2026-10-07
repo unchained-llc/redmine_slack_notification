@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 require_relative 'slash_commands_test'
+require_relative '../app/jobs/slackmine_command_form_job'
 
 module Rails
   def self.cache; nil; end unless respond_to?(:cache)
@@ -59,5 +60,99 @@ class SlashCommandsCacheTest < Minitest::Test
     result = submit { |*| count += 1; {} }
     assert_equal 'errors', result['response_action']
     assert_equal 0, count
+  end
+
+  def test_slack_link_creation_acknowledges_then_saves_once_in_job
+    @payload['view']['state']['values'] = {
+      'subject' => { 'subject' => { 'value' => 'Example' } },
+      'description' => { 'description' => { 'value' => 'https://example.slack.com/archives/C123/p123' } },
+      'tracker' => { 'tracker' => { 'selected_option' => { 'value' => '1' } } }
+    }
+    queued = []
+    SlackmineCommandFormJob.stub(:perform_later, ->(*args) { queued << args; Object.new }) do
+      COMMANDS.stub(:background_form_allowed?, true) do
+        assert_equal({}, submit { |*| flunk 'Save must wait for worker' })
+      end
+    end
+    assert_equal 1, queued.length
+    assert_equal %w[subject description tracker], queued.first[5].keys
+    assert_equal 'pending', @cache.read(@cache.instance_variable_get(:@data).keys.first)
+    calls = 0
+    Rails.stub(:cache, @cache) do
+      COMMANDS.stub(:enabled?, true) do
+        COMMANDS.stub(:integration?, true) do
+          Slackmine::WorkObjects.stub(:viewer_for, @viewer) do
+            COMMANDS.stub(:save_form, ->(*) { calls += 1; {} }) do
+              Slackmine.stub(:slack_api, ->(*) {}) do
+                SlackmineCommandFormJob.new.perform(*queued.first)
+                SlackmineCommandFormJob.new.perform(*queued.first)
+              end
+            end
+          end
+        end
+      end
+    end
+    assert_equal 1, calls
+  end
+
+  def test_background_form_validation_failure_reports_to_user_and_releases_claim
+    values = { 'description' => { 'description' => { 'value' => 'https://example.slack.com/archives/C123/p123' } } }
+    key = "slackmine:submission:#{Digest::SHA256.hexdigest(['ATEST', 'TTEST', @viewer.id, 'V123'].join(':'))}"
+    @cache.write(key, 'pending', expires_in: 86_400)
+    sent = []
+    Rails.stub(:cache, @cache) do
+      COMMANDS.stub(:enabled?, true) do
+        COMMANDS.stub(:integration?, true) do
+          Slackmine::WorkObjects.stub(:viewer_for, @viewer) do
+            COMMANDS.stub(:save_form, ->(*) { { 'response_action' => 'errors' } }) do
+              Slackmine.stub(:slack_api, ->(*args) { sent << args }) do
+                COMMANDS.complete_form('ATEST', 'TTEST', 'U123', 'create', '1', values, @viewer.id, 'V123')
+              end
+            end
+          end
+        end
+      end
+    end
+    assert_nil @cache.read(key)
+    assert_equal 'chat.postMessage', sent.first.first
+    assert_equal 'U123', sent.first[1]['channel']
+  end
+
+  def test_background_form_permission_loss_reports_failure_without_saving
+    key = "slackmine:submission:#{Digest::SHA256.hexdigest(['ATEST', 'TTEST', @viewer.id, 'V123'].join(':'))}"
+    @cache.write(key, 'pending', expires_in: 86_400)
+    sent = []
+    Rails.stub(:cache, @cache) do
+      Slackmine::WorkObjects.stub(:viewer_for, nil) do
+        COMMANDS.stub(:save_form, ->(*) { flunk 'Permission loss must not save' }) do
+          Slackmine.stub(:slack_api, ->(*args) { sent << args }) do
+            COMMANDS.complete_form('ATEST', 'TTEST', 'U123', 'create', '1', {}, @viewer.id, 'V123')
+          end
+        end
+      end
+    end
+    assert_nil @cache.read(key)
+    assert_equal 'U123', sent.first[1]['channel']
+  end
+
+  def test_background_form_uncertain_save_reports_failure_and_keeps_claim
+    key = "slackmine:submission:#{Digest::SHA256.hexdigest(['ATEST', 'TTEST', @viewer.id, 'V123'].join(':'))}"
+    @cache.write(key, 'pending', expires_in: 86_400)
+    sent = []
+    Rails.stub(:cache, @cache) do
+      COMMANDS.stub(:enabled?, true) do
+        COMMANDS.stub(:integration?, true) do
+          Slackmine::WorkObjects.stub(:viewer_for, @viewer) do
+            COMMANDS.stub(:save_form, ->(*) { raise 'Uncertain outcome' }) do
+              Slackmine.stub(:slack_api, ->(*args) { sent << args }) do
+                COMMANDS.complete_form('ATEST', 'TTEST', 'U123', 'create', '1', {}, @viewer.id, 'V123')
+              end
+            end
+          end
+        end
+      end
+    end
+    assert_equal 'pending', @cache.read(key)
+    assert_equal 'U123', sent.first[1]['channel']
   end
 end

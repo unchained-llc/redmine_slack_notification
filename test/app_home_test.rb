@@ -266,7 +266,7 @@ class AppHomeTest < Minitest::Test
     Slackmine.stub(:config, @settings) do
       WORK.stub(:viewer_for, nil) do
         Slackmine.stub(:slack_api, ->(_method, body, *_args, **_options) { calls << body }) do
-          SlackmineAppHomeJob.stub(:perform_later, ->(*args) { SlackmineAppHomeJob.new.perform(*args) }) do
+          SlackmineAppHomeJob.stub(:perform_later, ->(*args) { HOME.publish(*args) }) do
             select = home_action('filter')
             select['actions'][0]['selected_option'] = { 'value' => 'reported' }
             HOME.interaction('ATEST', 'TTEST', select)
@@ -380,13 +380,17 @@ class AppHomeTest < Minitest::Test
       WORK.stub(:viewer_for, @viewer) do
         WORK.stub(:issue_for, @issue) do
           WORK.stub(:update_issue, ->(*args, **_attrs) { writes << args; result }) do
-            HOME.stub(:publish, ->(*args, **options) { refreshes << [args, options] }) do
-              WORK.process_interaction('ATEST', 'TTEST', payload)
-              result = :restricted
-              WORK.process_interaction('ATEST', 'TTEST', payload)
-            end
-            HOME.stub(:publish, ->(*) { raise 'Slack unavailable' }) do
-              WORK.process_interaction('ATEST', 'TTEST', payload)
+            Issue.stub(:find_by, @issue) do
+              SlackmineWorkObjectRefreshJob.stub(:perform_later, ->(*args) { WORK.refresh_after_interaction(*args) }) do
+                HOME.stub(:publish, ->(*args, **options) { refreshes << [args, options] }) do
+                  WORK.process_interaction('ATEST', 'TTEST', payload)
+                  result = :restricted
+                  WORK.process_interaction('ATEST', 'TTEST', payload)
+                end
+                HOME.stub(:publish, ->(*) { raise 'Slack unavailable' }) do
+                  WORK.process_interaction('ATEST', 'TTEST', payload)
+                end
+              end
             end
           end
         end
@@ -422,17 +426,16 @@ class AppHomeTest < Minitest::Test
 end
 
 class SlackEventsControllerTest
-  def test_home_event_is_signed_queued_and_messages_tab_is_ignored
+  def test_home_event_is_signed_direct_and_messages_tab_is_ignored
     queued = []
     @settings['slack'].merge!('app_home' => true, 'bot_token' => 'token')
     event = { 'type' => 'event_callback', 'api_app_id' => 'ATEST', 'team_id' => 'TTEST',
               'event' => { 'type' => 'app_home_opened', 'user' => 'U123', 'tab' => 'home', 'channel' => 'D123' } }
-    SlackmineAppHomeJob.stub(:perform_later, ->(*args) { queued << args }) do
-      assert_equal :ok, dispatch(event).status
-      assert_equal :unauthorized, dispatch(event, signature: 'v0=' + '0' * 64).status
-      event['event']['tab'] = 'messages'
-      assert_equal :ok, dispatch(event).status
-    end
+    assert_equal :ok, dispatch(event).status
+    assert_equal :unauthorized, dispatch(event, signature: 'v0=' + '0' * 64).status
+    event['event']['tab'] = 'messages'
+    assert_equal :ok, dispatch(event).status
+    queued = @queued_home
     assert_equal [['ATEST', 'TTEST', 'U123', 'all']], queued
   end
 
@@ -442,13 +445,12 @@ class SlackEventsControllerTest
     event = { 'type' => 'event_callback', 'api_app_id' => 'ATEST', 'team_id' => 'TTEST',
               'event' => { 'type' => 'app_home_opened', 'user' => 'U123', 'tab' => 'home',
                 'view' => { 'callback_id' => 'slackmine_home', 'private_metadata' => 'my' } } }
-    SlackmineAppHomeJob.stub(:perform_later, ->(*args) { queued << args }) do
-      assert_equal :ok, dispatch(event).status
-      event['event']['view']['private_metadata'] = 'invalid'
-      assert_equal :ok, dispatch(event).status
-      event['event']['view'] = { 'callback_id' => 'other_app', 'private_metadata' => 'this_week' }
-      assert_equal :ok, dispatch(event).status
-    end
+    assert_equal :ok, dispatch(event).status
+    event['event']['view']['private_metadata'] = 'invalid'
+    assert_equal :ok, dispatch(event).status
+    event['event']['view'] = { 'callback_id' => 'other_app', 'private_metadata' => 'this_week' }
+    assert_equal :ok, dispatch(event).status
+    queued = @queued_home
     assert_equal %w[my all all], queued.map(&:last)
   end
 

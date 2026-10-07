@@ -238,7 +238,12 @@ module Slackmine
 
     def render_card(card, url, project, time_formatter: nil, icon_html: nil)
       text = SlackMarkup.render(card['text'], card['names'] || {})
-      link_text = Slackmine.effective_config(project).dig('slack', 'link_cards', 'link_text')
+      wording = Slackmine.messages_config
+      project_wording = wording.dig('projects', project.identifier.to_s, 'messages', 'link_cards', 'open') if project
+      global_wording = wording.dig('messages', 'link_cards', 'open')
+      separate_wording = [project_wording, global_wording].any? { |value| value.is_a?(String) && !value.strip.empty? }
+      legacy_link_text = Slackmine.effective_config(project).dig('slack', 'link_cards', 'link_text')
+      link_text = separate_wording ? nil : legacy_link_text
       link_text = link_message('open', project: project) unless link_text.is_a?(String) && !link_text.strip.empty?
       link_text = SlackMarkup.escape(link_text)
       label = if icon_html

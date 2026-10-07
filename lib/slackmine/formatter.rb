@@ -26,13 +26,13 @@ module Slackmine
     ISSUE_OPTIONAL_METADATA_KEYS = %w[status assignee author target_version start_date due_date
                                       estimated_hours done_ratio parent_issue children relations
                                       custom_fields attachments watchers].freeze
-    DEFAULT_MESSAGES = YAML.safe_load(File.read(File.expand_path('../../config/slackmine.messages.yml', __dir__))).fetch('messages').freeze
+    DEFAULT_MESSAGES = YAML.safe_load(File.read(File.expand_path('../../config/slackmine.messages.yml.example', __dir__))).fetch('messages').freeze
 
     module_function
 
     def message(*path, project: Thread.current[:slackmine_project])
       default = DEFAULT_MESSAGES.dig(*path)
-      configured = Slackmine.effective_config(project)['messages']
+      configured = Slackmine.message_settings(project)
       path.each do |key|
         configured = configured.is_a?(Hash) ? configured[key] : nil
       end
@@ -144,7 +144,7 @@ module Slackmine
     end
 
     def event_color(noun, action)
-      configured = Slackmine.effective_config['messages']
+      configured = Slackmine.message_settings
       ['colors', event_key(noun), action].each do |key|
         configured = configured.is_a?(Hash) ? configured[key] : nil
       end
@@ -612,7 +612,8 @@ module Slackmine
       configured = message('events', key, action) if key
       return configured if configured
 
-      "#{noun} #{action}"
+      interpolate(message('templates', 'event_fallback'), { noun: noun, action: action },
+                  fallback: DEFAULT_MESSAGES.dig('templates', 'event_fallback'))
     end
 
     def issue_heading(action, actor, label)
@@ -624,7 +625,7 @@ module Slackmine
     end
 
     def event_icon(action, noun: 'Issue')
-      message('icons', event_key(noun), action) || '🔧'
+      message('icons', event_key(noun), action) || message('templates', 'icon_fallback')
     end
 
     def event_key(noun)
@@ -1029,7 +1030,9 @@ module Slackmine
     end
 
     def relation_type_label(relation_type)
-      message('relations', relation_type.to_s) || relation_type.to_s
+      message('relations', relation_type.to_s) ||
+        interpolate(message('templates', 'relation_fallback'), { type: relation_type.to_s },
+                    fallback: DEFAULT_MESSAGES.dig('templates', 'relation_fallback'))
     end
 
     def relation_issue_link(issue_id)

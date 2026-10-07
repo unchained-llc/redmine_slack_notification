@@ -4,7 +4,7 @@
 
 ![Slackmine — Slack and Redmine integration](docs/assets/slackmine-icon.png)
 
-Version **1.3.0**.
+Version **1.4.0**.
 
 The plugin was renamed from **Redmine Event Notifications for Slack** (`redmine_slack_notification`) to **Slackmine** as it grew from notifications into a broader Slack–Redmine integration. Internal names, plugin ID, configuration filename and endpoints now use `slackmine`; the former names are no longer supported.
 
@@ -53,8 +53,8 @@ See the [Slack scopes and feature setup tables](#slack-scopes-and-feature-setup)
    git clone https://github.com/unchained-llc/slackmine.git plugins/slackmine
    ```
 
-2. Copy the [example configuration](config/slackmine.yml.example) to the application's `config/slackmine.yml`.
-3. Set the Bot Token and a default or project-specific channel ID. Keep the real YAML file out of Git.
+2. Copy the [behavior configuration example](config/slackmine.yml.example) to the application's `config/slackmine.yml`.
+3. Set the Bot Token and a default or project-specific channel ID. To customize wording, copy the [English message example](config/slackmine.messages.yml.example) to `config/slackmine.messages.yml` and edit it. Keep the real YAML files out of Git.
 4. Configure Sidekiq to process the `slack` queue and invite the bot to the configured channels.
 5. Restart Redmine and Sidekiq. Both processes cache the YAML configuration.
 
@@ -129,9 +129,9 @@ The plugin reads the first configuration file it finds:
 1. `<Redmine root>/config/slackmine.yml`
 2. `plugins/slackmine/config/slackmine.yml`
 
-Every top-level configuration group can be overridden under `projects.<identifier>`: `slack`, `events`, `messages`, `users`, and `due_reminders`. Nested maps merge by key, so omitted project keys inherit the global value. Explicit `false` values override `true`. For Bot Tokens, the priority is `projects.<identifier>.slack.bot_token`, then `SLACK_BOT_TOKEN`, then global `slack.bot_token`. For channels, `projects.<identifier>.slack.default_channel_id` takes priority over the older `projects.<identifier>.channel_id`, then a unique automatic name match for that project when enabled. If neither resolves a channel, the same checks are applied to each ancestor from nearest to farthest, then global `slack.default_channel_id` is used. Project keys are Redmine **identifiers**, not display names. A missing token or channel prevents delivery and is logged. Channel IDs typically begin with `C` for public channels or `G` for private channels. Keep every project token out of Git and restart Redmine and Sidekiq after changing the YAML.
+Behavior groups `slack`, `events`, `users`, and `due_reminders` can be overridden under `projects.<identifier>`. Put global `messages` and project-specific `projects.<identifier>.messages` in the separate `slackmine.messages.yml` file. Nested maps merge by key, so omitted project keys inherit the global value. Explicit `false` values override `true`. For Bot Tokens, the priority is `projects.<identifier>.slack.bot_token`, then `SLACK_BOT_TOKEN`, then global `slack.bot_token`. For channels, `projects.<identifier>.slack.default_channel_id` takes priority over the older `projects.<identifier>.channel_id`, then a unique automatic name match for that project when enabled. If neither resolves a channel, the same checks are applied to each ancestor from nearest to farthest, then global `slack.default_channel_id` is used. Project keys are Redmine **identifiers**, not display names. A missing token or channel prevents delivery and is logged. Channel IDs typically begin with `C` for public channels or `G` for private channels. Keep every project token out of Git and restart Redmine and Sidekiq after changing the YAML.
 
-For example, this project uses its own token and channel, disables comment notifications, hides Issue project metadata, changes the card color and heading, and overrides one Slack user mapping. Other settings retain their global values:
+For example, this project uses its own token and channel, disables comment notifications, hides Issue project metadata, changes the card color, and overrides one Slack user mapping. Other settings retain their global values. The heading belongs in `slackmine.messages.yml`:
 
 ```yaml
 projects:
@@ -147,12 +147,19 @@ projects:
       issue:
         comment:
           added: false
+    users:
+      alice: 'U0123456789'
+```
+
+The corresponding project-specific heading in the separate message file is:
+
+```yaml
+projects:
+  agentic:
     messages:
       events:
         issue:
           created: 'New Agentic issue'
-    users:
-      alice: 'U0123456789'
 ```
 
 ## Event switches
@@ -447,7 +454,7 @@ slack:
 
 `description: true` displays the issue description in the card. Blank descriptions are hidden and text beyond 1,000 characters is truncated. The detail pane description is unchanged.
 
-All built-in display text defaults to English. Override buttons, dialogs, and errors with `messages.work_objects`, editor field labels with `messages.fields`, and the unassigned label with `messages.values.unassigned`. The example YAML lists every message key. `edit_title` and `edit_failed` support `%{id}`. Slack-owned labels and menus follow Slack language settings.
+All built-in display text defaults to English. Override buttons, dialogs, and errors with `messages.work_objects`, editor field labels with `messages.fields`, and the unassigned label with `messages.values.unassigned`. The [message example](config/slackmine.messages.yml.example) lists every key. `edit_title` and `edit_failed` support `%{id}`. Slack-owned labels and menus follow Slack language settings.
 
 The card open button links to the issue URL. Configure its label with `messages.work_objects.open_issue`, which supports `%{product_name}`.
 
@@ -757,9 +764,9 @@ To share a newly uploaded private file with the channel, the plugin posts a temp
 
 ### Wording and templates
 
-The top-level `messages` tree changes notification wording, icons, and colors; it does not control whether an event is sent. All keys are optional. Omitted or empty strings use built-in defaults. The [example YAML](config/slackmine.yml.example) lists every available key with sample values:
+The `messages` tree in `slackmine.messages.yml` changes notification wording, icons, and colors; it does not control whether an event is sent. All keys are optional. Omitted or empty strings use built-in defaults. `messages.templates.icon_fallback` sets the icon for unknown events. The [message example](config/slackmine.messages.yml.example) lists every available key with sample values:
 
-Default wording is stored in [config/slackmine.messages.yml](config/slackmine.messages.yml). Customize it through `messages` in your `slackmine.yml`; project overrides belong under `projects.<identifier>.messages`. No Ruby changes are needed. Thread connection dialogs, feedback, errors, and the saved history heading use `messages.thread_connections`. Slack quote cards and their plain-text fallbacks use `messages.link_cards`. Existing `slack.link_cards.link_text` overrides continue to take precedence over `messages.link_cards.open`.
+English defaults are stored in [config/slackmine.messages.yml.example](config/slackmine.messages.yml.example). Put deployment-specific wording in a Git-ignored `config/slackmine.messages.yml`; a file in the Redmine application's `config` directory takes precedence over one in the plugin directory. Project overrides belong under `projects.<identifier>.messages` in the same file. During migration, the plugin still reads legacy `messages` values from `slackmine.yml`, but the separate message file wins. Thread connection dialogs, feedback, errors, and the saved history heading use `messages.thread_connections`. Slack quote cards and their plain-text fallbacks use `messages.link_cards`. Unknown event and relation labels use `messages.templates.event_fallback` and `relation_fallback`. Legacy `slack.link_cards.link_text` applies only when the separate file does not set `messages.link_cards.open`.
 
 ```yaml
 messages:
@@ -1066,7 +1073,7 @@ Set `due_reminders.colors.overdue`, `.today`, and `.upcoming` to six-digit hex c
 
 The assignee must be an active Redmine user who can view the Issue, and must map to a Slack user through `users` or `slack.auto_map_users_by_name`. Group assignees and unmapped users are skipped and logged. Private Issues can be sent to their own assignee by DM when Redmine grants that user access. DM delivery needs a Bot Token with [`chat:write`](https://docs.slack.dev/reference/scopes/chat.write/) and [`im:write`](https://docs.slack.dev/reference/scopes/im.write/); it does not use the project's channel ID. In the Slack app settings, enable **App Home → Messages Tab → Display Messages tab**; otherwise Slack returns [`messages_tab_disabled`](https://docs.slack.dev/reference/methods/conversations.open/#errors) even after [`conversations.open`](https://docs.slack.dev/reference/methods/conversations.open/) succeeds. After adding scopes, reinstall the Slack app. Verify a test Issue in the recipient's Slack DM before relying on the schedule.
 
-The digest wording is configurable under `messages.due_reminders` in the YAML file. The [example configuration](config/slackmine.yml.example) lists every key and its placeholders. For example, change the title and the overdue group label without changing the other groups:
+The digest wording is configurable under `messages.due_reminders` in `slackmine.messages.yml`. The [message example](config/slackmine.messages.yml.example) lists every key and its placeholders. For example, change the title and the overdue group label without changing the other groups:
 
 ```yaml
 messages:
@@ -1149,9 +1156,9 @@ Access follows Redmine issue and private-note permissions. Viewers do not need a
 
 Slack [`mrkdwn`](https://docs.slack.dev/messaging/formatting-message-text/) emphasis, strike-through, links, quotes and code are rendered, along with basic Markdown headings, lists, bold text and links. Standard emoji shortcodes become Unicode; custom emoji retain their shortcode. Raw HTML stays literal and links allow only HTTP, HTTPS and mailto. A reply not found in history is attempted through [`conversations.replies`](https://docs.slack.dev/reference/methods/conversations.replies/); API restrictions or failure may leave it as a normal link. Files are not imported.
 
-Set `slack.link_cards.link_text` to customize the **Open in Slack** label for
-both Redmine and email. Omitted or blank values use `Open in Slack`; the value is
-plain text, not HTML.
+Set `messages.link_cards.open` in `slackmine.messages.yml` to customize the
+**Open in Slack** label for both Redmine and email. Omitted or blank values use
+`Open in Slack`; the value is plain text, not HTML.
 
 Set `slack.link_cards.mail_enabled: false` to disable HTML email quote cards and
 the inline logo, keeping the original Slack link and plain quote text. Omitted or
@@ -1233,6 +1240,7 @@ version numbers are editorial labels, not a record of published releases or Git 
 
 | Version | Highlights |
 | --- | --- |
+| **1.4.0** | Separate deployment wording into a Git-ignored message YAML while keeping English defaults in a tracked example. Add request deduplication, explicit queue-failure responses, deferred quote-heavy form saves, and background refreshes for direct Slack interactions. |
 | **1.3.0** | Process Work Object details and short actions in the Web process; queue URL unfurls, post-save refreshes, App Home lists, slash command delivery, connection saves, and quote-heavy form saves. Review thread history in the Web process first, falling back to Sidekiq after two seconds. |
 | **1.2.2** | Added file-transfer restrictions for audit and internal policies: use source links instead of transferring files, allow per-project exceptions, or enforce the restriction globally. |
 | **1.2.1** | Added switches to disable Slack link retrieval, quote imports, and all cards, or only Redmine web cards. Documented how to disable assignee mentions. |

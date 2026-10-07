@@ -102,7 +102,7 @@ module Slackmine
       return unless enabled? && integration?(app, team)
       text = payload['text'].to_s
       return deliver_reminders(app, team, payload) if text.strip == 'reminders'
-      # Modal commands first show a button, so queued work never uses an expired trigger_id.
+      # Modal commands first show a button to obtain a fresh trigger_id.
       result = if (arguments = direct_arguments(text))
                  direct_edit(app, team, payload, *arguments)
                elsif text.match?(/\Acomment\s+#?[1-9]\d*\s*\z/)
@@ -344,8 +344,17 @@ module Slackmine
       key = "slackmine:submission:#{Digest::SHA256.hexdigest([app, team, viewer.id, view['id']].join(':'))}"
       cache = Rails.cache
       return {} if cache.read(key) == 'done'
-      unless cache.write(key, 'pending', unless_exist: true, expires_in: 300)
+      unless cache.write(key, 'pending', unless_exist: true, expires_in: 86_400)
         return { 'response_action' => 'errors', 'errors' => { error_key => message('processing') } }
+      end
+      text = kind == 'create' ? values.dig('description', 'description', 'value') : values.dig('comment', 'comment', 'value')
+      if %w[create comment].include?(kind) && text.to_s.match?(%r{\.slack\.com/archives/}i) &&
+         background_form_valid?(kind, values) && background_form_allowed?(kind, id, viewer, app, team)
+        fields = kind == 'create' ? values.slice('subject', 'description', 'tracker') : values.slice('comment')
+        job = SlackmineCommandFormJob.perform_later(app, team, payload.dig('user', 'id'), kind, id, fields, viewer.id, view['id'])
+        return {} if job
+        cache.delete(key)
+        return { 'response_action' => 'errors', 'errors' => { error_key => message('denied') } }
       end
       result = save_form(kind, id, values, viewer, app, team, error_key)
       if result.empty?
@@ -356,6 +365,59 @@ module Slackmine
       result
     ensure
       User.current = previous
+    end
+
+    def background_form_valid?(kind, values)
+      if kind == 'create'
+        subject = values.dig('subject', 'subject', 'value')
+        description = values.dig('description', 'description', 'value').to_s
+        subject.is_a?(String) && subject.length.between?(1, 255) && description.length <= 3000
+      else
+        note = values.dig('comment', 'comment', 'value').to_s.strip
+        !note.empty? && note.length <= 3000
+      end
+    end
+
+    def background_form_allowed?(kind, id, viewer, app, team)
+      if kind == 'create'
+        project = Project.find_by(id: id)
+        project && authorized_project?(project, app, team) && viewer.allowed_to?(:add_issues, project)
+      else
+        issue = Issue.find_by(id: id)
+        issue && authorized_project?(issue.project, app, team) && issue.visible?(viewer) &&
+          issue.notes_addable?(viewer) && !issue.is_private?
+      end
+    end
+
+    def complete_form(app, team, slack_user, kind, id, values, user_id, view_id)
+      key = "slackmine:submission:#{Digest::SHA256.hexdigest([app, team, user_id, view_id].join(':'))}"
+      return if Rails.cache.read(key) == 'done'
+      viewer = WorkObjects.viewer_for(slack_user)
+      unless viewer && viewer.id == user_id && enabled? && integration?(app, team)
+        Rails.cache.delete(key)
+        notify_background_form(slack_user, 'background_failed')
+        return
+      end
+      previous = User.current
+      User.current = viewer
+      assigned_current = true
+      result = save_form(kind, id, values, viewer, app, team, error_key(kind))
+      saved = result.empty?
+      Rails.cache.write(key, 'done', expires_in: 86_400) if saved
+      Rails.cache.delete(key) unless saved
+      notify_background_form(slack_user, saved ? 'background_saved' : 'background_failed')
+    rescue StandardError => e
+      # A failed or uncertain save must not be retried into a duplicate Issue.
+      Rails.logger&.error("Slackmine: command form save failed: #{e.class}")
+      notify_background_form(slack_user, 'background_failed') unless saved
+    ensure
+      User.current = previous if assigned_current
+    end
+
+    def notify_background_form(slack_user, key)
+      Slackmine.slack_api('chat.postMessage', { 'channel' => slack_user, 'text' => message(key) }, Slackmine.bot_token)
+    rescue StandardError => e
+      Rails.logger&.error("Slackmine: command form notice failed: #{e.class}")
     end
 
     def save_form(kind, id, values, viewer, app, team, error_key)

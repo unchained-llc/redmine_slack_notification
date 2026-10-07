@@ -43,12 +43,13 @@ class StandardNotificationsTest < Minitest::Test
 
   def test_all_formatter_nouns_have_customizable_labels_icons_and_example_metadata
     example = YAML.safe_load(File.read(File.expand_path('../config/slackmine.yml.example', __dir__)))
+    message_example = YAML.safe_load(File.read(File.expand_path('../config/slackmine.messages.yml.example', __dir__)))
     Slackmine::Formatter::EVENT_NOUN_KEYS.each do |noun, key|
       next if key == 'comment' # Issue comments share Issue metadata.
       assert example.dig('slack', 'metadata', key).is_a?(Hash), key
       Slackmine::Formatter::DEFAULT_MESSAGES.fetch('events').fetch(key).each_key do |action|
-        assert example.dig('messages', 'events', key, action), "#{key}.#{action} label"
-        assert example.dig('messages', 'icons', key, action), "#{key}.#{action} icon"
+        assert message_example.dig('messages', 'events', key, action), "#{key}.#{action} label"
+        assert message_example.dig('messages', 'icons', key, action), "#{key}.#{action} icon"
         settings = { 'projects' => { 'example' => { 'messages' => {
           'events' => { key => { action => 'Custom event' } },
           'icons' => { key => { action => 'ICON' } }
@@ -59,6 +60,70 @@ class StandardNotificationsTest < Minitest::Test
             assert_equal 'ICON', Slackmine::Formatter.event_icon(action, noun: noun)
           end
         end
+      end
+    end
+  end
+
+  def test_default_messages_are_english_and_match_example_keys
+    defaults = Slackmine::Formatter::DEFAULT_MESSAGES
+    example = YAML.safe_load(File.read(File.expand_path('../config/slackmine.messages.yml.example', __dir__))).fetch('messages')
+    operations = YAML.safe_load(File.read(File.expand_path('../config/slackmine.yml.example', __dir__)))
+    refute operations.key?('messages')
+    flatten = ->(entries, prefix = '') do
+      entries.flat_map do |key, value|
+        value.is_a?(Hash) ? flatten.call(value, "#{prefix}#{key}.").to_a : [["#{prefix}#{key}", value]]
+      end.to_h
+    end
+    default_values = flatten.call(defaults)
+    assert_equal default_values.keys.sort, flatten.call(example).keys.sort
+    assert_empty default_values.select { |_, value| value.to_s.match?(/[ぁ-んァ-ヶ一-龠]/) }
+  end
+
+  def test_message_file_prefers_redmine_config_path
+    require 'tmpdir'
+    Dir.mktmpdir do |directory|
+      redmine_path = File.join(directory, 'redmine.yml')
+      plugin_path = File.join(directory, 'plugin.yml')
+      File.write(redmine_path, YAML.dump('messages' => { 'app_home' => { 'title' => 'Redmine file' } }))
+      File.write(plugin_path, YAML.dump('messages' => { 'app_home' => { 'title' => 'Plugin file' } }))
+      previous = Slackmine.instance_variable_get(:@messages_config)
+      Slackmine.instance_variable_set(:@messages_config, nil)
+      Slackmine.stub(:messages_config_paths, [redmine_path, plugin_path]) do
+        assert_equal 'Redmine file', Slackmine.messages_config.dig('messages', 'app_home', 'title')
+      end
+    ensure
+      Slackmine.instance_variable_set(:@messages_config, previous)
+    end
+  end
+
+  def test_unknown_event_and_relation_labels_use_configurable_yaml_templates
+    formatter = Slackmine::Formatter
+    Slackmine.stub(:config, {}) do
+      assert_equal 'Novel archived', formatter.event_label('Novel', 'archived')
+      assert_equal '🔧', formatter.event_icon('archived', noun: 'Novel')
+      assert_equal 'unlisted', formatter.relation_type_label('unlisted')
+    end
+    settings = { 'messages' => { 'templates' => {
+      'event_fallback' => '%{action}: %{noun}', 'relation_fallback' => 'Relation %{type}',
+      'icon_fallback' => 'ICON'
+    } } }
+    Slackmine.stub(:config, settings) do
+      assert_equal 'archived: Novel', formatter.event_label('Novel', 'archived')
+      assert_equal 'ICON', formatter.event_icon('archived', noun: 'Novel')
+      assert_equal 'Relation unlisted', formatter.relation_type_label('unlisted')
+    end
+  end
+
+  def test_separate_message_settings_override_legacy_without_losing_project_priority
+    legacy = { 'messages' => { 'app_home' => { 'title' => 'Legacy global' } },
+      'projects' => { 'example' => { 'messages' => { 'app_home' => { 'title' => 'Legacy project' } } } } }
+    separate = { 'messages' => { 'app_home' => { 'title' => 'New global', 'refresh' => 'Reload' } },
+      'projects' => { 'example' => { 'messages' => { 'app_home' => { 'title' => 'New project' } } } } }
+    Slackmine.stub(:config, legacy) do
+      Slackmine.stub(:messages_config, separate) do
+        assert_equal 'New global', Slackmine::Formatter.message('app_home', 'title', project: nil)
+        assert_equal 'New project', Slackmine::Formatter.message('app_home', 'title', project: @project)
+        assert_equal 'Reload', Slackmine::Formatter.message('app_home', 'refresh', project: @project)
       end
     end
   end

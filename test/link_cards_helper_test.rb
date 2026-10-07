@@ -286,6 +286,18 @@ class LinkCardsHelperTest < Minitest::Test
     end
   end
 
+  def test_separate_message_file_overrides_legacy_link_text
+    card = { 'author' => 'Example', 'channel' => 'example', 'text' => 'Message' }
+    legacy = { 'slack' => { 'link_cards' => { 'link_text' => 'Old wording' } } }
+    separate = { 'messages' => { 'link_cards' => { 'open' => 'New wording' } } }
+    Slackmine.stub(:effective_config, legacy) do
+      Slackmine.stub(:messages_config, separate) do
+        html = Slackmine::LinkCards.render_card(card, LinkCardsTest::URL, @issue.project)
+        assert_equal 'New wording', Nokogiri::HTML.fragment(html).at_css('.slackmine-link-card > a').text
+      end
+    end
+  end
+
   def test_project_wording_is_shared_by_web_mail_and_plain_quotes_and_escaped
     card = { 'author' => 'Alice', 'channel' => 'example', 'timestamp' => '2026-10-07T01:00:00Z',
              'text' => 'Reply', 'thread_reply' => true, 'parent_url' => LinkCardsTest::URL,

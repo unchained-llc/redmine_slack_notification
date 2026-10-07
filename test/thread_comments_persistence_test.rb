@@ -39,6 +39,8 @@ class User < ActiveRecord::Base
 end
 
 require_relative '../lib/slackmine'
+Slackmine.instance_variable_set(:@config, {})
+Slackmine.instance_variable_set(:@messages_config, {})
 
 ActiveRecord::Base.establish_connection(adapter: 'sqlite3', database: ':memory:')
 ActiveRecord::Schema.verbose = false

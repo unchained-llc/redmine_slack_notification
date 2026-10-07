@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'uri'
+require 'digest'
+require 'timeout'
 
 class SlackmineEventsController < ActionController::Base
   # This endpoint uses Slack signatures, never a browser session or Redmine's
@@ -77,13 +79,26 @@ class SlackmineEventsController < ActionController::Base
         return head :bad_request unless values.is_a?(Hash)
         interaction['view']['state'] = { 'values' => values.slice('status', 'priority', 'assignee', 'due_date', 'new_comment', 'description') }
       end
-      watch_action = source_key == 'container' && Array(interaction['actions']).one? &&
-                     %w[slackmine_watch slackmine_unwatch].include?(interaction['actions'].first['action_id'])
-      if watch_action
-        # Modal trigger IDs expire in three seconds; do not wait for a worker.
-        Slackmine::WorkObjects.process_interaction(app_id, team_id, interaction)
+      # The signed request can be redelivered while this Web process is still
+      # saving or refreshing Slack. Claim it before any write, using only a hash
+      # of the already verified body; never cache submitted text or permissions.
+      key = "slackmine:work_object_request:#{Digest::SHA256.hexdigest(body)}"
+      return head :ok unless Rails.cache.write(key, true, unless_exist: true, expires_in: 600)
+
+      values = interaction.dig('view', 'state', 'values') || {}
+      slow_edit = %w[modal entity_detail].include?(interaction.dig('view', 'type')) &&
+        values.values.any? { |group| group.is_a?(Hash) && group.values.any? { |item|
+          item.is_a?(Hash) && item['value'].is_a?(String) && item['value'].match?(%r{\.slack\.com/archives/}i)
+        } }
+      if slow_edit
+        interaction['deferred'] = true
+        job = SlackmineWorkObjectInteractionJob.perform_later(app_id, team_id, interaction)
+        unless job
+          Rails.cache.delete(key)
+          return head :service_unavailable
+        end
       else
-        SlackmineWorkObjectInteractionJob.perform_later(app_id, team_id, interaction)
+        run_work_object(:process_interaction, app_id, team_id, interaction)
       end
       return head :ok
     end
@@ -95,21 +110,22 @@ class SlackmineEventsController < ActionController::Base
         view = event['view']
         filter = view.is_a?(Hash) && view['callback_id'] == 'slackmine_home' ? view['private_metadata'] : nil
         filter = 'all' unless Slackmine::AppHome::FILTERS.include?(filter)
-        SlackmineAppHomeJob.perform_later(app_id, team_id, event['user'], filter)
+        return head :service_unavailable unless SlackmineAppHomeJob.perform_later(app_id, team_id, event['user'], filter)
       end
     elsif payload['type'] == 'event_callback' && event.is_a?(Hash) && event['type'] == 'entity_details_requested'
       return head :bad_request if event['trigger_id'].to_s.empty? || event['user'].to_s.empty?
 
-      # ACK immediately; external HTTP calls run on the existing Slack queue.
-      SlackmineWorkObjectDetailsJob.perform_later(payload['api_app_id'], payload['team_id'], event.slice(
+      # Process live details directly in the signed endpoint's Web process.
+      run_work_object(:present_details, app_id, team_id, event.slice(
         'type', 'trigger_id', 'user', 'entity_url', 'external_ref'
       ))
     elsif payload['type'] == 'event_callback' && event.is_a?(Hash) && event['type'] == 'link_shared'
       return head :bad_request unless event['user'].is_a?(String) && event['links'].is_a?(Array)
 
-      SlackmineWorkObjectUnfurlJob.perform_later(payload['api_app_id'], payload['team_id'], event.slice(
+      job = SlackmineWorkObjectUnfurlJob.perform_later(app_id, team_id, event.slice(
         'type', 'user', 'links', 'channel', 'message_ts', 'unfurl_id', 'source', 'is_unfurl_refresh'
       ))
+      return head :service_unavailable unless job
     elsif payload['type'] == 'event_callback' && Slackmine::ThreadComments.accepted_reply?(payload['api_app_id'], payload['team_id'], event)
       reply = event.slice(
         'type', 'subtype', 'user', 'text', 'channel', 'ts', 'thread_ts'
@@ -122,7 +138,28 @@ class SlackmineEventsController < ActionController::Base
       SlackmineThreadCommentJob.perform_later(payload['api_app_id'], payload['team_id'], reply)
     end
     head :ok
+  rescue Slackmine::SlackApiError => e
+    Rails.logger&.error("Slackmine: synchronous Slack operation failed: #{e.code}")
+    head :ok
+  rescue Timeout::Error, IOError, SystemCallError => e
+    Rails.logger&.error("Slackmine: synchronous Slack operation failed: #{e.class}")
+    head :ok
   rescue JSON::ParserError, ArgumentError
     head :bad_request
+  end
+
+  private
+
+  def run_work_object(method, app_id, team_id, payload)
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    Slackmine::WorkObjects.public_send(method, app_id, team_id, payload)
+  rescue Slackmine::SlackApiError => e
+    # A Slack refresh failure must not replay a completed Redmine write.
+    Rails.logger&.error("Slackmine: Work Object #{method} failed: #{e.code}")
+  rescue Timeout::Error, IOError, SystemCallError => e
+    Rails.logger&.error("Slackmine: Work Object #{method} failed: #{e.class}")
+  ensure
+    elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
+    Rails.logger&.info("Slackmine: Work Object #{method} duration_ms=#{elapsed}")
   end
 end

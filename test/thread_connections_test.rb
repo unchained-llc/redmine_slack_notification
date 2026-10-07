@@ -14,8 +14,9 @@ class ThreadConnectionsTest < Minitest::Test
     @issue.define_singleton_method(:visible?) { |*| true }
     @issue.define_singleton_method(:notes_addable?) { |*| true }
     @calls = []
-    @jobs = []
+    @cache = SlashCommandsCacheTest::Cache.new
     @saved = []
+    @queued = []
     @member = @bot_member = true
     @payload = { 'type' => 'message_action', 'callback_id' => CONNECTIONS::CALLBACK,
       'user' => { 'id' => 'U123' }, 'channel' => { 'id' => 'C123' }, 'trigger_id' => 'fresh',
@@ -49,11 +50,18 @@ class ThreadConnectionsTest < Minitest::Test
       Slackmine::WorkObjects.stub(:viewer_for, @viewer) do
         Slackmine::WorkObjects.stub(:integration_for, @integration) do
           Issue.stub(:find_by, @issue) do
-            SlackmineThreadConnectionJob.stub(:perform_later, ->(*args) { @jobs << args }) do
+            enqueue = ->(*args) { @reject_enqueue ? false : (@queued << args; Object.new) }
+            configured = Object.new
+            configured.define_singleton_method(:perform_later) { |*args| enqueue.call(*args) }
+            SlackmineThreadConnectionJob.stub(:perform_later, enqueue) do
+              SlackmineThreadConnectionJob.stub(:set, ->(wait:) { assert_equal 1, wait; configured }) do
               Slackmine.stub(:slack_api, @api) do
                 Slackmine::ThreadComments.stub(:persist_reply, ->(*args, **opts) { @saved << [args, opts]; :saved }) do
-                  Slackmine::ThreadComments.stub(:feedback, ->(*) {}) { yield }
+                  Slackmine::ThreadComments.stub(:feedback, ->(*) {}) do
+                    Rails.stub(:cache, @cache) { yield }
+                  end
                 end
+              end
               end
             end
           end
@@ -69,6 +77,10 @@ class ThreadConnectionsTest < Minitest::Test
   def preview(history: true)
     CONNECTIONS.prepare_preview('ATEST', 'TTEST', @source.merge('history' => history), 'V123')
     @calls.last[1]['view']
+  end
+
+  def drain_jobs
+    SlackmineThreadConnectionJob.new.perform(*@queued.shift) until @queued.empty?
   end
 
   def confirmation(view, selected: [0, 1])
@@ -124,14 +136,13 @@ class ThreadConnectionsTest < Minitest::Test
     end
   end
 
-  def test_shortcut_ack_only_opens_loading_modal_and_queues_work
+  def test_shortcut_prepares_picker_directly_before_ack
     context do
       assert_equal({}, CONNECTIONS.interaction('ATEST', 'TTEST', @payload))
-      assert_equal ['views.open'], @calls.map(&:first)
-      assert_equal 'picker', @jobs.last.last
-      source = @jobs.last[2]
-      assert_equal @source['ts'], source['ts']
-      CONNECTIONS.prepare_picker('ATEST', 'TTEST', source, 'V123')
+      assert_equal 'views.open', @calls.first.first
+      drain_jobs
+      assert_equal 'views.update', @calls.last.first
+      assert @calls.any? { |method, _| method == 'conversations.replies' }
       picker = @calls.last[1]['view']
       assert_equal CONNECTIONS::PICK_CALLBACK, picker['callback_id']
       assert_equal 'history', picker['blocks'].last['element']['initial_options'].first['value']
@@ -147,8 +158,8 @@ class ThreadConnectionsTest < Minitest::Test
       assert_includes view.to_json, 'Bob'
       refute_includes view.to_json, 'Bot feedback'
       assert_equal({}, confirmation(view, selected: [1]))
-      @calls.clear
-      CONNECTIONS.finish(*@jobs.last)
+      assert_empty @saved
+      drain_jobs
       assert_equal 1, @saved.size
       opts = @saved.first.last
       assert_equal @viewer, opts[:import_viewer]
@@ -164,6 +175,109 @@ class ThreadConnectionsTest < Minitest::Test
       assert_equal CONNECTIONS::SAVE_CALLBACK, preview(history: false)['callback_id']
       refute @calls.any? { |method, _| method == 'conversations.replies' }
       assert @calls.any? { |method, _| method == 'conversations.members' }
+    end
+  end
+
+  def test_pick_returns_completed_preview_without_an_api_update_race
+    request_thread = Thread.current
+    context do
+      CONNECTIONS.interaction('ATEST', 'TTEST', @payload)
+      drain_jobs
+      picker = @calls.last[1]['view']
+      @calls.clear
+      result = CONNECTIONS.interaction('ATEST', 'TTEST', submitted(picker, {
+        'issue' => { 'issue' => { 'value' => '7' } },
+        'history' => { 'history' => { 'selected_options' => [{ 'value' => 'history' }] } }
+      }))
+      assert_same request_thread, Thread.current
+      assert_equal 'update', result['response_action']
+      assert_equal CONNECTIONS::SAVE_CALLBACK, result['view']['callback_id']
+      assert_includes result['view'].to_json, 'Parent message'
+      refute @calls.any? { |method, _| method == 'views.update' }
+      assert_empty @queued
+    end
+  end
+
+  def test_pick_falls_back_to_worker_when_direct_preview_exceeds_budget
+    context do
+      CONNECTIONS.interaction('ATEST', 'TTEST', @payload)
+      drain_jobs
+      picker = @calls.last[1]['view']
+      @calls.clear
+      result = nil
+      CONNECTIONS.stub(:prepare_preview, ->(*) { raise CONNECTIONS::PreviewDeadline }) do
+        result = CONNECTIONS.interaction('ATEST', 'TTEST', submitted(picker, {
+          'issue' => { 'issue' => { 'value' => '7' } },
+          'history' => { 'history' => { 'selected_options' => [{ 'value' => 'history' }] } }
+        }))
+      end
+      assert_equal 'update', result['response_action']
+      refute result['view'].key?('callback_id')
+      assert_equal 1, @queued.size
+      refute @calls.any? { |method, _| method == 'views.update' }
+      drain_jobs
+      assert_equal CONNECTIONS::SAVE_CALLBACK, @calls.last.last['view']['callback_id']
+    end
+  end
+
+  def test_confirmation_redelivery_does_not_repeat_import_or_connection_marker
+    context do
+      view = preview
+      assert_equal({}, confirmation(view))
+      assert_equal 'errors', confirmation(view)['response_action']
+      assert_equal 1, @queued.size
+      drain_jobs
+      assert_equal({}, confirmation(view))
+      assert_equal 1, @saved.size
+      assert_equal 1, @calls.count { |method, _| method == 'chat.postMessage' }
+    end
+  end
+
+  def test_confirmation_accepts_hash_prefixed_issue_number
+    context do
+      view = preview
+      values = { 'issue' => { 'issue' => { 'value' => ' #7 ' } } }
+      assert_equal({}, CONNECTIONS.save('ATEST', 'TTEST', @viewer, submitted(view, values)))
+      assert_equal 1, @queued.size
+      drain_jobs
+      assert_equal 1, @calls.count { |method, _| method == 'chat.postMessage' }
+    end
+  end
+
+  def test_failed_save_enqueue_reopens_confirmation_without_claiming_a_write
+    context do
+      view = preview
+      @reject_enqueue = true
+      assert_equal 'errors', confirmation(view)['response_action']
+      @reject_enqueue = false
+      assert_empty @queued
+      assert_equal({}, confirmation(view))
+      assert_equal 1, @queued.size
+    end
+  end
+
+  def test_confirmation_redelivery_while_in_progress_does_not_repeat_finish
+    context do
+      view = preview
+      assert_equal({}, confirmation(view))
+      assert_equal 'errors', confirmation(view)['response_action']
+      assert_equal 1, @queued.size
+    end
+  end
+
+  def test_confirmation_failure_returns_errors_and_requires_result_check_on_retry
+    context do
+      view = preview
+      calls = 0
+      CONNECTIONS.stub(:finish, lambda { |*|
+        calls += 1
+        raise 'Unknown save outcome'
+      }) do
+        assert_equal({}, confirmation(view))
+        drain_jobs
+        assert_equal 'errors', confirmation(view)['response_action']
+      end
+      assert_equal 1, calls
     end
   end
 
@@ -229,9 +343,9 @@ class ThreadConnectionsTest < Minitest::Test
   def test_changed_selected_history_is_rejected_before_connecting
     context do
       view = preview
-      confirmation(view)
       @messages.first['text'] = 'Edited after preview'
-      assert_raises(RuntimeError) { CONNECTIONS.finish(*@jobs.last) }
+      assert_equal({}, confirmation(view))
+      drain_jobs
       assert_empty @saved
       assert_nil CONNECTIONS.connection('ATEST', 'TTEST', @source, @messages)
     end

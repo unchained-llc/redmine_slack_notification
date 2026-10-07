@@ -218,7 +218,15 @@ class MessageShortcutsTest < Minitest::Test
         assert_equal 'errors', COMMANDS.interaction('ATEST', 'TTEST', submitted)['response_action']
         assert_equal 0, count
         @allowed = true
-        2.times { assert_equal({}, COMMANDS.interaction('ATEST', 'TTEST', submitted)) }
+        queued = []
+        SlackmineCommandFormJob.stub(:perform_later, ->(*args) { queued << args; Object.new }) do
+          assert_equal({}, COMMANDS.interaction('ATEST', 'TTEST', submitted))
+          assert_equal 'errors', COMMANDS.interaction('ATEST', 'TTEST', submitted)['response_action']
+        end
+        assert_equal 1, queued.size
+        assert_equal 0, count
+        SlackmineCommandFormJob.new.perform(*queued.first)
+        assert_equal({}, COMMANDS.interaction('ATEST', 'TTEST', submitted))
         assert_equal 1, count
         assert_equal 'First line', attributes['subject']
         assert_includes attributes['description'], @permalink

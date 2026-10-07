@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+require 'uri'
+require 'digest'
+require 'timeout'
+
 class SlackmineCommandsController < ActionController::Base
   protect_from_forgery with: :null_session
 
@@ -19,12 +23,18 @@ class SlackmineCommandsController < ActionController::Base
     expected = Slackmine.effective_config.dig('slack', 'slash_command')
     return head :forbidden unless expected.to_s.start_with?('/') && payload['command'] == expected
     return head :bad_request unless payload['user_id'].to_s.match?(/\A[UW][A-Z0-9]+\z/) && payload['channel_id'].to_s.match?(/\A[CDG][A-Z0-9]+\z/) && payload['text'].to_s.length <= 1000
-    queued = payload.slice('user_id', 'channel_id', 'text')
+    command = payload.slice('user_id', 'channel_id', 'text')
     if Slackmine::SlashCommands.direct_arguments(payload['text'])
-      queued['request_key'] = Digest::SHA256.hexdigest([request.headers['X-Slack-Request-Timestamp'], body].join(':'))
+      command['request_key'] = Digest::SHA256.hexdigest([request.headers['X-Slack-Request-Timestamp'], body].join(':'))
     end
-    SlackmineCommandJob.perform_later(payload['api_app_id'], payload['team_id'], queued)
+    return head :service_unavailable unless SlackmineCommandJob.perform_later(payload['api_app_id'], payload['team_id'], command)
     head :ok
+  rescue Slackmine::SlackApiError => e
+    Rails.logger&.error("Slackmine: command enqueue failed: #{e.code}")
+    head :service_unavailable
+  rescue Timeout::Error, IOError, SystemCallError => e
+    Rails.logger&.error("Slackmine: command enqueue failed: #{e.class}")
+    head :service_unavailable
   rescue ArgumentError
     head :bad_request
   end

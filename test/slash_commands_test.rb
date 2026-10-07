@@ -24,22 +24,27 @@ class SlashCommandsTest < Minitest::Test
     end
   end
 
-  def dispatch(signature: nil, timestamp: Time.now.to_i)
+  def dispatch(signature: nil, timestamp: Time.now.to_i, enqueue: nil)
     body = URI.encode_www_form(@payload)
     signature ||= 'v0=' + OpenSSL::HMAC.hexdigest('SHA256', 'secret', "v0:#{timestamp}:#{body}")
     controller = SlackmineCommandsController.new
     controller.request = OpenStruct.new(content_length: body.bytesize, raw_post: body, headers: {
       'X-Slack-Request-Timestamp' => timestamp.to_s, 'X-Slack-Signature' => signature })
-    @queued = []
+    @delivered = []
     Slackmine.stub(:config, @settings) do
-      SlackmineCommandJob.stub(:perform_later, ->(*args) { @queued << args }) { controller.receive }
+    SlackmineCommandJob.stub(:perform_later, enqueue || ->(*args) { assert_nil controller.status; @delivered << args }) { controller.receive }
     end
     controller
   end
 
-  def test_signed_command_acks_and_only_queues_needed_fields
+  def test_signed_command_is_queued_before_ack_with_only_needed_fields
     assert_equal :ok, dispatch.status
-    assert_equal ['ATEST', 'TTEST', @payload.slice('user_id', 'channel_id', 'text')], @queued.first
+    assert_equal ['ATEST', 'TTEST', @payload.slice('user_id', 'channel_id', 'text')], @delivered.first
+  end
+
+  def test_enqueue_failure_returns_retryable_response
+    assert_equal :service_unavailable, dispatch(enqueue: ->(*) { false }).status
+    assert_equal :service_unavailable, dispatch(enqueue: ->(*) { raise Timeout::Error }).status
   end
 
   def test_direct_edit_uses_configured_command_and_a_server_derived_retry_key
@@ -48,7 +53,7 @@ class SlashCommandsTest < Minitest::Test
                     'request_key' => 'untrusted-key')
     timestamp = Time.now.to_i
     assert_equal :ok, dispatch(timestamp: timestamp).status
-    queued = @queued.first.last
+    queued = @delivered.first.last
     assert_equal 'status 7 終了', queued['text']
     assert_match(/\A[0-9a-f]{64}\z/, queued['request_key'])
     refute queued.key?('response_url')
@@ -56,19 +61,19 @@ class SlashCommandsTest < Minitest::Test
     refute queued.key?('trigger_id')
     key = queued['request_key']
     assert_equal :ok, dispatch(timestamp: timestamp).status
-    assert_equal key, @queued.first.last['request_key']
+    assert_equal key, @delivered.first.last['request_key']
     @payload['trigger_id'] = 'another-trigger'
     assert_equal :ok, dispatch(timestamp: timestamp).status
-    refute_equal key, @queued.first.last['request_key']
+    refute_equal key, @delivered.first.last['request_key']
   end
 
-  def test_forged_expired_disabled_and_other_commands_never_queue
+  def test_forged_expired_disabled_and_other_commands_never_run
     assert_equal :unauthorized, dispatch(signature: 'v0=' + '0' * 64).status
-    assert_empty @queued
+    assert_empty @delivered
     assert_equal :unauthorized, dispatch(timestamp: Time.now.to_i - 400).status
     @payload['command'] = '/other'
     assert_equal :forbidden, dispatch.status
-    assert_empty @queued
+    assert_empty @delivered
     @payload['command'] = '/slackmine'
     @settings['slack'].delete('slash_command')
     assert_equal :forbidden, dispatch.status

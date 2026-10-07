@@ -4,7 +4,7 @@
 
 ![Slackmine — SlackとRedmineの連携](docs/assets/slackmine-icon.png)
 
-バージョン **1.3.0**。
+バージョン **1.4.0**。
 
 通知機能からSlackとRedmineの統合へ機能が広がったため、**Redmine Event Notifications for Slack**（`redmine_slack_notification`）から **Slackmine** に改名しました。内部名・プラグインID・設定ファイル名・エンドポイントも `slackmine` に統一し、旧名の互換対応は設けていません。
 
@@ -51,8 +51,8 @@ Work Objectのプレビュー・操作、スラッシュコマンド、スレッ
    git clone https://github.com/unchained-llc/slackmine.git plugins/slackmine
    ```
 
-2. [設定例](config/slackmine.yml.example)を Redmine アプリケーションの `config/slackmine.yml` にコピーします。
-3. Bot Token と、デフォルトまたはプロジェクト固有のチャンネル ID を設定します。実際の YAML ファイルは Git に含めないでください。
+2. [動作設定例](config/slackmine.yml.example)を Redmine アプリケーションの `config/slackmine.yml` にコピーします。
+3. Bot Token と、デフォルトまたはプロジェクト固有のチャンネル ID を設定します。文言を変更する場合は[英語の文言例](config/slackmine.messages.yml.example)を `config/slackmine.messages.yml` にコピーして編集します。実際の YAML ファイルは Git に含めないでください。
 4. Sidekiq が `slack` キューを処理するように設定し、ボットを通知先チャンネルに招待します。
 5. Redmine と Sidekiq を再起動します。どちらのプロセスも YAML 設定をキャッシュします。
 
@@ -127,9 +127,9 @@ projects:
 1. `<Redmine root>/config/slackmine.yml`
 2. `plugins/slackmine/config/slackmine.yml`
 
-最上位の設定グループ `slack`、`events`、`messages`、`users`、`due_reminders` は、`projects.<identifier>` 以下で上書きできます。ネストしたマップはキーごとにマージされ、省略したプロジェクト設定は全体設定を引き継ぎます。`false` を明示すると、全体設定の `true` を上書きします。Bot Token の優先順位は、`projects.<identifier>.slack.bot_token`、`SLACK_BOT_TOKEN`、全体の `slack.bot_token` の順です。チャンネルは、`projects.<identifier>.slack.default_channel_id`、従来の `projects.<identifier>.channel_id`、子自身の名前による自動照合の順に確認します。見つからなければ近い親から同じ順序で確認し、最後に全体の `slack.default_channel_id` を使います。プロジェクトのキーには表示名ではなく Redmine の**識別子**を使います。Token またはチャンネルがない場合、通知は送られずログに記録されます。チャンネル ID は通常、公開チャンネルが `C`、非公開チャンネルが `G` で始まります。プロジェクト固有の Token も Git に含めず、YAML の変更後は Redmine と Sidekiq を再起動してください。
+動作設定 `slack`、`events`、`users`、`due_reminders` は、`projects.<identifier>` 以下で上書きできます。文言の `messages` とプロジェクト別の `projects.<identifier>.messages` は別ファイルの `slackmine.messages.yml` に置きます。ネストしたマップはキーごとにマージされ、省略したプロジェクト設定は全体設定を引き継ぎます。`false` を明示すると、全体設定の `true` を上書きします。Bot Token の優先順位は、`projects.<identifier>.slack.bot_token`、`SLACK_BOT_TOKEN`、全体の `slack.bot_token` の順です。チャンネルは、`projects.<identifier>.slack.default_channel_id`、従来の `projects.<identifier>.channel_id`、子自身の名前による自動照合の順に確認します。見つからなければ近い親から同じ順序で確認し、最後に全体の `slack.default_channel_id` を使います。プロジェクトのキーには表示名ではなく Redmine の**識別子**を使います。Token またはチャンネルがない場合、通知は送られずログに記録されます。チャンネル ID は通常、公開チャンネルが `C`、非公開チャンネルが `G` で始まります。プロジェクト固有の Token も Git に含めず、YAML の変更後は Redmine と Sidekiq を再起動してください。
 
-次の例では、プロジェクト固有の Token とチャンネルを使い、コメント通知と Issue のプロジェクト情報を非表示にし、カードの色・見出し・Slack ユーザーの対応付けを変更します。その他の設定は全体設定を引き継ぎます。
+次の動作設定例では、プロジェクト固有の Token とチャンネルを使い、コメント通知と Issue のプロジェクト情報を非表示にし、カードの色・Slack ユーザーの対応付けを変更します。その他の設定は全体設定を引き継ぎます。見出しは別の `slackmine.messages.yml` で変更します。
 
 ```yaml
 projects:
@@ -145,12 +145,19 @@ projects:
       issue:
         comment:
           added: false
+    users:
+      alice: 'U0123456789'
+```
+
+文言ファイルにプロジェクト別の見出しを指定する例です。
+
+```yaml
+projects:
+  agentic:
     messages:
       events:
         issue:
           created: 'New Agentic issue'
-    users:
-      alice: 'U0123456789'
 ```
 
 ## イベントの切り替え
@@ -413,7 +420,7 @@ slack:
 
 `description: true` でカードに説明文を表示します。空欄は非表示、1,000文字を超える場合は省略します。右ペインの説明全文は従来どおりです。
 
-表示文言の既定値は英語です。`messages.work_objects` でボタン・編集画面・エラー文言、`messages.fields` で編集項目名、`messages.values.unassigned` で未割当表示を変更できます。全キーを設定例に掲載しています。`edit_title` と `edit_failed` は `%{id}` を使用できます。Slack自身が表示する標準項目名・メニューはSlackの言語設定に従います。
+表示文言の既定値は英語です。`messages.work_objects` でボタン・編集画面・エラー文言、`messages.fields` で編集項目名、`messages.values.unassigned` で未割当表示を変更できます。全キーを[文言の設定例](config/slackmine.messages.yml.example)に掲載しています。`edit_title` と `edit_failed` は `%{id}` を使用できます。Slack自身が表示する標準項目名・メニューはSlackの言語設定に従います。
 
 カードの「外部サービスで開く」は課題URLを開きます。`messages.work_objects.open_issue: '%{product_name}で開く'` で表示名を指定できます。
 
@@ -736,9 +743,9 @@ slack:
 
 ### 文言とテンプレート
 
-最上位の `messages` ツリーで通知文言・アイコン・色を変更できます。イベントを送るかどうかは制御しません。すべてのキーは任意です。省略した値や空文字列には組み込みの初期値を使います。[設定例](config/slackmine.yml.example)には、使用できるすべてのキーとサンプル値を掲載しています。
+`slackmine.messages.yml` の `messages` ツリーで通知文言・アイコン・色を変更できます。イベントを送るかどうかは制御しません。すべてのキーは任意です。省略した値や空文字列には組み込みの初期値を使います。未知のイベントに使うアイコンは `messages.templates.icon_fallback` で指定できます。[文言の設定例](config/slackmine.messages.yml.example)には、使用できるすべてのキーとサンプル値を掲載しています。
 
-既定文言は [config/slackmine.messages.yml](config/slackmine.messages.yml) にまとめています。変更するときは、自分の `slackmine.yml` の `messages` に指定してください。プロジェクト別の上書きは `projects.<識別子>.messages` に指定でき、Rubyの編集は不要です。スレッド接続の画面・結果通知・エラー・保存する過去会話の見出しは `messages.thread_connections`、Slack引用カードとプレーンテキストの代替表示は `messages.link_cards` で変更できます。既存の `slack.link_cards.link_text` は `messages.link_cards.open` より優先します。
+英語の既定文言は [config/slackmine.messages.yml.example](config/slackmine.messages.yml.example) にまとめています。Redmine固有の日本語は Git 管理対象外の `config/slackmine.messages.yml` に置きます。Redmine 本体の `config` に置いたファイルがプラグイン内のファイルより優先されます。プロジェクト別の上書きは同じファイルの `projects.<識別子>.messages` に指定できます。移行中は旧 `slackmine.yml` 内の `messages` も読み取りますが、新しい文言ファイルの値を優先します。スレッド接続の画面・結果通知・エラー・保存する過去会話の見出しは `messages.thread_connections`、Slack引用カードとプレーンテキストの代替表示は `messages.link_cards` で変更できます。未知のイベント名・関連種別の表示は `messages.templates.event_fallback` と `relation_fallback` で変更できます。旧 `slack.link_cards.link_text` は別ファイルに `messages.link_cards.open` がない場合だけ使います。
 
 ```yaml
 messages:
@@ -1053,7 +1060,7 @@ projects:
 
 担当者は、Issue を閲覧できる有効な Redmine ユーザーであり、`users` または `slack.auto_map_users_by_name` で Slack ユーザーに対応付けられている必要があります。グループ担当者と対応付けのないユーザーはスキップし、ログに記録します。Redmine で担当者に閲覧権限がある場合は、非公開 Issue も本人への DM に含められます。DM 配信には [`chat:write`](https://docs.slack.dev/reference/scopes/chat.write/) と [`im:write`](https://docs.slack.dev/reference/scopes/im.write/) を持つ Bot Token が必要です。プロジェクトのチャンネル ID は使いません。Slack アプリの設定で **App Home → Messages Tab → Display Messages tab** を有効にしてください。有効にしていないと、[`conversations.open`](https://docs.slack.dev/reference/methods/conversations.open/) が成功しても Slack が [`messages_tab_disabled`](https://docs.slack.dev/reference/methods/conversations.open/#errors) を返します。スコープを追加した場合はアプリを再インストールしてください。スケジュールに依存する前に、テスト用の Issue が受信者の Slack DM に表示されることを確認してください。
 
-DM の文言は YAML の `messages.due_reminders` 以下で変更できます。[設定例](config/slackmine.yml.example)にすべてのキーとプレースホルダーを掲載しています。たとえば、他のグループを変更せずに見出しと期限超過グループのラベルを変更できます。
+DM の文言は `slackmine.messages.yml` の `messages.due_reminders` 以下で変更できます。[文言の設定例](config/slackmine.messages.yml.example)にすべてのキーとプレースホルダーを掲載しています。たとえば、他のグループを変更せずに見出しと期限超過グループのラベルを変更できます。
 
 ```yaml
 messages:
@@ -1201,6 +1208,7 @@ ruby -Itest test/thread_comment_feedback_cleanup_test.rb
 
 | バージョン | 主な変更 |
 | --- | --- |
+| **1.4.0** | 配備先固有の文言をGit管理外の文言YAMLへ分離し、英語の既定値を設定例として管理。Slackの直接処理に重複リクエストの抑止、キュー投入失敗時の応答、引用を含むフォーム保存と表示更新の非同期処理を追加しました。 |
 | **1.3.0** | Work Objectの即時表示・軽い操作をWebで処理。URL展開・保存後の更新、App Home一覧、スラッシュコマンド配信、スレッド接続の保存、時間のかかる引用付きフォーム保存をSidekiqで処理。接続先選択後の履歴確認はWebを優先し、2秒を超えた場合にキューへ切り替えます。 |
 | **1.2.2** | 監査・社内規程向けのファイル転送制限を追加。ファイル本体の代わりに元の保存場所へのリンクで連携し、プロジェクト別の例外設定と全体強制に対応しました。 |
 | **1.2.1** | Slackリンクの本文取得・引用保存・カード表示全体と、Redmine画面のカード表示をそれぞれOFFにできる設定を追加。メンションを無効にする設定方法も追記。 |

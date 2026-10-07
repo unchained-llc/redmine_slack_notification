@@ -114,6 +114,39 @@ module Slackmine
     config_paths.first
   end
 
+  def messages_config
+    @messages_config ||= begin
+      path = messages_config_paths.find { |candidate| File.exist?(candidate) }
+      path ? (YAML.safe_load(File.read(path), permitted_classes: [], aliases: false) || {}) : {}
+    rescue StandardError => e
+      Rails.logger&.error("Slackmine: cannot load #{path}: #{e.class}: #{e.message}")
+      {}
+    end
+  end
+
+  def messages_config_paths
+    [
+      (Rails.root.join('config', 'slackmine.messages.yml') if Rails.respond_to?(:root)),
+      File.expand_path('../config/slackmine.messages.yml', __dir__)
+    ].compact
+  end
+
+  def message_settings(project = Thread.current[:slackmine_project])
+    separate = messages_config
+    global = merge_config(message_hash(effective_config(nil)['messages']), message_hash(separate['messages']))
+    return global unless project
+
+    legacy_project = message_hash(project_config(project)['messages'])
+    separate_projects = separate['projects']
+    separate_project = separate_projects[project.identifier.to_s] if separate_projects.is_a?(Hash)
+    separate_project = message_hash(separate_project['messages']) if separate_project.is_a?(Hash)
+    merge_config(global, merge_config(legacy_project, message_hash(separate_project)))
+  end
+
+  def message_hash(value)
+    value.is_a?(Hash) ? value : {}
+  end
+
   def project_config(project)
     return {} unless project
 

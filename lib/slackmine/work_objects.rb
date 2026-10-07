@@ -543,46 +543,15 @@ module Slackmine
                                  priority_id: priority, due_date: due_date, comment: comment, description: description, reply: reply)
         end
         Rails.logger&.info("Slackmine: Work Object interaction issue=#{issue.id} result=#{outcome}")
-        if modal && AppHome::FILTERS.include?(context['app_home'])
-          begin
-            notice = work_object_message('edit_failed', id: issue.id) unless %i[saved unchanged].include?(outcome)
-            AppHome.publish(app_id, team_id, payload.dig('user', 'id'), context['app_home'], notice: notice)
-          rescue StandardError => e
-            Rails.logger&.warn("Slackmine: App Home refresh failed issue=#{issue.id} #{e.class}")
-          end
-        end
-        if (outcome == :saved || outcome == :unchanged) && context['is_ephemeral'] != true &&
-           context['channel_id'].to_s.match?(/\A[CDG][A-Z0-9]+\z/) &&
-           context['message_ts'].to_s.match?(/\A\d+\.\d+\z/)
-          issue.reload
-          card = Formatter.issue_payload(issue, actor: viewer, action: 'updated')
-          begin
-            token = Slackmine.bot_token(issue.project)
-            original = Slackmine.slack_api('conversations.replies', {
-              'channel' => context['channel_id'], 'ts' => context['message_ts'], 'limit' => 1
-            }, token, form: true).fetch('messages').first
-            raise 'Original message text unavailable' unless original && original['ts'] == context['message_ts'] &&
-                                                            original['text'].to_s != ''
-            update = { 'channel' => context['channel_id'], 'ts' => context['message_ts'],
-                       'text' => original['text'], 'metadata' => card['metadata'] }
-            update['blocks'] = original['blocks'] if original['blocks'].is_a?(Array) && original['blocks'].any?
-            Slackmine.slack_api('chat.update', update, token, form: true)
-          rescue StandardError => e
-            # A failed Slack refresh must not retry a completed Redmine write.
-            Rails.logger&.warn("Slackmine: card refresh failed issue=#{issue.id} #{e.class}")
-          end
-        end
         if modal || source['type'] == 'message_attachment'
-          if outcome != :saved && outcome != :unchanged && context['channel_id'].to_s.match?(/\A[CDG][A-Z0-9]+\z/)
-            begin
-              Slackmine.slack_api('chat.postEphemeral', {
-                'channel' => context['channel_id'], 'user' => payload.dig('user', 'id'),
-                'text' => work_object_message('edit_failed', id: issue.id)
-              }, Slackmine.bot_token(issue.project))
-            rescue StandardError => e
-              Rails.logger&.warn("Slackmine: edit error notice failed issue=#{issue.id} #{e.class}")
-            end
-          end
+          enqueue_refresh(app_id, team_id, issue.id, payload.dig('user', 'id'), context, outcome, true)
+          return
+        end
+        if payload['deferred'] == true
+          enqueue_refresh(app_id, team_id, issue.id, payload.dig('user', 'id'), context, outcome, false)
+          notice = %i[saved unchanged].include?(outcome) ? Formatter.message('commands', 'background_saved') :
+            work_object_message('edit_failed', id: issue.id)
+          Slackmine.slack_api('chat.postMessage', { 'channel' => payload.dig('user', 'id'), 'text' => notice }, Slackmine.bot_token(issue.project))
           return
         end
         trigger = payload['trigger_id'].to_s
@@ -597,9 +566,60 @@ module Slackmine
           request['error'] = { 'status' => 'edit_error', 'custom_message' => Formatter.message('work_objects', 'operation_failed') }
         end
         Slackmine.slack_api('entity.presentDetails', request, token, form: true)
+        enqueue_refresh(app_id, team_id, issue.id, payload.dig('user', 'id'), context, outcome, false)
       end
     rescue JSON::ParserError
       nil
+    end
+
+    def enqueue_refresh(app, team, issue_id, slack_user, context, outcome, modal)
+      fields = context.slice('channel_id', 'message_ts', 'is_ephemeral', 'app_home')
+      job = SlackmineWorkObjectRefreshJob.perform_later(app, team, issue_id, slack_user, fields, outcome.to_s, modal)
+      Rails.logger&.warn("Slackmine: Work Object refresh enqueue failed issue=#{issue_id}") unless job
+    rescue StandardError => e
+      # The Issue may already be saved. Never re-run the incoming interaction.
+      Rails.logger&.warn("Slackmine: Work Object refresh enqueue failed issue=#{issue_id} #{e.class}")
+    end
+
+    def refresh_after_interaction(app, team, issue_id, slack_user, context, outcome, modal)
+      issue = Issue.find_by(id: issue_id)
+      return unless issue && integration_for(app, team, project: issue.project)
+      Slackmine.with_project(issue.project) do
+        viewer = viewer_for(slack_user)
+        return unless viewer && issue.visible?(viewer)
+        success = %w[saved unchanged].include?(outcome)
+        if modal && AppHome::FILTERS.include?(context['app_home'])
+          begin
+            notice = work_object_message('edit_failed', id: issue.id) unless success
+            AppHome.publish(app, team, slack_user, context['app_home'], notice: notice)
+          rescue StandardError => e
+            Rails.logger&.warn("Slackmine: App Home refresh failed issue=#{issue.id} #{e.class}")
+          end
+        end
+        if success && !issue.is_private? && context['is_ephemeral'] != true &&
+           context['channel_id'].to_s.match?(/\A[CDG][A-Z0-9]+\z/) &&
+           context['message_ts'].to_s.match?(/\A\d+\.\d+\z/)
+          begin
+            token = Slackmine.bot_token(issue.project)
+            original = Slackmine.slack_api('conversations.replies', {
+              'channel' => context['channel_id'], 'ts' => context['message_ts'], 'limit' => 1
+            }, token, form: true).fetch('messages').first
+            raise 'Original message text unavailable' unless original && original['ts'] == context['message_ts'] && original['text'].to_s != ''
+            update = { 'channel' => context['channel_id'], 'ts' => context['message_ts'],
+                       'text' => original['text'], 'metadata' => Formatter.issue_payload(issue, actor: viewer, action: 'updated')['metadata'] }
+            update['blocks'] = original['blocks'] if original['blocks'].is_a?(Array) && original['blocks'].any?
+            Slackmine.slack_api('chat.update', update, token, form: true)
+          rescue StandardError => e
+            Rails.logger&.warn("Slackmine: card refresh failed issue=#{issue.id} #{e.class}")
+          end
+        end
+        if modal && !success && context['channel_id'].to_s.match?(/\A[CDG][A-Z0-9]+\z/)
+          Slackmine.slack_api('chat.postEphemeral', {
+            'channel' => context['channel_id'], 'user' => slack_user,
+            'text' => work_object_message('edit_failed', id: issue.id)
+          }, Slackmine.bot_token(issue.project))
+        end
+      end
     end
 
     def valid_date?(value)
