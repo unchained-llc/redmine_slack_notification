@@ -18,3 +18,4 @@ The feature examples use fictional data and selected supported configuration. Th
 | App Home | `AppHome.view`, `add_group` | All sections has four tables; one caption each; Subject/Status/Assignee/Due date/Edit issue; project under subject; adjacent selector and Refresh. |
 | User mapping | YAML example; `WorkObjects.viewer_for`, `viewer_by_email` | YAML illustration; distinguish incoming email authorization from outgoing name matching. |
 | Email preference | `config/locales/en.yml` and personal preference hook | Exact checkbox and help wording; account/security emails unaffected; delivery success is not checked. |
+| Administration | `SlackmineAdminController`, `slackmine_admin/index.html.erb`, `_jobs.html.erb`, `AdminOverview`, `JobMonitor` | Two separate tab examples, read-only setting/default/current columns, gray descriptions, bold changes, square color swatches; Sidekiq-only queues/history/test button; no settings editor or task retry/delete controls. |

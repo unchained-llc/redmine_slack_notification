@@ -4,7 +4,7 @@
 
 ![Slackmine — Slack and Redmine integration](docs/assets/slackmine-icon.png)
 
-Version **1.4.0**.
+Version **1.5.0**.
 
 The plugin was renamed from **Redmine Event Notifications for Slack** (`redmine_slack_notification`) to **Slackmine** as it grew from notifications into a broader Slack–Redmine integration. Internal names, plugin ID, configuration filename and endpoints now use `slackmine`; the former names are no longer supported.
 
@@ -31,10 +31,11 @@ The plugin provides notifications, Work Object actions, and optional slash comma
 | [App Home issue lists](#app-home-issue-lists) | View open issues updated by you, due this week, assigned to you, or reported by you. Five-column tables show title/project, status, assignee, due date, and edit actions. Filters refresh automatically; titles open Redmine and buttons open permitted Slack edit/comment forms. |
 | [User mapping](#assignee-mentions) | Map Redmine users to Slack IDs explicitly; optionally match names for outgoing mentions or [email addresses for incoming authorization](#match-viewers-by-email). Actions still enforce Redmine permissions and workflow rules. |
 | [Personal email preference](#personal-email-preference) | Let each user opt out of supported notification emails when Slack notification settings and channel membership qualify. Account/security emails remain enabled; Slack delivery success is not checked. |
+| [Administration screen](#administration-overview) | Inspect effective settings, event colors, project/channel routing and user mentions. Queue monitoring, execution history and test notifications are available only when using Sidekiq. |
 
 Work Object previews/actions, slash commands, thread integration, and reminders require their respective configuration and Slack app scopes/events. The personal email option is off by default. See each linked section for setup and limits.
 
-The images below illustrate supported feature content and controls using fictional English data. They are not live screenshots or pixel-exact reproductions of Slack; surrounding navigation is omitted, and configuration examples show YAML rather than a settings GUI. Both language versions share the same images.
+The images below illustrate supported feature content and controls using fictional English data. They are not live screenshots or pixel-exact reproductions of Slack; surrounding navigation is omitted, and notification configuration examples show YAML, while the administration illustration shows the supported read-only settings view. Both language versions share the same images.
 
 See the [Slack scopes and feature setup tables](#slack-scopes-and-feature-setup) for the permissions and app settings needed by each feature.
 
@@ -1096,6 +1097,18 @@ Membership is checked synchronously using [`conversations.members`](https://docs
 
 This option checks notification configuration and channel membership, **not Slack delivery success**. It adds no delivery-coordination job: if a later Slack post fails, a skipped email is not sent as a fallback. It also does not change Redmine's existing mail notification selection; disabling the checkbox restores that selection.
 
+## Administration overview
+
+![Slackmine administration: current settings and Sidekiq tasks](docs/images/features/administration.webp)
+
+Queue monitoring, execution history and test notifications are available **only when the ActiveJob adapter is Sidekiq**. Other adapters keep their existing notification behavior; queue/history information is unavailable and the test button is disabled. The **Queue and tasks** tab inspects pending, running, scheduled, retry and dead jobs. The latest 100 Slackmine execution attempts are recorded for up to seven days after installation; historical completed jobs cannot be reconstructed. History uses the existing Sidekiq Redis/Valkey instance at `slackmine:admin:job_history:v1`; no Redmine database tables are added. Only job names, IDs, outcomes, timestamps, durations and exception classes are stored, without job arguments, message bodies or credentials. Selecting a project changes the test destination; task monitoring remains global across Slackmine jobs. Job completion does not guarantee delivery for regular notifications. The administrator-only test button enqueues one message to the displayed destination, revalidates that destination before posting, and uses the same Slack queue. It requires Sidekiq and valid Bot/channel settings. Each job set is scanned up to 500 entries and truncated results are marked.
+
+Administrator labels and descriptions are kept in `config/locales/slackmine_admin.ja.yml` and `config/locales/slackmine_admin.en.yml`, following the Redmine UI language. They are separate from Slack notification wording in `slackmine.messages.yml`.
+
+Administrators can open **Administration → Slackmine** (`/admin/slackmine`) to inspect loaded settings with localized key descriptions, project/channel routing, and active users' Slack mention targets. The settings and user tabs support selecting a project to apply its overrides. Projects can be filtered by status and default to active projects. The settings table combines each key with a gray description beneath it, followed by the built-in default and current value. Current values that differ from code defaults are bold, including multiline values, and can be filtered with Changed values only. Valid color codes include a small square swatch, and effective event colors have a separate section. Context-dependent defaults show their values and conditions rather than being compared against a single value. Routing uses the existing parent-project inheritance and automatic matching; user mentions use the same login/email mappings and automatic name matching as notifications. The user list defaults to mapped users and offers Mapped, Unmapped, and All filters. Selecting a project restricts the list to its active members. Filtering occurs before pagination (50 entries per page). The user tab also shows configured mapping entries, including entries without an active Redmine account.
+
+Settings and mappings are read-only; test notifications are sent through an explicit administrator action. Credentials are masked, including the effective Bot Token after environment-variable precedence. Message wording includes built-in defaults and the separate message file; omitted operational keys continue to use code defaults and are not listed. Automatic matching may make read-only Slack API calls and reuse caches for up to 10 minutes. The channel list does not verify event enablement or successful delivery. Missing configuration files are identified on the screen to distinguish an unloaded configuration from an unmapped account or default English wording. Restart web/worker processes after editing configuration files to refresh loaded settings.
+
 ## Delivery and operations
 
 `SlackmineNotificationJob` is enqueued after the Redmine event on the `slack` ActiveJob queue. For Sidekiq, include that queue in its configuration, for example:
@@ -1182,6 +1195,7 @@ The repository's local test suite can be run with:
 
 ```bash
 ruby -Itest test/image_notification_test.rb
+ruby -Itest test/admin_controller_test.rb
 ruby -Itest test/standard_notifications_test.rb
 ruby -Itest test/slack_events_controller_test.rb
 ruby -Itest test/slash_commands_cache_test.rb
@@ -1195,6 +1209,11 @@ ruby -Itest test/thread_comment_feedback_cleanup_test.rb
 ```
 
 These tests exercise notification formatting and delivery logic with stubs. Additionally, run `ruby -Itest test/thread_connections_test.rb` for signed Slack connection state, previews, and reply routing. Run `ruby -Itest test/thread_comments_persistence_test.rb` where ActiveRecord and sqlite3 are available to check persistence, duplicate suppression, permission denial, and notification-loop suppression using in-memory Issue/Journal fixture tables. Run `ruby -Itest test/notification_transactions_test.rb` separately with ActiveRecord and sqlite3 to verify commit/rollback behavior for Issue deletion and generic notification models. See [notification audit](#notification-coverage-and-verification) for the coverage matrix and remaining runtime checks. These tests do not connect to production databases or Redis, post to Slack, or verify a live Redmine installation.
+
+The administration overview's ERB rendering and HTML escaping can also be checked with `ruby -Itest test/admin_view_test.rb` where ActionView is available. These tests do not verify a running Redmine 7 administration page.
+
+Job monitoring, bounded history and test-notification destination checks can be verified with `ruby -Itest test/job_monitor_test.rb`. These tests use adapters and do not send real Slack messages.
+
 
 ## Notification coverage and verification
 
@@ -1240,6 +1259,7 @@ version numbers are editorial labels, not a record of published releases or Git 
 
 | Version | Highlights |
 | --- | --- |
+| **1.5.0** | Add the localized Slackmine administration screen for effective settings, event-color swatches, project/channel routing and user mentions. Add Sidekiq-only queue monitoring, bounded execution history and test notifications. |
 | **1.4.0** | Separate display wording from operational settings and add a Japanese wording example. Improve duplicate-operation handling and failure responses for Slack interactions. |
 | **1.3.0** | Process Work Object details and short actions in the Web process; queue URL unfurls, post-save refreshes, App Home lists, slash command delivery, connection saves, and quote-heavy form saves. Review thread history in the Web process first, falling back to Sidekiq after two seconds. |
 | **1.2.2** | Added file-transfer restrictions for audit and internal policies: use source links instead of transferring files, allow per-project exceptions, or enforce the restriction globally. |

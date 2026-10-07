@@ -1,0 +1,31 @@
+<p><%= l(:text_slackmine_admin_jobs) %></p>
+<% if @job_snapshot[:available] %>
+  <p><%= l(:text_slackmine_admin_queue_summary, count: @job_snapshot[:queue_size], seconds: @job_snapshot[:latency].round(1)) %></p>
+  <% if @job_snapshot[:truncated] %><p class="warning"><%= l(:text_slackmine_admin_jobs_truncated) %></p><% end %>
+  <% [[@job_snapshot[:entries], :label_slackmine_admin_jobs_current], [@job_snapshot[:history], :label_slackmine_admin_jobs_history]].each do |entries, title| %>
+    <h3><%= l(title) %></h3>
+    <% if entries.empty? %><p class="nodata"><%= l(:label_no_data) %></p><% else %>
+      <div class="autoscroll"><table class="list">
+        <thead><tr><% %w[job state time duration error].each do |column| %><th><%= l("label_slackmine_admin_job_#{column}") %></th><% end %></tr></thead>
+        <tbody><% entries.each do |entry| %><tr>
+          <td class="text" style="text-align: left"><code><%= entry['job'] %></code><em class="info"><%= entry['id'] %></em></td>
+          <td><%= l("label_slackmine_admin_job_#{entry['status']}") %></td>
+          <% timestamp = entry['finished_at'] || entry['timestamp']; timestamp = timestamp.to_f / (timestamp.to_f > 100_000_000_000 ? 1000 : 1) if timestamp %>
+          <td><%= format_time(Time.at(timestamp)) if timestamp %></td>
+          <td><%= l(:text_slackmine_admin_job_seconds, seconds: entry['duration'].round(2)) if entry['duration'] %></td>
+          <td><%= entry['error'] %></td>
+        </tr><% end %></tbody>
+      </table></div>
+    <% end %>
+  <% end %>
+<% else %>
+  <p class="warning"><%= l(:text_slackmine_admin_jobs_unavailable) %></p>
+<% end %>
+<h3><%= l(:label_slackmine_admin_test_notification) %></h3>
+<p><%= l(:text_slackmine_admin_test_hint) %></p>
+<p><%= l(:label_slackmine_admin_channel) %>: <code><%= @test_channel.presence || l(:label_slackmine_admin_unset) %></code></p>
+<%= form_tag slackmine_admin_test_notification_path, method: :post do %>
+  <%= hidden_field_tag :scope_project_id, @scope_project&.id %>
+  <%= hidden_field_tag :expected_channel, @test_channel %>
+  <%= submit_tag l(:label_slackmine_admin_test_notification), disabled: !@test_ready, data: { confirm: l(:text_slackmine_admin_test_confirm, channel: @test_channel) } %>
+<% end %>

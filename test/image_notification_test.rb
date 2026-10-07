@@ -104,6 +104,8 @@ class PresenceValue < String
 end
 
 class ApplicationJob
+  def self.around_perform(*)
+  end
   def self.queue_as(*)
   end
 

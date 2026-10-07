@@ -608,6 +608,8 @@ require_relative 'slackmine/thread_connections'
 require_relative 'slackmine/app_home'
 require_relative 'slackmine/comment_threads'
 require_relative 'slackmine/channel_matching'
+require_relative 'slackmine/admin_overview'
+require_relative 'slackmine/job_monitor'
 require_relative 'slackmine/mail_preference'
 
 
@@ -615,6 +617,7 @@ module Slackmine
   module_function
 
   def install_patches
+    ApplicationJob.include Slackmine::JobTracking if defined?(ApplicationJob) && !(ApplicationJob < Slackmine::JobTracking)
     if defined?(ApplicationHelper) && !(ApplicationHelper < Slackmine::LinkCardsHelper)
       ApplicationHelper.prepend Slackmine::LinkCardsHelper
     end

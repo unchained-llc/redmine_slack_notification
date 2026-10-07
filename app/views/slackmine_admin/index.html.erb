@@ -1,0 +1,125 @@
+<h2><%= l(:label_slackmine_admin) %></h2>
+<% if @missing_configuration && @missing_configuration.any? %>
+  <div class="warning"><%= l(:text_slackmine_admin_missing_configuration) %> <%= @missing_configuration.join(', ') %></div>
+<% end %>
+
+<div class="tabs">
+  <ul>
+    <% %w[settings projects users jobs].each do |tab| %>
+      <li><%= link_to l("label_slackmine_admin_#{tab}"), slackmine_admin_path(tab: tab, scope_project_id: @scope_project&.id), class: (@tab == tab ? 'selected' : nil) %></li>
+    <% end %>
+  </ul>
+</div>
+
+<% if @tab != 'projects' %>
+  <%= form_tag slackmine_admin_path, method: :get do %>
+    <%= hidden_field_tag :tab, @tab %>
+    <p>
+      <%= label_tag :scope_project_id, l(:label_project) %>
+      <%= select_tag :scope_project_id, options_for_select([[l(:label_slackmine_admin_global), '']] + @scope_projects, @scope_project&.id) %>
+      <% if @tab == 'users' %>
+        <%= label_tag :mapping_filter, l(:label_slackmine_admin_filter) %>
+        <%= select_tag :mapping_filter, options_for_select(%w[mapped unmapped all].map { |filter| [l("label_slackmine_admin_filter_#{filter}"), filter] }, @mapping_filter) %>
+      <% end %>
+      <% if @tab == 'settings' %>
+        <%= check_box_tag :changes_only, '1', @changes_only %>
+        <%= label_tag :changes_only, l(:label_slackmine_admin_changes_only) %>
+      <% end %>
+      <%= submit_tag l(:button_apply), name: nil %>
+    </p>
+  <% end %>
+<% end %>
+
+<% if @tab == 'settings' %>
+  <p><%= l(:text_slackmine_admin_settings) %></p>
+  <p><%= l(:text_slackmine_admin_defaults) %></p>
+  <% comparison = Slackmine::AdminOverview.comparison(@settings) %>
+  <% if @changes_only && comparison.values.flatten.none? { |entry| entry[:changed] } %>
+    <p class="nodata"><%= l(:label_no_data) %></p>
+  <% end %>
+  <% comparison.each do |group, entries| %>
+    <% entries = entries.select { |entry| entry[:changed] } if @changes_only %>
+    <% next if entries.empty? %>
+    <details <%= 'open' unless group == 'messages' %>>
+      <summary><strong><%= group %></strong></summary>
+      <div class="autoscroll">
+        <table class="list" style="table-layout: fixed; width: 100%">
+          <% widths = group == 'messages' ? [30, 35, 35] : [70, 15, 15] %>
+          <colgroup><% widths.each do |width| %><col style="width: <%= width %>%"><% end %></colgroup>
+          <thead><tr><th style="text-align: left"><%= l(:label_slackmine_admin_key) %></th><th><%= l(:label_slackmine_admin_default) %></th><th><%= l(:label_slackmine_admin_current) %></th></tr></thead>
+          <tbody>
+            <% entries.each do |entry| %>
+              <tr>
+                <td class="text" style="text-align: left; vertical-align: top; overflow-wrap: anywhere"><code><%= entry[:key] %></code><em class="info"><%= Slackmine::AdminOverview.description(entry[:key]) { |label, **options| l(label, **options) } %> <%= Slackmine::AdminOverview.default_rule(entry[:key]) { |label| l(label) } %></em></td>
+                <td style="overflow-wrap: anywhere; <%= 'text-align: left; vertical-align: top;' if group == 'messages' %>"><% if Slackmine::AdminOverview.color?(entry[:default]) %><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><rect width="12" height="12" fill="<%= entry[:default] %>" /></svg> <% end %><span style="<%= 'white-space: pre-wrap;' if group == 'messages' %>"><%= entry[:default].nil? ? l(:label_slackmine_admin_unset) : entry[:default] == :conditional ? Slackmine::AdminOverview.conditional_default(entry[:key]) { |label, **options| l(label, **options) } : entry[:default] == :unknown ? l(:label_slackmine_admin_default_unknown) : Slackmine::AdminOverview.display(entry[:default]) %></span></td>
+                <td style="overflow-wrap: anywhere; <%= 'text-align: left; vertical-align: top;' if group == 'messages' %>">
+                  <% if Slackmine::AdminOverview.color?(entry[:value]) %><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><rect width="12" height="12" fill="<%= entry[:value] %>" /></svg> <% end %>
+                  <% if entry[:changed] %><strong style="<%= 'white-space: pre-wrap;' if group == 'messages' %>"><%= Slackmine::AdminOverview.display(entry[:value]) %></strong>
+                  <% else %><span style="<%= 'white-space: pre-wrap;' if group == 'messages' %>"><%= Slackmine::AdminOverview.display(entry[:value]) %></span><% end %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    </details>
+  <% end %>
+<% elsif @tab == 'jobs' %>
+  <%= render partial: 'slackmine_admin/jobs' %>
+<% elsif @tab == 'projects' %>
+  <%= form_tag slackmine_admin_path, method: :get do %>
+    <%= hidden_field_tag :tab, 'projects' %>
+    <p>
+      <%= label_tag :project_status, l(:field_status) %>
+      <%= select_tag :project_status, options_for_select([[l(:project_status_active), '1'], [l(:project_status_closed), '5'], [l(:project_status_archived), '9'], [l(:project_status_scheduled_for_deletion), '10'], [l(:label_slackmine_admin_filter_all), 'all']], @project_status) %>
+      <%= submit_tag l(:button_apply), name: nil %>
+    </p>
+  <% end %>
+  <p><%= l(:text_slackmine_admin_projects) %></p>
+  <div class="autoscroll">
+    <table class="list">
+      <thead><tr><th><%= l(:label_project) %></th><th><%= l(:field_identifier) %></th><th><%= l(:field_status) %></th><th><%= l(:label_slackmine_admin_channel) %></th><th><%= l(:label_slackmine_admin_settings) %></th></tr></thead>
+      <tbody>
+        <% @projects.each do |project| %>
+          <% channel = Slackmine.channel_id(project) %>
+          <tr>
+            <td><%= link_to project.name, project_path(project) %></td>
+            <td><%= project.identifier %></td>
+            <td><%= l({1 => :project_status_active, 5 => :project_status_closed, 9 => :project_status_archived, 10 => :project_status_scheduled_for_deletion}.fetch(project.status, :label_none)) %></td>
+            <td><%= channel.presence || l(:label_slackmine_admin_unmapped) %></td>
+            <td><%= link_to l(:button_show), slackmine_admin_path(scope_project_id: project.id) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+<% else %>
+  <p><%= l(:text_slackmine_admin_users) %></p>
+  <div class="autoscroll">
+    <table class="list">
+      <thead><tr><th><%= l(:label_user) %></th><th><%= l(:field_login) %></th><th><%= l(:field_mail) %></th><th><%= l(:label_slackmine_admin_mention) %></th></tr></thead>
+      <tbody>
+        <% @users.each do |user| %>
+          <tr><td><%= link_to user.name, user_path(user) %></td><td><%= user.login %></td><td><%= user.mail %></td><td><%= @mentions[user.id] ? "<@#{@mentions[user.id]}>" : l(:label_slackmine_admin_unmapped) %></td></tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+  <% if @users.empty? %><p class="nodata"><%= l(:label_no_data) %></p><% end %>
+  <details>
+    <summary><%= l(:label_slackmine_admin_mapping) %></summary>
+    <table class="list">
+      <thead><tr><th><%= l(:label_slackmine_admin_key) %></th><th><%= l(:label_slackmine_admin_value) %></th></tr></thead>
+      <tbody>
+        <% @user_mapping.each do |key, value| %>
+          <tr><td><%= key %></td><td><%= Slackmine::AdminOverview.display(value) %></td></tr>
+        <% end %>
+      </tbody>
+    </table>
+  </details>
+<% end %>
+
+<% if @pages %>
+  <span class="pagination"><%= pagination_links_full @pages, @count, per_page_links: false %></span>
+<% end %>
+<% html_title l(:label_slackmine_admin) %>

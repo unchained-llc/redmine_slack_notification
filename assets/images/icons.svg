@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" class="icon--sprite">
+  <defs>
+    <symbol id="icon--slackmine" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 3l-4 18m12 -18l-4 18m-10 -13h17m-19 8h17"/>
+    </symbol>
+  </defs>
+</svg>
