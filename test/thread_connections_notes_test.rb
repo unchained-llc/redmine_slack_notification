@@ -25,8 +25,10 @@ class ThreadConnectionsNotesTest < Minitest::Test
     end
   end
 
-  def persist
-    Slackmine.stub(:config, { 'slack' => { 'thread_connections' => true, 'thread_comments' => false, 'bot_token' => 'token' } }) do
+  def persist(messages = {})
+    settings = { 'slack' => { 'thread_connections' => true, 'thread_comments' => false, 'bot_token' => 'token' },
+                 'messages' => { 'thread_connections' => messages } }
+    Slackmine.stub(:config, settings) do
       Slackmine.stub(:slack_api, ->(method, body, *) {
         @calls << method
         { 'permalink' => "https://example.slack.com/archives/C123/p#{body['message_ts'].delete('.')}" }
@@ -57,5 +59,13 @@ class ThreadConnectionsNotesTest < Minitest::Test
     assert_equal :duplicate, persist
     assert_equal 1, @stored.size
     assert_empty @calls
+  end
+
+  def test_configured_history_heading_preserves_speakers_and_deduplication
+    assert_equal :saved, persist('history_heading' => 'Conversation imported before connection')
+    assert_includes @journal.notes, 'Conversation imported before connection'
+    assert_equal ['Alice', 'Bob'], Slackmine::LinkQuotes.blocks(@journal.notes).map { |_, card| card['author'] }
+    assert_equal :duplicate, persist('history_heading' => 'A different heading after configuration changes')
+    assert_equal 1, @stored.size
   end
 end

@@ -555,6 +555,61 @@ messages:
     saved: '✅ Comment added to Redmine #%{id}.'
     restricted: '⚠️ Could not add the comment. Check the user mapping, Issue permissions and state, and text length.'
     image_failed: '⚠️ The reply was not saved. Check file size, file access, and the files:read bot scope.'
+  # Connection dialogs, feedback, saved history heading, and quote-card labels.
+  thread_connections:
+    title: スレッドをチケットに接続
+    close: 閉じる
+    loading_picker: このスレッドの接続設定を確認しています…
+    unsupported_source: ユーザーの対応付けとチャンネルを確認してください。DMには対応していません。
+    destination: 接続先
+    disconnect: 接続を解除
+    save_history: これまでの会話も保存する
+    picker_hint: 接続するチケット番号を入力してください。確認画面で過去の発言を選べます。
+    issue_number: チケット番号
+    history: 過去の会話
+    review: 内容を確認
+    invalid_review: 確認情報が無効です。メニューからやり直してください。
+    issue_denied: チケットが見つからないか、接続する権限がありません。
+    loading_preview: チケットとスレッドの内容を確認しています…
+    destination_number: 接続先チケット番号
+    save_post: この発言を保存する
+    import: 取り込み
+    connect: 接続する
+    preview_failed: 確認できませんでした。権限・Botの参加・スコープを確認してください。過去分は人の発言20件、スレッド全体は1000件までです。メニューからやり直せます。
+    denied: 操作する権限がありません。
+    destination_changed: 接続先を変える場合はメニューからやり直してください。
+    review_incomplete: 確認が完了していません。
+    connected: このスレッドを接続しました。以後の返信・添付を保存します。
+    disconnected: 接続を解除しました。保存済みコメントは残ります。
+    already_connected: 既に別の接続が設定されています。メニューから確認してください。
+    connection_conflict: 別の接続が先に設定されました。メニューから確認してください。
+    attachment_only: "[添付ファイル]"
+    operation_failed: 処理を完了できませんでした。確認後に会話が変わった場合は、接続を解除してから再確認してください。管理者はSlackキューの失敗ジョブも確認できます。
+    current_connection: 'このスレッドは #%{id} に接続されています。解除しても保存済みコメントは残ります。'
+    preview_hint: |-
+      #%{id} %{subject}
+      過去分はあなたの名義の1件の引用コメントにまとめます。保存する発言を選んでください。確認中に届いた返信も権限に応じて保存します。
+    post_preview: |-
+      %{author} · %{timestamp}
+      %{text}
+      添付: %{count}件
+    history_heading: Slackスレッドから取り込み（接続前の会話）
+  link_cards:
+    open: Open in Slack
+    parent_open: Open parent message in Slack
+    thread_reply: "↳ Thread reply"
+    reply_count: "%{count} thread replies"
+    plain_parent: |
+      Thread parent: %{author}
+      %{text}
+
+      Thread reply
+    plain_quote: |-
+      Slack — %{author} · #%{channel} · %{timestamp}
+      %{urls}
+      %{prefix}%{text}
+    unknown_author: Slack
+    compact_open: Slack ↗
   due_reminders:
     # Omit a key to use its built-in default. Projects can override keys under
     # projects.<identifier>.messages.due_reminders.

@@ -90,7 +90,7 @@ module Slackmine
       end
     end
 
-    def plain_source(text)
+    def plain_source(text, project: Thread.current[:slackmine_project])
       source = text.to_s.dup
       if source.encoding == Encoding::ASCII_8BIT && source.dup.force_encoding(Encoding::UTF_8).valid_encoding?
         source.force_encoding(Encoding::UTF_8)
@@ -100,8 +100,8 @@ module Slackmine
         card = decode(match[1], match[3])
         next raw unless card
         parent = card['parent']
-        prefix = parent ? "Thread parent: #{parent['author']}\n#{parent['text']}\n\nThread reply\n" : ''
-        "Slack — #{card['author']} · ##{card['channel']} · #{card['timestamp']}\n#{Array(card['source_urls'] || card['url']).join("\n")}\n#{prefix}#{card['text']}"
+        prefix = parent ? LinkCards.link_message('plain_parent', project: project, author: parent['author'], text: parent['text']) : ''
+        LinkCards.link_message('plain_quote', project: project, author: card['author'], channel: card['channel'], timestamp: card['timestamp'], urls: Array(card['source_urls'] || card['url']).join("\n"), prefix: prefix, text: card['text'])
       end
     end
 

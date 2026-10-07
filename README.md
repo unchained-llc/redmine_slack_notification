@@ -753,6 +753,29 @@ To share a newly uploaded private file with the channel, the plugin posts a temp
 
 The top-level `messages` tree changes notification wording, icons, and colors; it does not control whether an event is sent. All keys are optional. Omitted or empty strings use built-in defaults. The [example YAML](config/slackmine.yml.example) lists every available key with sample values:
 
+Default wording is stored in [config/slackmine.messages.yml](config/slackmine.messages.yml). Customize it through `messages` in your `slackmine.yml`; project overrides belong under `projects.<identifier>.messages`. No Ruby changes are needed. Thread connection dialogs, feedback, errors, and the saved history heading use `messages.thread_connections`. Slack quote cards and their plain-text fallbacks use `messages.link_cards`. Existing `slack.link_cards.link_text` overrides continue to take precedence over `messages.link_cards.open`.
+
+```yaml
+messages:
+  thread_connections:
+    title: Connect a thread
+    close: Close
+    connect: Connect
+    connected: This thread is connected. Future replies and attachments will be saved.
+    history_heading: Conversation imported before connection
+  link_cards:
+    open: Open in Slack
+    parent_open: Open parent message in Slack
+    reply_count: '%{count} thread replies'
+projects:
+  example:
+    messages:
+      thread_connections:
+        connect: Connect to this project
+```
+
+The initial dialog uses global wording because no Issue has been selected yet. Once the Issue is known, dialogs and feedback use its project's overrides. Keep each template's `%{...}` placeholders as shown in the default YAML. Invalid placeholders fall back to the default template. Changing the saved history heading affects new imports; existing comments are retained.
+
 | Group | Controls |
 | --- | --- |
 | `messages.events` | Visible event labels such as `Issue updated` |
@@ -766,6 +789,8 @@ The top-level `messages` tree changes notification wording, icons, and colors; i
 | `messages.images` | Temporary preview wording, alt text, and fallback link label |
 | `messages.templates` | Visible Issue-update heading and plain-text attachment fallbacks |
 | `messages.due_reminders` | Daily DM headings, labels, relative timing, and fallbacks |
+| `messages.thread_connections` | Connection dialogs, feedback, errors, and saved history heading |
+| `messages.link_cards` | Quote-card links, thread context, and plain-text fallback templates |
 
 An Issue update heading uses the Redmine user who made the update. Its default format is `🔄 Alice *Issue updated*` in Slack markup. You can change the text after the icon without editing the plugin:
 

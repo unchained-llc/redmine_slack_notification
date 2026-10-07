@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'time'
+require 'yaml'
 
 module Slackmine
   module Formatter
@@ -25,176 +26,13 @@ module Slackmine
     ISSUE_OPTIONAL_METADATA_KEYS = %w[status assignee author target_version start_date due_date
                                       estimated_hours done_ratio parent_issue children relations
                                       custom_fields attachments watchers].freeze
-    DEFAULT_MESSAGES = {
-      'app_home' => {
-        'title' => 'My issues', 'all' => 'All sections', 'my' => 'Assigned to me',
-        'reported' => 'Reported by me', 'updated' => 'Updated by me',
-        'this_week' => 'Due this week', 'refresh' => 'Refresh', 'detail' => 'Open details',
-        'open' => 'Open in Redmine', 'empty' => 'No open issues.',
-        'unmapped' => 'Your Slack account is not linked to an active Redmine user.',
-        'limit' => 'Up to 10 open issues per section. Open details or refresh to get current data.'
-      },
-      'commands' => {
-        'project' => 'Project',
-        'continue' => 'Continue',
-        'message_project' => 'Choose a project (up to 100). The next form includes the selected message and its source link.',
-        'source_message' => 'Source Slack message',
-        'message_expired' => 'This form expired. Open the message shortcut again.',
-        'message_retry' => 'Could not retrieve the source link. Please retry.',
-        'processing' => 'This submission is still processing. Check the issue before retrying.',
-        'full_form' => 'Open the full form in Redmine',
-        'help' => <<~HELP.strip,
-          *%{command} — Issue commands*
-          • `%{command} my` — Your assigned open issues (up to 10).
-          • `%{command} due` — Your overdue issues and issues due within 3 days (up to 10).
-          • `%{command} reminders` — Your personal due-reminder digest, using the configured reminder window. No day argument.
-          • `%{command} search words` — Search issue subjects (up to 10).
-          • `%{command} 123` — Show one issue; automatically use a card when Work Object previews are configured.
-          • `%{command} new [project-identifier]` — Choose a project and open the issue creation form.
-          • `%{command} comment 123` — Open the comment form from the returned button. Enter the comment in the form.
-          • `%{command} status 123 [status name or ID]` — Change status directly, or omit the value to open a picker.
-          • `%{command} assign 123 [user login, name, or ID]` — Change assignee directly. Use me or none; omit the value to open a picker.
-          • `%{command} help` — Show this help.
-
-          Results are visible only to you. Lists use the reminder format; a single result uses a card when configured.
-        HELP
-        'denied' => 'Not available. Check your account mapping, permissions, and configuration.',
-        'empty' => 'No matching results.',
-        'results' => 'Issues (up to 10 results)',
-        'choose_project' => 'Choose a project (up to 20). Use new <project identifier> to narrow the list.',
-        'my' => 'My issues',
-        'search' => 'Search results',
-        'due' => 'Due soon',
-        'reminders' => 'My due reminders',
-        'reminders_empty' => 'No due reminders for you with the current reminder settings.',
-        'new' => 'New issue',
-        'comment' => 'Add comment',
-        'status' => 'Change status',
-        'assign' => 'Change assignee',
-        'updated' => 'Issue updated.',
-        'unchanged' => 'The issue already has that value.',
-        'no_match' => 'No unique permitted match. Use an ID or choose from the returned button.',
-        'save' => 'Save',
-        'cancel' => 'Cancel',
-        'tracker' => 'Tracker',
-        'subject' => 'Subject',
-        'description' => 'Description',
-      },
-      'work_objects' => {
-        'product_name' => 'Redmine', 'display_type' => 'Issue',
-        'edit_issue' => 'Edit issue',
-        'change_assignee' => 'Change assignee',
-        'open_issue' => 'Open %{product_name}',
-        'assign_to_me' => 'Assign to me',
-        'start_work' => 'Start work',
-        'complete_work' => 'Complete work',
-        'log_time' => 'Log time',
-        'watch_settings' => 'Watch settings',
-        'watching' => 'You are watching this issue.',
-        'not_watching' => 'You are not watching this issue.',
-        'watch' => 'Watch',
-        'unwatch' => 'Unwatch',
-        'add_comment' => 'Add comment',
-        'reply' => 'Reply',
-        'reply_hint' => 'Return to the most recent former assignee and add a comment. If reassignment is unavailable, only the comment is added.',
-        'comment_placeholder' => 'Enter a comment',
-        'edit_title' => 'Edit issue #%{id}',
-        'save' => 'Save',
-        'cancel' => 'Cancel',
-        'edit_failed' => 'Could not update issue #%{id}. Check your permissions and the current state.',
-        'operation_failed' => 'Could not perform this action. Check your permissions and the current state.'
-      },
-      'thread_notifications' => {
-        'added_header' => '%{product_name} #%{id}: New comment',
-        'updated_header' => '%{product_name} #%{id}: Comment updated',
-        'deleted_header' => '%{product_name} #%{id}: Comment deleted'
-      },
-      'thread_comments' => {
-        'saved' => '✅ Comment added to Redmine #%{id}.',
-        'restricted' => '⚠️ Could not add the comment. Check the user mapping, Issue permissions and state, and text length.',
-        'image_failed' => '⚠️ The reply was not saved. Check file size, file access, and the files:read bot scope.'
-      },
-      'events' => {
-        'document' => { 'created' => 'Document created', 'updated' => 'Document updated', 'deleted' => 'Document deleted' },
-        'file' => { 'added' => 'File added', 'updated' => 'File updated', 'deleted' => 'File deleted' },
-        'message' => { 'posted' => 'Message posted', 'updated' => 'Message updated', 'deleted' => 'Message deleted' },
-        'issue' => { 'created' => 'Issue created', 'updated' => 'Issue updated', 'deleted' => 'Issue deleted' },
-        'comment' => { 'added' => 'Comment added', 'updated' => 'Comment updated', 'deleted' => 'Comment deleted' },
-        'wiki' => { 'created' => 'Wiki page created', 'updated' => 'Wiki page updated', 'deleted' => 'Wiki page deleted' },
-        'news' => { 'created' => 'News created', 'updated' => 'News updated', 'deleted' => 'News deleted' },
-        'news_comment' => { 'added' => 'News comment added', 'updated' => 'News comment updated', 'deleted' => 'News comment deleted' },
-        'time_entry' => { 'created' => 'Time entry created', 'updated' => 'Time entry updated', 'deleted' => 'Time entry deleted' },
-        'version' => { 'created' => 'Version created', 'updated' => 'Version updated', 'deleted' => 'Version deleted' },
-        'project' => { 'updated' => 'Project updated' }
-      },
-      'icons' => {
-        'document' => { 'created' => '📄', 'updated' => '✏️', 'deleted' => '🗑️' },
-        'file' => { 'added' => '📎', 'updated' => '✏️', 'deleted' => '🗑️' },
-        'message' => { 'posted' => '💬', 'updated' => '✏️', 'deleted' => '🗑️' },
-        'issue' => { 'created' => '🆕', 'updated' => '🔄', 'deleted' => '🗑️' },
-        'comment' => { 'added' => '💬', 'updated' => '💬', 'deleted' => '🗑️' },
-        'wiki' => { 'created' => '📚', 'updated' => '✏️', 'deleted' => '🗑️' },
-        'news' => { 'created' => '📰', 'updated' => '📰', 'deleted' => '🗑️' },
-        'news_comment' => { 'added' => '💬', 'updated' => '✏️', 'deleted' => '🗑️' },
-        'time_entry' => { 'created' => '⏱️', 'updated' => '⏱️', 'deleted' => '🗑️' },
-        'version' => { 'created' => '🏷️', 'updated' => '🏷️', 'deleted' => '🗑️' },
-        'project' => { 'updated' => '🗂️' }
-      },
-      'sections' => {
-        'content' => 'Content', 'comment' => 'Comment', 'summary' => 'Summary', 'changes' => 'Changes',
-        'metadata' => 'Metadata', 'added_comment' => 'Added comment', 'updated_comment' => 'Updated comment',
-        'description' => 'Description', 'body' => 'Body'
-      },
-      'fields' => {
-        'project' => 'Project', 'updater' => 'Updated by', 'poster' => 'Posted by', 'tracker' => 'Tracker',
-        'category' => 'Category', 'priority' => 'Priority', 'status' => 'Status', 'assignee' => 'Assignee',
-        'target_version' => 'Target version', 'parent_issue' => 'Parent issue', 'child_issue' => 'Child issue',
-        'subject' => 'Subject', 'description' => 'Description', 'start_date' => 'Start date', 'due_date' => 'Due date',
-        'attachment' => 'Attachment', 'relation' => 'Related issue (%{type})', 'location' => 'Changed location',
-        'hours' => 'Hours', 'spent_on' => 'Spent on', 'author' => 'Author',
-        'estimated_hours' => 'Estimated hours', 'done_ratio' => 'Done ratio', 'last_comment' => 'Last comment',
-        'children' => 'Child issues', 'relations' => 'Related issues',
-        'attachments' => 'Attachments', 'watchers' => 'Watchers',
-        'custom_fields' => 'Custom fields'
-      },
-      'relations' => {
-        'relates' => 'Related', 'duplicates' => 'Duplicates', 'duplicated' => 'Duplicated by', 'blocks' => 'Blocks',
-        'blocked' => 'Blocked by', 'precedes' => 'Precedes', 'follows' => 'Follows', 'copied_to' => 'Copied to',
-        'copied_from' => 'Copied from'
-      },
-      'values' => { 'unknown_user' => 'Unknown user', 'unknown' => 'Unknown', 'unset' => 'Not set',
-                    'unassigned' => 'Unassigned', 'none' => 'None', 'empty' => '(empty)', 'added' => 'Added', 'removed' => 'Removed',
-                    'created' => 'created', 'updated' => 'updated', 'deleted' => 'deleted' },
-      'diff' => { 'heading' => '%{label} diff', 'omitted' => 'Diff truncated. See the linked page for the full text.' },
-      'images' => { 'alt' => 'Image', 'link_label' => 'Image: %{name}' },
-      'templates' => {
-        'issue_updated_header' => '%{actor} *%{event}*',
-        'issue_fallback' => '[%{project}] %{actor} %{action} %{tracker} #%{id}: %{subject}',
-        'journal_fallback' => '[%{project}] %{actor} %{event} %{tracker} #%{id}: %{subject}',
-        'generic_fallback' => '%{event} - %{subject}'
-      },
-      'due_reminders' => {
-        'part_suffix' => ' (%{part}/%{total_parts})',
-        'fallback' => 'Due reminders%{suffix}: %{count} total (overdue: %{overdue_count}, due today: %{today_count})',
-        'title' => '📋 *Due reminders: %{count}%{suffix}*',
-        'overdue_label' => '🚨 Overdue',
-        'today_label' => '⏰ Due today',
-        'upcoming_label' => '📅 Due soon',
-        'group_fallback' => '%{label}: %{count}',
-        'group_heading' => '*%{label} (%{count})*',
-        'group_continued' => '*%{label} (continued)*',
-        'overdue_timing' => '%{days}d overdue',
-        'upcoming_timing' => '%{days}d left',
-        'timing_suffix' => ' · %{timing}',
-        'issue_line' => '• <%{url}|#%{id} %{subject}> · %{project}%{timing}'
-      }
-    }.freeze
+    DEFAULT_MESSAGES = YAML.safe_load(File.read(File.expand_path('../../config/slackmine.messages.yml', __dir__))).fetch('messages').freeze
 
     module_function
 
-    def message(*path)
+    def message(*path, project: Thread.current[:slackmine_project])
       default = DEFAULT_MESSAGES.dig(*path)
-      configured = Slackmine.effective_config['messages']
+      configured = Slackmine.effective_config(project)['messages']
       path.each do |key|
         configured = configured.is_a?(Hash) ? configured[key] : nil
       end

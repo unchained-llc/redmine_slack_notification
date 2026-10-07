@@ -260,7 +260,7 @@ module Slackmine
                                          [['thread_ts', item['thread_ts']]])
           uri.to_s
         end
-        notes = history_cards ? 'Slackスレッドから取り込み（接続前の会話）' : urls.join("\n\n")
+        notes = history_cards ? ThreadConnections.message('history_heading', project: issue.project) : urls.join("\n\n")
         User.current = viewer
         journal = issue.init_journal(viewer, notes)
         unless restrict_transfer

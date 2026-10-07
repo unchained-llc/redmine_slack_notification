@@ -88,6 +88,42 @@ class ThreadConnectionsTest < Minitest::Test
     end
   end
 
+  def test_global_messages_customize_the_initial_dialog
+    @settings['messages'] = { 'thread_connections' => {
+      'title' => 'Connect a thread', 'close' => 'Cancel', 'loading_picker' => 'Checking connection' } }
+    context { CONNECTIONS.interaction('ATEST', 'TTEST', @payload) }
+    view = @calls.find { |method, _| method == 'views.open' }.last['view']
+    assert_equal 'Connect a thread', view.dig('title', 'text')
+    assert_equal 'Cancel', view.dig('close', 'text')
+    assert_equal 'Checking connection', view.dig('blocks', 0, 'text', 'text')
+  end
+
+  def test_project_messages_customize_preview_controls_content_and_feedback
+    @settings['messages'] = { 'thread_connections' => { 'title' => 'Global title' } }
+    @settings['projects'] = { 'example' => { 'messages' => { 'thread_connections' => {
+      'title' => 'Review thread', 'close' => 'Dismiss', 'connect' => 'Connect',
+      'preview_hint' => 'Issue %{id}: %{subject}', 'destination_number' => 'Destination',
+      'post_preview' => '%{author}: %{text} (%{count} files)', 'save_post' => 'Keep this post',
+      'import' => 'Selection', 'connected' => 'Connected successfully', 'preview_failed' => 'Cannot review' } } } }
+    context do
+      view = preview
+      assert_equal 'Review thread', view.dig('title', 'text')
+      assert_equal 'Dismiss', view.dig('close', 'text')
+      assert_equal 'Connect', view.dig('submit', 'text')
+      assert_equal 'Issue 7: Example issue', view.dig('blocks', 0, 'text', 'text')
+      assert_equal 'Destination', view.dig('blocks', 1, 'label', 'text')
+      assert_equal 'Alice: Parent message (0 files)', view.dig('blocks', 2, 'text', 'text')
+      assert_equal 'Keep this post', view.dig('blocks', 3, 'element', 'options', 0, 'text', 'text')
+      assert_equal 'Selection', view.dig('blocks', 3, 'label', 'text')
+      CONNECTIONS.post_marker('ATEST', 'TTEST', @source, active: true)
+      assert_includes @calls.last.last['text'], 'Connected successfully'
+      CONNECTIONS.preview_error('V123', StandardError.new, project: @issue.project)
+      assert_equal 'Cannot review', @calls.last.last.dig('view', 'blocks', 0, 'text', 'text')
+      @settings['projects']['example']['messages']['thread_connections']['preview_hint'] = '%{missing}'
+      assert_includes CONNECTIONS.message('preview_hint', project: @issue.project, id: 7, subject: 'Example'), '#7 Example'
+    end
+  end
+
   def test_shortcut_ack_only_opens_loading_modal_and_queues_work
     context do
       assert_equal({}, CONNECTIONS.interaction('ATEST', 'TTEST', @payload))

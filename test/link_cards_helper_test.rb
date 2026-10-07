@@ -286,6 +286,32 @@ class LinkCardsHelperTest < Minitest::Test
     end
   end
 
+  def test_project_wording_is_shared_by_web_mail_and_plain_quotes_and_escaped
+    card = { 'author' => 'Alice', 'channel' => 'example', 'timestamp' => '2026-10-07T01:00:00Z',
+             'text' => 'Reply', 'thread_reply' => true, 'parent_url' => LinkCardsTest::URL,
+             'parent' => { 'author' => 'Bob', 'text' => 'Parent', 'timestamp' => '2026-10-07T00:00:00Z' } }
+    settings = { 'messages' => { 'link_cards' => { 'open' => 'Global link' } },
+                 'projects' => { 'example' => { 'messages' => { 'link_cards' => {
+                   'open' => '<script>Open & read</script>', 'thread_reply' => '<b>Reply</b>',
+                   'parent_open' => 'Read parent', 'reply_count' => '%{count} replies here',
+                   'plain_parent' => "Parent by %{author}: %{text}\n",
+                   'plain_quote' => "%{author} in %{channel}\n%{prefix}%{text}" } } } } }
+    Slackmine.stub(:config, settings) do
+      [nil, '<img class="slackmine-mail-icon" src="slackmine-bundled-logo.png">'].each do |icon|
+        doc = Nokogiri::HTML.fragment(Slackmine::LinkCards.render_card(card, LinkCardsTest::URL, @issue.project, icon_html: icon))
+        assert_equal '<script>Open & read</script>', doc.at_css('.slackmine-link-card > a').text
+        assert_equal '<b>Reply</b>', doc.at_css('.slackmine-thread-label').text
+        assert_equal 'Read parent', doc.at_css('.slackmine-thread-parent a').text
+        assert_empty doc.css('script, b')
+      end
+      root = card.merge('thread_reply' => false, 'reply_count' => 3)
+      doc = Nokogiri::HTML.fragment(Slackmine::LinkCards.render_card(root, LinkCardsTest::URL, @issue.project))
+      assert_equal '3 replies here', doc.at_css('.slackmine-thread-label').text
+      encoded = Slackmine::LinkQuotes.encode(card, LinkCardsTest::URL)
+      assert_equal "Alice in example\nParent by Bob: Parent\nReply", Slackmine::LinkQuotes.plain_source(encoded, project: @issue.project)
+    end
+  end
+
   def test_mail_cards_can_be_disabled_without_hiding_quote_text_or_web_cards
     card = { 'author' => 'Example', 'channel' => 'example', 'timestamp' => '2026-10-05T00:00:00Z', 'text' => '*Saved message*' }
     url = LinkCardsTest::URL

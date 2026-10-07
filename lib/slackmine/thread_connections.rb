@@ -75,6 +75,11 @@ module Slackmine
         left.bytes.zip(right.bytes).reduce(0) { |n, (a, b)| n | (a ^ b) }.zero?
     end
 
+    def message(key, project: nil, **values)
+      Formatter.interpolate(Formatter.message('thread_connections', key, project: project), values,
+                            fallback: Formatter::DEFAULT_MESSAGES.dig('thread_connections', key))
+    end
+
     def section(text)
       { 'type' => 'section', 'text' => { 'type' => 'plain_text', 'text' => text[0, 3000] } }
     end
@@ -84,9 +89,9 @@ module Slackmine
         'label' => { 'type' => 'plain_text', 'text' => label }, 'element' => element.merge('action_id' => id) }
     end
 
-    def modal(blocks, app: nil, team: nil, source: nil, callback: nil, submit: nil)
-      view = { 'type' => 'modal', 'title' => { 'type' => 'plain_text', 'text' => 'スレッドをチケットに接続' },
-               'close' => { 'type' => 'plain_text', 'text' => '閉じる' }, 'blocks' => blocks }
+    def modal(blocks, project: nil, app: nil, team: nil, source: nil, callback: nil, submit: nil)
+      view = { 'type' => 'modal', 'title' => { 'type' => 'plain_text', 'text' => message('title', project: project) },
+               'close' => { 'type' => 'plain_text', 'text' => message('close', project: project) }, 'blocks' => blocks }
       if source
         view['private_metadata'] = signed_source(app, team, source)
         raise 'Preview metadata exceeds Slack limit' if view['private_metadata'].bytesize > 3000
@@ -129,11 +134,11 @@ module Slackmine
       if valid
         source = { 'channel' => channel, 'ts' => ts, 'slack_user' => payload.dig('user', 'id'),
                    'user_id' => viewer.id, 'nonce' => SecureRandom.hex(16) }
-        loading = modal([section('このスレッドの接続設定を確認しています…')])
+        loading = modal([section(message('loading_picker'))])
         result = Slackmine.slack_api('views.open', { 'trigger_id' => payload['trigger_id'], 'view' => loading }, Slackmine.bot_token(nil))
         SlackmineThreadConnectionJob.set(wait: 1).perform_later(app, team, source, result.dig('view', 'id'), 'picker')
       else
-        Slackmine.slack_api('views.open', { 'trigger_id' => payload['trigger_id'], 'view' => modal([section('ユーザーの対応付けとチャンネルを確認してください。DMには対応していません。')]) }, Slackmine.bot_token(nil))
+        Slackmine.slack_api('views.open', { 'trigger_id' => payload['trigger_id'], 'view' => modal([section(message('unsupported_source'))]) }, Slackmine.bot_token(nil))
       end
       {}
     end
@@ -229,30 +234,30 @@ module Slackmine
         issue = Issue.find_by(id: current['issue_id'])
         raise 'Permission denied' unless allowed?(issue, viewer, app, team)
         source = source.merge(current).merge('disconnect' => true)
-        view = modal([section("このスレッドは ##{issue.id} に接続されています。解除しても保存済みコメントは残ります。"),
-          input('issue', '接続先', { 'type' => 'plain_text_input', 'initial_value' => issue.id.to_s })],
-          app: app, team: team, source: source, callback: SAVE_CALLBACK, submit: '接続を解除')
+        view = modal([section(message('current_connection', project: issue.project, id: issue.id)),
+          input('issue', message('destination', project: issue&.project), { 'type' => 'plain_text_input', 'initial_value' => issue.id.to_s })],
+          project: issue&.project, app: app, team: team, source: source, callback: SAVE_CALLBACK, submit: message('disconnect', project: issue&.project))
       else
-        option = { 'text' => { 'type' => 'plain_text', 'text' => 'これまでの会話も保存する' }, 'value' => 'history' }
-        view = modal([section('接続するチケット番号を入力してください。確認画面で過去の発言を選べます。'),
-          input('issue', 'チケット番号', { 'type' => 'plain_text_input' }),
-          input('history', '過去の会話', { 'type' => 'checkboxes', 'options' => [option], 'initial_options' => [option] }, optional: true)],
-          app: app, team: team, source: source, callback: PICK_CALLBACK, submit: '内容を確認')
+        option = { 'text' => { 'type' => 'plain_text', 'text' => message('save_history', project: issue&.project) }, 'value' => 'history' }
+        view = modal([section(message('picker_hint', project: issue&.project)),
+          input('issue', message('issue_number', project: issue&.project), { 'type' => 'plain_text_input' }),
+          input('history', message('history', project: issue&.project), { 'type' => 'checkboxes', 'options' => [option], 'initial_options' => [option] }, optional: true)],
+          project: issue&.project, app: app, team: team, source: source, callback: PICK_CALLBACK, submit: message('review', project: issue&.project))
       end
       update_view(view_id, view)
     rescue StandardError => e
-      preview_error(view_id, e)
+      preview_error(view_id, e, project: issue&.project)
     end
 
     def pick(app, team, viewer, payload)
       source = source_for(app, team, viewer, payload)
-      return error('確認情報が無効です。メニューからやり直してください。') unless source
+      return error(message('invalid_review')) unless source
       id = state(payload, 'issue')['value'].to_s.strip.sub(/\A#/, '')
       issue = Issue.find_by(id: id) if id.match?(/\A[1-9]\d*\z/)
-      return error('チケットが見つからないか、接続する権限がありません。') unless allowed?(issue, viewer, app, team)
+      return error(message('issue_denied', project: issue&.project)) unless allowed?(issue, viewer, app, team)
       source = source.merge('issue_id' => issue.id, 'history' => Array(state(payload, 'history')['selected_options']).any? { |o| o['value'] == 'history' }, 'cutoff' => timestamp_now)
       SlackmineThreadConnectionJob.set(wait: 1).perform_later(app, team, source, payload.dig('view', 'id'), 'preview')
-      { 'response_action' => 'update', 'view' => modal([section('チケットとスレッドの内容を確認しています…')]) }
+      { 'response_action' => 'update', 'view' => modal([section(message('loading_preview', project: issue.project))], project: issue.project) }
     end
 
     def prepare_preview(app, team, source, view_id)
@@ -269,40 +274,40 @@ module Slackmine
       raise 'Past conversation exceeds 20 human posts' if messages.size > MAX_HISTORY
       cache = {}
       call = lambda { |method, body| cache[[method, body]] ||= Slackmine.slack_api(method, body, Slackmine.bot_token(nil), form: true) }
-      blocks = [section("##{issue.id} #{issue.subject}\n過去分はあなたの名義の1件の引用コメントにまとめます。保存する発言を選んでください。確認中に届いた返信も権限に応じて保存します。"),
-                input('issue', '接続先チケット番号', { 'type' => 'plain_text_input', 'initial_value' => issue.id.to_s })]
+      blocks = [section(message('preview_hint', project: issue.project, id: issue.id, subject: issue.subject)),
+                input('issue', message('destination_number', project: issue&.project), { 'type' => 'plain_text_input', 'initial_value' => issue.id.to_s })]
       source = source.merge('posts' => messages.map { |m| [m['ts'], fingerprint(m)] }, 'ready' => true)
       messages.each_with_index do |m, index|
         card = LinkCards.message_card(m, call)
         text = MessageShortcuts.message_text(m)
         raise 'A post exceeds 10000 characters' if text.length > 10_000
-        preview = "#{card['author']} · #{card['timestamp']}\n#{text}\n添付: #{Array(m['files']).size}件"
+        preview = message('post_preview', project: issue.project, author: card['author'], timestamp: card['timestamp'], text: text, count: Array(m['files']).size)
         preview.scan(/.{1,2900}/m).each { |part| blocks << section(part) }
-        option = { 'text' => { 'type' => 'plain_text', 'text' => 'この発言を保存する' }, 'value' => index.to_s }
-        blocks << input("post_#{index}", '取り込み', { 'type' => 'checkboxes', 'options' => [option], 'initial_options' => [option] }, optional: true)
+        option = { 'text' => { 'type' => 'plain_text', 'text' => message('save_post', project: issue&.project) }, 'value' => index.to_s }
+        blocks << input("post_#{index}", message('import', project: issue&.project), { 'type' => 'checkboxes', 'options' => [option], 'initial_options' => [option] }, optional: true)
       end
       raise 'Preview exceeds Slack block limit' if blocks.size > 100
-      update_view(view_id, modal(blocks, app: app, team: team, source: source, callback: SAVE_CALLBACK, submit: '接続する'))
+      update_view(view_id, modal(blocks, project: issue.project, app: app, team: team, source: source, callback: SAVE_CALLBACK, submit: message('connect', project: issue&.project)))
     rescue StandardError => e
-      preview_error(view_id, e)
+      preview_error(view_id, e, project: issue&.project)
     end
 
     def update_view(view_id, view)
       Slackmine.slack_api('views.update', { 'view_id' => view_id, 'view' => view }, Slackmine.bot_token(nil))
     end
 
-    def preview_error(view_id, error)
+    def preview_error(view_id, error, project: nil)
       Rails.logger&.warn("Slackmine: connection preview failed: #{error.class}")
-      update_view(view_id, modal([section('確認できませんでした。権限・Botの参加・スコープを確認してください。過去分は人の発言20件、スレッド全体は1000件までです。メニューからやり直せます。')]))
+      update_view(view_id, modal([section(message('preview_failed', project: project))], project: project))
     end
 
     def save(app, team, viewer, payload)
       source = source_for(app, team, viewer, payload)
-      return error('確認情報が無効です。メニューからやり直してください。') unless source
+      return error(message('invalid_review')) unless source
       issue = Issue.find_by(id: source['issue_id'])
-      return error('操作する権限がありません。') unless allowed?(issue, viewer, app, team)
-      return error('接続先を変える場合はメニューからやり直してください。') unless state(payload, 'issue')['value'].to_s == issue.id.to_s
-      return error('確認が完了していません。') unless source['disconnect'] || source['ready']
+      return error(message('denied', project: issue&.project)) unless allowed?(issue, viewer, app, team)
+      return error(message('destination_changed', project: issue&.project)) unless state(payload, 'issue')['value'].to_s == issue.id.to_s
+      return error(message('review_incomplete', project: issue&.project)) unless source['disconnect'] || source['ready']
       selected = Array(source['posts']).each_with_index.select do |_, index|
         Array(state(payload, "post_#{index}")['selected_options']).any? { |o| o['value'] == index.to_s }
       end.map(&:first)
@@ -317,7 +322,7 @@ module Slackmine
       block_id = MARKER_PREFIX + encoded + ':' + signature(app, team, source['channel'], source['ts'], encoded)
       raise 'Marker exceeds Slack limit' if block_id.length > 255
       text = "<#{Formatter.url("/issues/#{issue.id}")}|##{issue.id}> " +
-             (active ? 'このスレッドを接続しました。以後の返信・添付を保存します。' : '接続を解除しました。保存済みコメントは残ります。')
+             (active ? message('connected', project: issue&.project) : message('disconnected', project: issue&.project))
       Slackmine.slack_api('chat.postMessage', { 'channel' => source['channel'], 'thread_ts' => source['ts'], 'text' => text,
         'blocks' => [{ 'type' => 'section', 'block_id' => block_id, 'text' => { 'type' => 'mrkdwn', 'text' => text } }],
         'unfurl_links' => false, 'unfurl_media' => false }, Slackmine.bot_token(nil))
@@ -343,7 +348,7 @@ module Slackmine
       end
       return if closed
       if current && current['active'] && current['nonce'] != source['nonce']
-        return failure_notice(source, '既に別の接続が設定されています。メニューから確認してください。')
+        return failure_notice(source, message('already_connected', project: issue&.project))
       end
       selected = Array(source['posts']).map do |ts, digest|
         message = messages.find { |m| m['ts'] == ts }
@@ -358,7 +363,7 @@ module Slackmine
         unless current && current['active'] && current['nonce'] == source['nonce']
           # Only remove the losing confirmation created by this job.
           Slackmine.slack_api('chat.delete', { 'channel' => source['channel'], 'ts' => posted['ts'] }, Slackmine.bot_token(nil)) if ThreadComments.posted_at(posted['ts'])
-          return failure_notice(source, '別の接続が先に設定されました。メニューから確認してください。')
+          return failure_notice(source, message('connection_conflict', project: issue&.project))
         end
       end
       cache = {}
@@ -366,7 +371,7 @@ module Slackmine
       entries = selected.map do |m|
         card = LinkCards.message_card(m, call).merge('channel' => channel_info['name'] || source['channel'],
           'text' => MessageShortcuts.message_text(m), 'thread_connection_nonce' => source['nonce'])
-        card['text'] = '[添付ファイル]' if card['text'].empty?
+        card['text'] = message('attachment_only', project: issue&.project) if card['text'].empty?
         { 'event' => snapshot(m).merge('channel' => source['channel'], 'thread_ts' => source['ts']), 'card' => card }
       end
       Slackmine.with_project(issue.project) do
@@ -384,7 +389,7 @@ module Slackmine
       end
     rescue StandardError => e
       Rails.logger&.error("Slackmine: connection operation failed: #{e.class}")
-      failure_notice(source, '処理を完了できませんでした。確認後に会話が変わった場合は、接続を解除してから再確認してください。管理者はSlackキューの失敗ジョブも確認できます。')
+      failure_notice(source, message('operation_failed', project: issue&.project))
       raise
     end
 

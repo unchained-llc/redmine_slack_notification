@@ -147,7 +147,7 @@ module Slackmine
         names[id] = channel['name']
       end
       avatar = nil unless avatar.to_s.match?(%r{\Ahttps://[^/]+/})
-      { 'author' => author.to_s.empty? ? 'Slack' : author, 'avatar' => avatar,
+      { 'author' => author.to_s.empty? ? Formatter.message('link_cards', 'unknown_author') : author, 'avatar' => avatar,
         'text' => text, 'names' => names, 'timestamp' => Time.at(message['ts'].to_f).utc.iso8601 }
     end
 

@@ -41,7 +41,7 @@ module Slackmine
         quote_urls[token] = group.size == 1 ? (card['source_urls'] || card['url']) :
                             group.flat_map { |_, entry| Array(entry['source_urls'] || entry['url']) }
         replacements[token] = if options[:formatting] == false || !render_cards
-                                %(<span style="white-space: pre-wrap">#{SlackMarkup.escape(group.map { |source, _| LinkQuotes.plain_source(source) }.join("\n\n"))}</span>)
+                                %(<span style="white-space: pre-wrap">#{SlackMarkup.escape(group.map { |source, _| LinkQuotes.plain_source(source, project: issue.project) }.join("\n\n"))}</span>)
                               else
                                 LinkCards.render_card(card, card['url'], issue.project,
                                                       time_formatter: time_formatter, icon_html: mail_icon)
@@ -53,7 +53,7 @@ module Slackmine
       unless replacements.empty?
         fragment = Nokogiri::HTML.fragment(html.to_s)
         quote_paragraphs = fragment.css('p').select { |node| replacements.keys.any? { |token| node.text.include?(token) } }
-        LinkCards.place_saved_cards(fragment, replacements, quote_urls) if render_cards
+        LinkCards.place_saved_cards(fragment, replacements, quote_urls, project: issue.project) if render_cards
         fragment.xpath('.//text()').each do |node|
           next unless replacements.keys.any? { |token| node.text.include?(token) }
           pieces = node.text.split(/(#{Regexp.union(replacements.keys)})/)
@@ -188,7 +188,7 @@ module Slackmine
       fragment.to_html
     end
 
-    def place_saved_cards(fragment, replacements, quote_urls)
+    def place_saved_cards(fragment, replacements, quote_urls, project: Thread.current[:slackmine_project])
       quote_urls.each do |token, url|
         anchors = fragment.css('a[href]').select do |anchor|
           next false if anchor.ancestors.any? { |node| %w[pre code].include?(node.name) || node['class'].to_s.split.include?('slackmine-link-card') }
@@ -202,7 +202,7 @@ module Slackmine
           if url.is_a?(Array)
             replace_link_with_card(anchor, '')
           else
-            anchor.content = 'Slack ↗' if anchor.text == anchor['href']
+            anchor.content = link_message('compact_open', project: project) if anchor.text == anchor['href']
           end
         end
       end
@@ -231,10 +231,15 @@ module Slackmine
       %(<span class="slackmine-link-card-header" style="display: block; font-size: .9em">#{content}</span>)
     end
 
+    def link_message(key, project: Thread.current[:slackmine_project], **values)
+      Formatter.interpolate(Formatter.message('link_cards', key, project: project), values,
+                            fallback: Formatter::DEFAULT_MESSAGES.dig('link_cards', key))
+    end
+
     def render_card(card, url, project, time_formatter: nil, icon_html: nil)
       text = SlackMarkup.render(card['text'], card['names'] || {})
       link_text = Slackmine.effective_config(project).dig('slack', 'link_cards', 'link_text')
-      link_text = 'Open in Slack' unless link_text.is_a?(String) && !link_text.strip.empty?
+      link_text = link_message('open', project: project) unless link_text.is_a?(String) && !link_text.strip.empty?
       link_text = SlackMarkup.escape(link_text)
       label = if icon_html
                 %(<span class="slackmine-mail-link-layout" style="display: inline-table; vertical-align: middle; border-collapse: collapse"><span style="display: table-cell; vertical-align: middle; padding-right: 6px; line-height: 0">#{icon_html}</span><span style="display: table-cell; vertical-align: middle; line-height: 20px; white-space: nowrap">#{link_text}</span></span>)
@@ -243,15 +248,15 @@ module Slackmine
               end
       context = +''
       if card['thread_reply']
-        context << %(<span class="slackmine-thread-label" style="display: block; font-size: .85em; margin-bottom: 8px">↳ Thread reply</span>)
+        context << %(<span class="slackmine-thread-label" style="display: block; font-size: .85em; margin-bottom: 8px">#{SlackMarkup.escape(link_message('thread_reply', project: project))}</span>)
         if (parent = card['parent'])
           parent = parent.merge('channel' => card['channel'])
-          context << %(<span class="slackmine-thread-parent" style="display: block; padding: 10px 12px; margin-bottom: 12px; border-left: 2px solid #aaa; font-size: .9em">#{header(parent, time_formatter, mail: !icon_html.nil?)}<span class="slackmine-link-card-text" style="display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0">#{SlackMarkup.render(parent['text'].to_s[0, 500], parent['names'] || {})}</span>#{SlackMarkup.link(card['parent_url'], 'Open parent message in Slack')}</span>)
+          context << %(<span class="slackmine-thread-parent" style="display: block; padding: 10px 12px; margin-bottom: 12px; border-left: 2px solid #aaa; font-size: .9em">#{header(parent, time_formatter, mail: !icon_html.nil?)}<span class="slackmine-link-card-text" style="display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0">#{SlackMarkup.render(parent['text'].to_s[0, 500], parent['names'] || {})}</span>#{SlackMarkup.link(card['parent_url'], link_message('parent_open', project: project))}</span>)
         else
-          context << SlackMarkup.link(card['parent_url'], 'Open parent message in Slack')
+          context << SlackMarkup.link(card['parent_url'], link_message('parent_open', project: project))
         end
       elsif card['reply_count'].to_i > 0
-        context << %(<span class="slackmine-thread-label" style="display: block; font-size: .85em; margin-bottom: 8px">#{card['reply_count'].to_i} thread replies</span>)
+        context << %(<span class="slackmine-thread-label" style="display: block; font-size: .85em; margin-bottom: 8px">#{SlackMarkup.escape(link_message('reply_count', project: project, count: card['reply_count'].to_i))}</span>)
       end
       %(<span class="slackmine-link-card" style="--slack-card-color: #{color(project)}; display: block; box-sizing: border-box; margin: .7em 0; padding: 14px 16px; max-width: 680px; border: 1px solid #d9d9e3; border-left: 4px solid #{color(project)}; border-radius: 8px; background: transparent; color: inherit">#{context}#{header(card, time_formatter, mail: !icon_html.nil?)}<span class="slackmine-link-card-text" style="display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0">#{text}</span>#{SlackMarkup.link(url, label).sub('<a ', '<a style="display: inline-block; margin-top: 6px; font-weight: 700" ')}</span>)
     end

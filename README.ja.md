@@ -732,6 +732,29 @@ slack:
 
 最上位の `messages` ツリーで通知文言・アイコン・色を変更できます。イベントを送るかどうかは制御しません。すべてのキーは任意です。省略した値や空文字列には組み込みの初期値を使います。[設定例](config/slackmine.yml.example)には、使用できるすべてのキーとサンプル値を掲載しています。
 
+既定文言は [config/slackmine.messages.yml](config/slackmine.messages.yml) にまとめています。変更するときは、自分の `slackmine.yml` の `messages` に指定してください。プロジェクト別の上書きは `projects.<識別子>.messages` に指定でき、Rubyの編集は不要です。スレッド接続の画面・結果通知・エラー・保存する過去会話の見出しは `messages.thread_connections`、Slack引用カードとプレーンテキストの代替表示は `messages.link_cards` で変更できます。既存の `slack.link_cards.link_text` は `messages.link_cards.open` より優先します。
+
+```yaml
+messages:
+  thread_connections:
+    title: スレッドをチケットに接続
+    close: 閉じる
+    connect: 接続する
+    connected: このスレッドを接続しました。以後の返信・添付を保存します。
+    history_heading: Slackスレッドから取り込み（接続前の会話）
+  link_cards:
+    open: Slackで開く
+    parent_open: 親メッセージをSlackで開く
+    reply_count: '%{count}件の返信'
+projects:
+  example:
+    messages:
+      thread_connections:
+        connect: このプロジェクトに接続
+```
+
+接続先が未選択の最初の画面には全体設定を使い、チケットが確定した後の画面や結果通知にはそのプロジェクトの設定を適用します。テンプレートの `%{...}` は既定YAMLに記載された名前を使ってください。無効なプレースホルダーは既定テンプレートに戻ります。過去会話の見出し変更は新しい取り込みに適用し、保存済みコメントは維持します。
+
 | グループ | 設定対象 |
 | --- | --- |
 | `messages.events` | `Issue updated` などのイベント名 |
@@ -745,6 +768,8 @@ slack:
 | `messages.images` | 一時プレビューの文言、代替テキスト、リンクのラベル |
 | `messages.templates` | Issue 更新時の見出しと、attachment のプレーンテキスト代替表示 |
 | `messages.due_reminders` | 毎日の DM の見出し、ラベル、相対日数、代替表示 |
+| `messages.thread_connections` | 接続画面・結果通知・エラー・保存する過去会話の見出し |
+| `messages.link_cards` | 引用カードのリンク・スレッド表示・プレーンテキストの代替テンプレート |
 
 Issue の更新通知の見出しには、更新した Redmine ユーザーを使います。Slack マークアップでの初期形式は `🔄 Alice *Issue updated*` です。プラグインを編集せずに、アイコンの後の文言を変更できます。
 
