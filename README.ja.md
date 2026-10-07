@@ -4,7 +4,7 @@
 
 ![Slackmine — SlackとRedmineの連携](docs/assets/slackmine-icon.png)
 
-バージョン **1.2.1**。
+バージョン **1.2.2**。
 
 通知機能からSlackとRedmineの統合へ機能が広がったため、**Redmine Event Notifications for Slack**（`redmine_slack_notification`）から **Slackmine** に改名しました。内部名・プラグインID・設定ファイル名・エンドポイントも `slackmine` に統一し、旧名の互換対応は設けていません。
 
@@ -601,7 +601,9 @@ Bot自身の発言と、人がBotやアプリのユーザーに `@メンショ�
 
 Slack 側では非公開チャンネル用の Bot Token スコープ [`groups:history`](https://docs.slack.dev/reference/scopes/groups.history/) とイベント [`message.groups`](https://docs.slack.dev/reference/events/message.groups/) を追加してください。公開チャンネルの場合は [`channels:history`](https://docs.slack.dev/reference/scopes/channels.history/) と [`message.channels`](https://docs.slack.dev/reference/events/message.channels/) を使います。スコープ追加後はアプリを再インストールします。署名検証と Request URL は詳細表示と共通です。Bot が対象チャンネルに参加している必要があります。[Slack のメッセージイベント](https://docs.slack.dev/reference/events/message/)
 
-ファイル付き返信（ファイルだけの投稿も含む）にはBot Tokenスコープ [`files:read`](https://docs.slack.dev/reference/scopes/files.read/) が必要です。追加後にアプリを再インストールしてください。PDF・Office文書・圧縮ファイル・テキストなど、SlackにアップロードされたファイルをBot認証で取得し、返信者名義の通常のRedmineチケット添付として保存します。PNG・JPEG・GIF・WebPは検証して画像表示し、それ以外（SVG・動画を含む）は `attachment:"ファイル名"` の記法で保存し、ファイル名からRedmineの添付表示ページへリンクします。プレビューの可否はRedmineとファイル形式に依存します。取り込み時に添付IDをSlack引用の保存情報へ記録し、明示的に対応付けた添付だけを本文と「Open in Slack」の間にまとめます。通常のコメントや、この対応情報がない過去の返信は従来の表示を維持します。カードが表示されない場合は出典URLの下に添付参照を表示します。画像は添付ファイル名で参照し、`@2x`も維持してRedmineの画像サイズ補正を適用します。1返信につき最大10ファイル、1ファイルは10 MiBとRedmineの添付サイズ上限の小さい方まで、合計50 MiBまでです。Redmineの添付権限・拡張子制限も適用します。コメントと添付は同じトランザクションで保存し、取得・検証に失敗した場合はコメントだけを残しません。再送で保存済み添付を重複登録しません。外部ファイルは非対応です。ファイルの拒否時は失敗を返信し、一時的なAPI・通信エラーはジョブで再試行します。
+`restrict_transfer` または全体の `force_restrict_transfer` が `true` の場合は、ファイル付き返信も元メッセージへのリンクとして保存し、`files:read` は使用しません。詳しくは[監査・社内規程向けのファイル連携制限](#監査社内規程向けのファイル連携制限)を参照してください。
+
+通常のファイル取り込みでは、ファイル付き返信（ファイルだけの投稿も含む）にはBot Tokenスコープ [`files:read`](https://docs.slack.dev/reference/scopes/files.read/) が必要です。追加後にアプリを再インストールしてください。PDF・Office文書・圧縮ファイル・テキストなど、SlackにアップロードされたファイルをBot認証で取得し、返信者名義の通常のRedmineチケット添付として保存します。PNG・JPEG・GIF・WebPは検証して画像表示し、それ以外（SVG・動画を含む）は `attachment:"ファイル名"` の記法で保存し、ファイル名からRedmineの添付表示ページへリンクします。プレビューの可否はRedmineとファイル形式に依存します。取り込み時に添付IDをSlack引用の保存情報へ記録し、明示的に対応付けた添付だけを本文と「Open in Slack」の間にまとめます。通常のコメントや、この対応情報がない過去の返信は従来の表示を維持します。カードが表示されない場合は出典URLの下に添付参照を表示します。画像は添付ファイル名で参照し、`@2x`も維持してRedmineの画像サイズ補正を適用します。1返信につき最大10ファイル、1ファイルは10 MiBとRedmineの添付サイズ上限の小さい方まで、合計50 MiBまでです。Redmineの添付権限・拡張子制限も適用します。コメントと添付は同じトランザクションで保存し、取得・検証に失敗した場合はコメントだけを残しません。再送で保存済み添付を重複登録しません。外部ファイルは非対応です。ファイルの拒否時は失敗を返信し、一時的なAPI・通信エラーはジョブで再試行します。
 
 追加テーブル・DBマイグレーション・Redisへの処理済みID保存は不要です。返信先の親通知1件だけを [`conversations.history`](https://docs.slack.dev/reference/methods/conversations.history/) で取得し、アプリIDとチケット見出しの正規URLを検証します。対象は現在の設定で通知先になっているチャンネルです。既存の通知にも返信できますが、他のアプリ・ユーザーの投稿や任意のチケットリンクへの返信は登録しません。
 
@@ -675,7 +677,49 @@ slack:
 
 省略した項目の初期値は `true` です。`issue`、`wiki`、`news`、`document`、`message` 自体を `false` にすると、その下のすべての差分を無効にします。従来の単一値 `body_diff: true` / `body_diff: false` も、すべての種別に適用されます。削除された Issue・News コメントは、この設定にかかわらず削除行を**常に**差分で表示します。
 
+### 監査・社内規程向けのファイル連携制限
+
+監査や社内規程でファイルの外部転送・複製を厳しく制限する会社向けに、ファイル本体を転送せず、元の保存場所へのリンクだけで連携するオプションがあります。
+
+```yaml
+slack:
+  files:
+    restrict_transfer: true
+    force_restrict_transfer: false
+```
+
+有効にすると、RedmineからSlackへの画像アップロードを止め、通知内の画像参照をRedmineの添付ファイルへのリンクに置き換えます。SlackからRedmineへの返信取り込みでは、添付ファイルの情報取得・ダウンロード・保存を行わず、Slackの元メッセージへのリンクを保存します。ファイルだけの返信もリンクとして保存します。本文と引用カードの連携は従来どおりです。ファイル保存を行わないため、添付追加権限は不要ですが、チケットの閲覧・コメント追加権限の確認は継続します。
+
+全体設定を既定値として、`projects.<identifier>.slack.files.restrict_transfer` でプロジェクトごとに上書きできます。例えば全体をリンクのみとし、ファイル転送を許可したプロジェクトだけ例外にできます。
+
+```yaml
+slack:
+  files:
+    restrict_transfer: true
+projects:
+  file-sharing-project:
+    slack:
+      files:
+        restrict_transfer: false
+```
+
+会社方針として例外を禁止する場合は、全体の `slack.files.force_restrict_transfer: true` を指定します。全体・プロジェクトの `restrict_transfer: false` より優先し、すべてのプロジェクトでファイル転送を制限します。`force_restrict_transfer` は全体設定でのみ有効で、プロジェクト側に指定しても無視します。既定値は `false` です。
+
+```yaml
+slack:
+  files:
+    force_restrict_transfer: true
+```
+
+プロジェクト設定を省略すると全体の `restrict_transfer` を継承します。強制が無効で、`restrict_transfer` も省略または有効な設定が `false` なら従来のファイル転送を維持します。設定を変更したらWeb・ジョブワーカーを再起動してください。待機中のジョブも実行時の設定に従います。既に転送したファイル・保存したコメントは削除しません。リンク先の閲覧には元サービスの権限が必要です。
+
+リンクのみのモードでは、Slackへの投稿でリンク・メディアの自動プレビューも無効にします。
+
+このオプションの対象はSlackmineによるファイル本体の転送です。会話本文・URL・ファイル名は引き続き連携するため、監査要件全体への適合を保証するものではありません。別の連携によるファイル転送や、利用者自身によるSlackへのアップロードは制御しません。
+
 ### Issue の画像表示
+
+以下はファイル転送制限が無効な場合の動作です。`restrict_transfer` または全体の `force_restrict_transfer` が `true` の場合は、[監査・社内規程向けのファイル連携制限](#監査社内規程向けのファイル連携制限)に従ってリンクに置き換えます。
 
 公開 Issue の作成・コメント通知では、`![](screenshot.png)` のようなローカル Markdown 画像参照を認識します。作成時は Issue に添付された同名の画像を、コメントでは同じ Journal に添付された画像をアップロードできます。対応形式は PNG、JPEG、GIF です。画像は色付きカードの中に表示されます。外部 URL やファイルシステム上のパスは取得しません。画像は空でないことと、20 MiB 以下であることが必要です。Bot Token には [`files:write`](https://docs.slack.dev/reference/scopes/files.write/) が必要です。
 
@@ -1021,6 +1065,7 @@ ruby -Itest test/thread_comment_feedback_cleanup_test.rb
 
 | バージョン | 主な変更 |
 | --- | --- |
+| **1.2.2** | 監査・社内規程向けのファイル転送制限を追加。ファイル本体の代わりに元の保存場所へのリンクで連携し、プロジェクト別の例外設定と全体強制に対応しました。 |
 | **1.2.1** | Slackリンクの本文取得・引用保存・カード表示全体と、Redmine画面のカード表示をそれぞれOFFにできる設定を追加。メンションを無効にする設定方法も追記。 |
 | **1.2.0** | 会話を読みやすくするため、コメント保存の確認メッセージを非表示・一定時間後に自動削除できる任意設定を追加。 |
 | **1.1.0** | 同じユーザーの連続したSlackスレッド返信をまとめて保存する任意設定を追加。新しいDBテーブルやキャッシュバッファを使わず、元の時系列・リンク・添付を保持します。デフォルトは即時保存、設定例は待機60秒・最大300秒。取り込んだコメントの通常Slack通知を切り替える設定も追加しました。 |

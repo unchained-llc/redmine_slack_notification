@@ -262,6 +262,72 @@ class ThreadCommentsPersistenceTest < Minitest::Test
     file.close! if file && !file.closed?
   end
 
+  def test_restrict_transfer_saves_file_only_reply_url_without_attachment_permission_or_download
+    @settings['slack']['files'] = { 'restrict_transfer' => true }
+    @event.merge!('text' => '', 'subtype' => 'file_share', 'files' => [{ 'id' => 'F123' }])
+    @issue.define_singleton_method(:attachments_addable?) { |_| false }
+    Slackmine::ThreadFiles.stub(:download, ->(*) { flunk 'Link-only downloaded files' }) do
+      assert_equal :saved, persist
+      assert_equal :duplicate, persist
+    end
+    assert_equal 0, Attachment.count
+    assert_equal 1, Journal.count
+    assert_equal reply_url(@event['ts']) + '?thread_ts=' + @event['thread_ts'], Journal.first.notes
+    assert_nil Thread.current[:slackmine_thread_files]
+    assert_nil Thread.current[:slackmine_thread_images]
+  end
+
+  def test_restrict_transfer_batch_keeps_every_message_url_without_downloading_mixed_files
+    @settings['slack']['files'] = { 'restrict_transfer' => true }
+    events = [@event.merge('files' => [{ 'id' => 'F123' }]),
+              @event.merge('ts' => '1791001000.000003', 'text' => '', 'files' => [{ 'id' => 'F456' }])]
+    Slackmine::ThreadFiles.stub(:download, ->(*) { flunk 'Link-only downloaded a batch' }) do
+      assert_equal :saved, persist(events: events)
+    end
+    assert_equal 0, Attachment.count
+    assert_equal 1, Journal.count
+    events.each { |event| assert_includes Journal.first.notes, reply_url(event['ts']) }
+  end
+
+  def test_project_can_enable_restrict_transfer_without_global_restriction
+    @settings['projects'] = { 'agentic' => { 'slack' => { 'files' => { 'restrict_transfer' => true } } } }
+    @event['files'] = [{ 'id' => 'F123' }]
+    Slackmine::ThreadFiles.stub(:download, ->(*) { flunk 'Project restriction downloaded files' }) do
+      assert_equal :saved, persist
+    end
+    assert_equal 0, Attachment.count
+    assert_includes Journal.first.notes, reply_url(@event['ts'])
+  end
+
+  def test_project_can_allow_transfers_under_global_restrict_transfer_setting
+    @settings['slack']['files'] = { 'restrict_transfer' => true }
+    @settings['projects'] = { 'agentic' => { 'slack' => { 'files' => { 'restrict_transfer' => false } } } }
+    @event['files'] = [{ 'id' => 'F123' }]
+    file = image_upload
+    Slackmine::ThreadFiles.stub(:download, ->(*) {
+      refute Slackmine.files_transfer_restricted?
+      [file]
+    }) { assert_equal :saved, persist }
+    assert_equal 1, Attachment.count
+    assert_includes Journal.first.notes, '![](F123-screen.png)'
+  ensure
+    file.close! if file && !file.closed?
+  end
+
+  def test_global_force_saves_only_source_url_even_with_project_exception
+    @settings['slack']['files'] = { 'restrict_transfer' => false, 'force_restrict_transfer' => true }
+    @settings['projects'] = { 'agentic' => { 'slack' => { 'files' => {
+      'restrict_transfer' => false, 'force_restrict_transfer' => false } } } }
+    @event.merge!('text' => '', 'files' => [{ 'id' => 'F123' }])
+    @issue.define_singleton_method(:attachments_addable?) { |_| false }
+    Slackmine::ThreadFiles.stub(:download, ->(*) { flunk 'Forced restriction downloaded files' }) do
+      assert_equal :saved, persist
+    end
+    assert_equal 0, Attachment.count
+    assert_equal 1, Journal.count
+    assert_equal reply_url(@event['ts']) + '?thread_ts=' + @event['thread_ts'], Journal.first.notes
+  end
+
   def test_mixed_pdf_and_image_reply_persists_both_and_duplicate_does_not_download
     @event['files'] = [{ 'id' => 'F123' }, { 'id' => 'F124' }]
     files = [image_upload, image_upload('F124-report.pdf')]

@@ -23,6 +23,30 @@ class ThreadFilesTest < Minitest::Test
     assert_equal 'F123-screen@2x.png', download.first.original_filename
   end
 
+  def test_restrict_transfer_never_fetches_metadata_or_file_contents
+    Slackmine.stub(:config, { 'slack' => { 'files' => { 'restrict_transfer' => true } } }) do
+      Slackmine.stub(:slack_api, ->(*) { flunk 'Link-only fetched file metadata' }) do
+        IMAGES.stub(:fetch, ->(*) { flunk 'Link-only downloaded contents' }) do
+          assert_empty IMAGES.download(@event, 'token')
+        end
+      end
+    end
+  end
+
+  def test_global_force_blocks_file_api_despite_project_exception
+    settings = { 'slack' => { 'files' => { 'force_restrict_transfer' => true } },
+                 'projects' => { 'example' => { 'slack' => { 'files' => { 'restrict_transfer' => false } } } } }
+    Slackmine.stub(:config, settings) do
+      Slackmine.with_project(OpenStruct.new(identifier: 'example')) do
+        Slackmine.stub(:slack_api, ->(*) { flunk 'Forced restriction fetched files' }) do
+          IMAGES.stub(:fetch, ->(*) { flunk 'Forced restriction downloaded contents' }) do
+            assert_empty IMAGES.download(@event, 'token')
+          end
+        end
+      end
+    end
+  end
+
   def teardown
     @uploads.each { |file| file.close! unless file.closed? }
   end

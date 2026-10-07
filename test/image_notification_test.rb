@@ -1167,8 +1167,117 @@ module Setting
 end
 
 class ImageNotificationTest < Minitest::Test
+  def test_restrict_transfer_inherits_global_setting_and_supports_project_overrides
+    project = OpenStruct.new(identifier: 'example')
+    [nil, false, true].each do |enabled|
+      settings = { 'slack' => { 'files' => { 'restrict_transfer' => enabled } },
+                   'projects' => { 'example' => { 'slack' => { 'files' => { 'restrict_transfer' => !enabled } } } } }
+      Slackmine.stub(:config, settings) do
+        assert_equal enabled == true, Slackmine.files_transfer_restricted?
+        Slackmine.with_project(project) { assert_equal !enabled, Slackmine.files_transfer_restricted? }
+        assert_equal !enabled, Slackmine.files_transfer_restricted?(project)
+        assert_equal enabled == true, Slackmine.files_transfer_restricted?(OpenStruct.new(identifier: 'other'))
+      end
+    end
+    Slackmine.stub(:config, {}) { refute Slackmine.files_transfer_restricted? }
+  end
+
+  def test_global_force_wins_over_global_and_project_transfer_settings
+    project = OpenStruct.new(identifier: 'example')
+    settings = { 'slack' => { 'files' => { 'restrict_transfer' => false, 'force_restrict_transfer' => true } },
+                 'projects' => { 'example' => { 'slack' => { 'files' => {
+                   'restrict_transfer' => false, 'force_restrict_transfer' => false } } } } }
+    Slackmine.stub(:config, settings) do
+      assert Slackmine.files_transfer_restricted?
+      assert Slackmine.files_transfer_restricted?(project)
+      Slackmine.with_project(project) { assert Slackmine.files_transfer_restricted? }
+    end
+  end
+
+  def test_project_force_cannot_enable_global_enforcement
+    settings = { 'slack' => { 'files' => { 'force_restrict_transfer' => false } },
+                 'projects' => { 'example' => { 'slack' => { 'files' => {
+                   'restrict_transfer' => false, 'force_restrict_transfer' => true } } } } }
+    Slackmine.stub(:config, settings) do
+      refute Slackmine.files_transfer_restricted?(OpenStruct.new(identifier: 'example'))
+    end
+  end
+
+  def test_restrict_transfer_replaces_images_with_links_without_calling_upload
+    attachment = OpenStruct.new(id: 42, filename: 'screenshot.png')
+    messages = [
+      { 'blocks' => [{ 'type' => 'markdown', 'text' => "Before\n\n![](screenshot.png)\n\nAfter" }] },
+      { 'blocks' => [{ 'type' => 'section', 'text' => { 'type' => 'mrkdwn', 'text' => 'Before ![](screenshot.png) After' } }] }
+    ]
+    Slackmine.stub(:config, { 'slack' => { 'files' => { 'restrict_transfer' => true } } }) do
+      Journal.stub(:find_by, journal(attachments: [attachment])) do
+        Slackmine.stub(:upload_image, ->(*) { flunk 'Link-only uploaded a file' }) do
+          messages.each do |message|
+            Slackmine.add_images(message, [attachment.filename], 1, 'token')
+            assert_equal 1, message['blocks'].size
+            text = message['blocks'][0]['text']
+            text = text['text'] if text.is_a?(Hash)
+            assert_includes text, 'https://redmine.example.com/attachments/42'
+            assert_includes text, 'screenshot.png'
+            assert_includes text, 'Before'
+            assert_includes text, 'After'
+            refute_includes text, '![]('
+          end
+        end
+      end
+      Slackmine.stub(:slack_api, ->(*) { flunk 'Link-only called file API' }) do
+        assert_nil Slackmine.upload_image(attachment, 'token')
+      end
+    end
+  end
+
+  def test_delivery_uses_project_file_policy_at_execution_time
+    attachment = OpenStruct.new(id: 42, filename: 'clipboard-202609281254-s6trp@2x.png')
+    project = OpenStruct.new(identifier: 'example')
+    [[false, true, false, true], [true, false, false, false],
+     [false, false, true, true], [true, false, true, true]].each do |global, override, force, restricted|
+      settings = { 'slack' => { 'files' => { 'restrict_transfer' => global, 'force_restrict_transfer' => force } },
+                   'projects' => { 'example' => { 'slack' => { 'files' => { 'restrict_transfer' => override } } } } }
+      delivered = nil
+      uploads = 0
+      Slackmine.stub(:config, settings) do
+        Slackmine.stub(:bot_token, 'test-token') do
+          Slackmine.stub(:channel_id, 'C123') do
+            Journal.stub(:find_by, journal(attachments: [attachment])) do
+              Slackmine.stub(:upload_image, ->(*) { uploads += 1; 'F123' }) do
+                Slackmine.stub(:post_message, ->(message, *) { delivered = message }) do
+                  Slackmine.notify(payload, project: project, image_names: [attachment.filename], journal_id: 1)
+                end
+              end
+            end
+          end
+        end
+      end
+      assert_equal restricted ? 0 : 1, uploads
+      blocks = delivered.dig('attachments', 0, 'blocks')
+      assert_equal !restricted, blocks.any? { |block| block['type'] == 'image' }
+      assert_includes blocks.first.dig('text', 'text'), '/attachments/42' if restricted
+    end
+  end
+
   def payload
     { 'attachments' => [{ 'fallback' => 'Example Tracker notification', 'blocks' => [{ 'type' => 'section', 'text' => { 'type' => 'mrkdwn', 'text' => '*追加コメント*\n> ![](clipboard-202609281254-s6trp@2x.png)' } }] }] }
+  end
+
+  def test_restrict_transfer_disables_automatic_link_and_media_previews
+    request = nil
+    message = { 'text' => 'https://redmine.example.com/attachments/42',
+                'unfurl_links' => true, 'unfurl_media' => true }
+    Slackmine.stub(:config, { 'slack' => { 'files' => { 'restrict_transfer' => true } } }) do
+      Slackmine.stub(:slack_api, ->(method, body, *) {
+        assert_equal 'chat.postMessage', method
+        request = body
+        { 'ts' => '1791001000.000002' }
+      }) { Slackmine.post_message(message, 'C123', 'token') }
+    end
+    assert_equal false, request['unfurl_links']
+    assert_equal false, request['unfurl_media']
+    assert_equal true, message['unfurl_links']
   end
 
   def journal(private_note: false, attachments: [])

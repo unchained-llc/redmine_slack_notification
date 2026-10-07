@@ -12,6 +12,7 @@ module Slackmine
     module_function
 
     def download(event, token)
+      return [] if Slackmine.files_transfer_restricted?
       references = Array(event['files'])
       return [] if references.empty?
       raise ImportError, 'Too many files' if references.length > MAX_FILES

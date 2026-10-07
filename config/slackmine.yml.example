@@ -3,6 +3,20 @@
 # Do not commit this file because it contains Slack credentials.
 
 slack:
+  # For companies with strict audit/internal rules limiting external file
+  # transfers and copies. This restricts file contents, not conversation text,
+  # filenames or URLs; it does not by itself establish audit compliance.
+  # Override restrict_transfer with projects.<identifier>.slack.files.restrict_transfer.
+  # Global force_restrict_transfer: true enforces the restriction everywhere,
+  # even if restrict_transfer is false. Project force settings are ignored.
+  # restrict_transfer: true links Redmine images instead of uploading and saves
+  # Slack reply permalinks
+  # instead of downloading attachments. Text/comments continue as usual.
+  # Both switches omitted or false preserve file transfers. Existing files remain.
+  # Applied when workers execute jobs; restart web/worker processes after edits.
+  files:
+    restrict_transfer: false
+    force_restrict_transfer: false
   # Slack permalink cards in issue descriptions/comments. Six-digit hex color.
   # Override with projects.<identifier>.slack.link_cards.color.
   link_cards:
@@ -89,7 +103,9 @@ slack:
   # Save text/file replies to Issue notification threads as Redmine notes.
   # Requires slack.events, explicit users mappings or auto_map_users_by_email,
   # message.groups + groups:history (private channels), and an app reinstall.
-  # Files also require files:read. Images preview inline; other files use download links.
+  # File downloads also require files:read. When file transfers are restricted,
+  # replies keep source message links without file API calls or attachments.
+  # Otherwise, images preview inline; other files use download links.
   # Up to 10 files,
   # 10 MiB each (or Redmine's lower attachment limit), 50 MiB total per reply.
   thread_comments: false
@@ -635,6 +651,8 @@ projects:
       default_channel_id: 'C0123456789'
       attachment_color: '#123456'
       # work_object_previews: true
+      # files:
+      #   restrict_transfer: false # Allow transfers unless globally forced off.
     # The older project-level channel_id remains supported.
     # channel_id: 'C0123456789'
     # Every events key can override the matching global value.

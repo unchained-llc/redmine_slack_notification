@@ -142,6 +142,12 @@ module Slackmine
     project ? merge_config(config, project_config(project)) : config
   end
 
+  def files_transfer_restricted?(project = Thread.current[:slackmine_project])
+    return true if config.dig('slack', 'files', 'force_restrict_transfer') == true
+
+    effective_config(project).dig('slack', 'files', 'restrict_transfer') == true
+  end
+
   def bot_token(project = Thread.current[:slackmine_project])
     project_slack = project_config(project)['slack']
     project_token = project_slack['bot_token'] if project_slack.is_a?(Hash)
@@ -362,6 +368,7 @@ module Slackmine
       ids << block.dig('slack_file', 'id') if block['type'] == 'image'
     end.compact.uniq
     request = payload.merge('channel' => channel)
+    request.merge!('unfurl_links' => false, 'unfurl_media' => false) if files_transfer_restricted?
     if image_ids.any?
       summary = payload['text'].to_s
       summary = payload.dig('attachments', 0, 'fallback').to_s if summary.strip.empty?
@@ -467,7 +474,7 @@ module Slackmine
         if name
           found_eligible = true
           attachment = attachments[name.downcase]
-          file_id = upload_results.fetch(name) { upload_results[name] = upload_image(attachment, token) if attachment }
+          file_id = upload_results.fetch(name) { upload_results[name] = upload_image(attachment, token) if attachment } unless files_transfer_restricted?
           if file_id
             text_before = current_text.strip
             pieces << with_text.call(text_before) unless text_before.empty?
@@ -502,6 +509,7 @@ module Slackmine
   end
 
   def upload_image(attachment, token)
+    return if files_transfer_restricted?
     return unless attachment.filename.match?(/\.(?:png|jpe?g|gif)\z/i)
 
     path = attachment.diskfile

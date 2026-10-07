@@ -4,7 +4,7 @@
 
 ![Slackmine — Slack and Redmine integration](docs/assets/slackmine-icon.png)
 
-Version **1.2.1**.
+Version **1.2.2**.
 
 The plugin was renamed from **Redmine Event Notifications for Slack** (`redmine_slack_notification`) to **Slackmine** as it grew from notifications into a broader Slack–Redmine integration. Internal names, plugin ID, configuration filename and endpoints now use `slackmine`; the former names are no longer supported.
 
@@ -620,7 +620,9 @@ Bot messages and human replies that `@mention` a Bot or app user are always excl
 
 For private channels, add the Bot Token scope [`groups:history`](https://docs.slack.dev/reference/scopes/groups.history/) and subscribe to [`message.groups`](https://docs.slack.dev/reference/events/message.groups/). Public channels use [`channels:history`](https://docs.slack.dev/reference/scopes/channels.history/) and [`message.channels`](https://docs.slack.dev/reference/events/message.channels/). Reinstall the app after adding scopes. Request URL and signature verification are shared with Work Object details. The bot must be a member of the channel. See [Slack's message events](https://docs.slack.dev/reference/events/message/).
 
-File replies (including file-only posts) require the Bot Token scope [`files:read`](https://docs.slack.dev/reference/scopes/files.read/); reinstall the app after adding it. PDF, Office documents, archives, text files and other Slack-hosted files are downloaded using bot authorization and saved as ordinary Redmine Issue attachments under the replying user. PNG, JPEG, GIF and WebP images are validated and displayed inline. Other formats, including SVG and video, are saved as `attachment:"filename"` references and shown as filename links to Redmine’s attachment viewer. Preview availability depends on Redmine and the file type. The importer records attachment IDs in the saved Slack quote metadata so only explicitly associated attachments appear inside their card, between the message body and “Open in Slack”. Ordinary notes and older replies without this metadata keep their existing layout; when no card is available, attachment references remain below the source permalink. Image references use attachment filenames, preserving `@2x` suffixes for Redmine’s image sizing. A reply can contain up to 10 files, each no larger than 10 MiB or Redmine’s configured attachment limit (whichever is lower), and at most 50 MiB in total. Redmine attachment permissions and extension restrictions apply. Files and the comment are saved in the same transaction; a failed download or invalid attachment does not leave a partial comment. Retries do not duplicate saved attachments. External files are unsupported. Rejected file replies receive failure feedback; transient API/network errors are retried by the job.
+When effective `restrict_transfer` or global `force_restrict_transfer` is `true`, file replies retain the source message permalink without using `files:read`. See [File-transfer restriction for audit and internal policies](#file-transfer-restriction-for-audit-and-internal-policies).
+
+Normal file imports (including file-only posts) require the Bot Token scope [`files:read`](https://docs.slack.dev/reference/scopes/files.read/); reinstall the app after adding it. PDF, Office documents, archives, text files and other Slack-hosted files are downloaded using bot authorization and saved as ordinary Redmine Issue attachments under the replying user. PNG, JPEG, GIF and WebP images are validated and displayed inline. Other formats, including SVG and video, are saved as `attachment:"filename"` references and shown as filename links to Redmine’s attachment viewer. Preview availability depends on Redmine and the file type. The importer records attachment IDs in the saved Slack quote metadata so only explicitly associated attachments appear inside their card, between the message body and “Open in Slack”. Ordinary notes and older replies without this metadata keep their existing layout; when no card is available, attachment references remain below the source permalink. Image references use attachment filenames, preserving `@2x` suffixes for Redmine’s image sizing. A reply can contain up to 10 files, each no larger than 10 MiB or Redmine’s configured attachment limit (whichever is lower), and at most 50 MiB in total. Redmine attachment permissions and extension restrictions apply. Files and the comment are saved in the same transaction; a failed download or invalid attachment does not leave a partial comment. Retries do not duplicate saved attachments. External files are unsupported. Rejected file replies receive failure feedback; transient API/network errors are retried by the job.
 
 No extra tables, DB migrations, or Redis processing-state entries are required. The plugin fetches only the parent notification through [`conversations.history`](https://docs.slack.dev/reference/methods/conversations.history/), verifies its app ID and canonical Issue subject URL, and accepts replies only in channels currently configured as notification destinations. Existing notifications are supported. Replies to other apps, users, or arbitrary Issue links are ignored.
 
@@ -696,7 +698,49 @@ slack:
 
 Missing entries default to `true`. Setting `issue`, `wiki`, `news`, `document`, or `message` to `false` disables diffs for all children of that parent. The older scalar form, `body_diff: true` or `body_diff: false`, still applies to every type. Deleted Issue and News comments **always** show their removed lines as a diff, regardless of this setting.
 
+### File-transfer restriction for audit and internal policies
+
+Companies with strict audit or internal policies limiting external file transfers and copies can exchange links to the original source instead of transferring file contents.
+
+```yaml
+slack:
+  files:
+    restrict_transfer: true
+    force_restrict_transfer: false
+```
+
+When enabled, Redmine images are linked to their attachment pages instead of uploaded to Slack. Incoming Slack replies retain the source message permalink without fetching file metadata, downloading contents, or saving attachments. File-only replies also save a permalink. Text and quote cards continue through the existing import flow. Attachment-add permission is unnecessary in this mode; Issue visibility and comment-add authorization still apply.
+
+The global setting is the default. Override it per project with `projects.<identifier>.slack.files.restrict_transfer`. For example, use links globally while allowing file transfers for an approved project:
+
+```yaml
+slack:
+  files:
+    restrict_transfer: true
+projects:
+  file-sharing-project:
+    slack:
+      files:
+        restrict_transfer: false
+```
+
+To prohibit exceptions under company policy, set global `slack.files.force_restrict_transfer: true`. It takes precedence over both global and project `restrict_transfer: false`, restricting file transfers for every project. `force_restrict_transfer` is global-only; project values are ignored. It defaults to `false`.
+
+```yaml
+slack:
+  files:
+    force_restrict_transfer: true
+```
+
+Projects without an override inherit the global `restrict_transfer` setting. When enforcement is off and `restrict_transfer` is omitted or effectively `false`, existing file transfers are preserved. Restart web and job-worker processes after changing the configuration. Queued jobs use the setting when executed. Previously transferred files and saved comments are retained. Opening a source link requires access to the original service.
+
+Link-only mode also disables automatic link and media previews on outgoing Slack messages.
+
+This option restricts file-content transfers by Slackmine. Conversation text, URLs, and filenames still pass through the integration; enabling it alone does not establish compliance with all audit requirements. It does not control other integrations or users uploading files directly to Slack.
+
 ### Inline Issue images
+
+The following applies when file-transfer restriction is off. When effective `restrict_transfer` or global `force_restrict_transfer` is `true`, images become links as described in [File-transfer restriction for audit and internal policies](#file-transfer-restriction-for-audit-and-internal-policies).
 
 For new public Issues and public Issue comments, the plugin recognizes local Markdown image references such as `![](screenshot.png)`. On creation, it can upload a matching image attached to the Issue; for comments, it uses images attached to the same Journal. Supported formats are PNG, JPEG, and GIF. Images appear inside the colored card. It does not fetch remote URLs or filesystem paths. Images must be nonempty and at most 20 MiB. The Bot Token needs [`files:write`](https://docs.slack.dev/reference/scopes/files.write/).
 
@@ -1053,6 +1097,7 @@ version numbers are editorial labels, not a record of published releases or Git 
 
 | Version | Highlights |
 | --- | --- |
+| **1.2.2** | Added file-transfer restrictions for audit and internal policies: use source links instead of transferring files, allow per-project exceptions, or enforce the restriction globally. |
 | **1.2.1** | Added switches to disable Slack link retrieval, quote imports, and all cards, or only Redmine web cards. Documented how to disable assignee mentions. |
 | **1.2.0** | Added options to hide or automatically clear comment-save confirmations to keep thread conversations readable. |
 | **1.1.0** | Added optional batching of consecutive Slack thread replies from the same user, preserving source order, links, and attachments without a new DB table or cache buffer. Replies save immediately by default; the example uses a 60-second wait and a 300-second maximum. Added a switch for normal Slack notifications of imported comments. |

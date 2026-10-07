@@ -224,7 +224,8 @@ module Slackmine
         # The existing comment author and original posting time identify a
         # retry, even after the comment text has been edited in Redmine.
         next :duplicate if issue.journals.exists?(user_id: viewer.id, created_on: timestamp)
-        next :restricted if Array(event['files']).any? && !issue.attachments_addable?(viewer)
+        restrict_transfer = Slackmine.files_transfer_restricted?(issue.project)
+        next :restricted if !restrict_transfer && Array(event['files']).any? && !issue.attachments_addable?(viewer)
 
         urls = events.map do |item|
           response = Slackmine.slack_api('chat.getPermalink',
@@ -244,7 +245,11 @@ module Slackmine
         notes = urls.join("\n\n")
         User.current = viewer
         journal = issue.init_journal(viewer, notes)
-        uploads = ThreadFiles.download(event, Slackmine.bot_token(issue.project))
+        unless restrict_transfer
+          uploads = Slackmine.with_project(issue.project) do
+            ThreadFiles.download(event, Slackmine.bot_token(issue.project))
+          end
+        end
         # The Issue row lock's transaction includes both attachments and Journal.
         # Validate every file before saving any, then use the Issue association
         # so Redmine records attachment additions in this same Journal.
