@@ -1240,7 +1240,7 @@ version numbers are editorial labels, not a record of published releases or Git 
 
 | Version | Highlights |
 | --- | --- |
-| **1.4.0** | Separate deployment wording into a Git-ignored message YAML while keeping English defaults in a tracked example. Add request deduplication, explicit queue-failure responses, deferred quote-heavy form saves, and background refreshes for direct Slack interactions. |
+| **1.4.0** | Separate display wording from operational settings so it can be customized in a dedicated file. Preserve compatibility with existing wording settings and improve duplicate-operation handling and failure responses for Slack interactions. |
 | **1.3.0** | Process Work Object details and short actions in the Web process; queue URL unfurls, post-save refreshes, App Home lists, slash command delivery, connection saves, and quote-heavy form saves. Review thread history in the Web process first, falling back to Sidekiq after two seconds. |
 | **1.2.2** | Added file-transfer restrictions for audit and internal policies: use source links instead of transferring files, allow per-project exceptions, or enforce the restriction globally. |
 | **1.2.1** | Added switches to disable Slack link retrieval, quote imports, and all cards, or only Redmine web cards. Documented how to disable assignee mentions. |
