@@ -31,7 +31,7 @@ Redmine 7 の Issue、Wiki、News、文書、ファイル、フォーラム、�
 | [ユーザーの対応付け](#担当者のメンション) | RedmineユーザーとSlack IDの明示的な対応付け、送信時の名前マッチング、任意の[受信操作時のメールアドレス照合](#メールアドレスで閲覧ユーザーを自動対応付けする)。操作時にはRedmineの権限とワークフローを確認します。 |
 | [個人ごとの通知メール抑止](#個人ごとの通知メール設定) | Slack通知設定とチャンネル参加が条件を満たす場合、本人が対象の通知メールを停止できます。アカウント・セキュリティ関連メールは継続し、Slackの配信成功は確認しません。 |
 
-Work Objectのプレビュー・操作、スラッシュコマンド、スレッド連携、リマインダーには、それぞれの設定とSlackアプリのスコープ・イベント設定が必要です。個人のメール抑止設定は初期値OFFです。設定方法と制限は各リンク先を参照してください。
+Work Objectのプレビュー・操作、スラッシュコマンド、スレッド連携、リマインダーには、それぞれの設定とSlackアプリのスコープ・イベント設定が必要です。個人のメール抑止設定は初期値OFFです。必要な権限とSlack側の設定は[設定一覧](#slack権限と機能別の設定一覧)、各機能の制限はリンク先を参照してください。
 
 以下の画像は、実装で対応している表示内容と操作を架空の英語データで示した機能イメージです。実画面やSlackのレイアウトを完全に再現したものではなく、周辺のナビゲーションは省略しています。設定例は設定画面ではなくYAMLで示しています。英語版・日本語版で同じ画像を使用しています。
 
@@ -54,6 +54,57 @@ Work Objectのプレビュー・操作、スラッシュコマンド、スレッ
 3. Bot Token と、デフォルトまたはプロジェクト固有のチャンネル ID を設定します。実際の YAML ファイルは Git に含めないでください。
 4. Sidekiq が `slack` キューを処理するように設定し、ボットを通知先チャンネルに招待します。
 5. Redmine と Sidekiq を再起動します。どちらのプロセスも YAML 設定をキャッシュします。
+
+### Slack権限と機能別の設定一覧
+
+**OAuth & Permissions → Bot Token Scopes** に、使う機能の権限だけを追加します。通常のチャンネル通知は `chat:write` から始められます。スコープを変更したらアプリを再インストールし、Botを対象チャンネルへ招待してください。
+
+| Bot Tokenスコープ | 必要になる機能 |
+| --- | --- |
+| [`chat:write`](https://docs.slack.dev/reference/scopes/chat.write/) | 通知、操作結果の返信、Botが投稿した確認メッセージの削除 |
+| [`im:write`](https://docs.slack.dev/reference/scopes/im.write/) | 期日リマインダーのDM送信 |
+| [`files:write`](https://docs.slack.dev/reference/scopes/files.write/) | Redmineの添付画像をSlack通知にアップロード |
+| [`files:read`](https://docs.slack.dev/reference/scopes/files.read/) | Slackスレッドの添付ファイルをRedmineへ取り込み |
+| [`users:read`](https://docs.slack.dev/reference/scopes/users.read/) | 名前での自動対応付け、Bot宛てメンションの除外、リンクカードの投稿者・メンション表示 |
+| [`users:read.email`](https://docs.slack.dev/reference/scopes/users.read.email/) ＋ [`users:read`](https://docs.slack.dev/reference/scopes/users.read/) | メールアドレスでのユーザー対応付け、個人のメール抑止で自動マッチングを使用 |
+| [`channels:history`](https://docs.slack.dev/reference/scopes/channels.history/) / [`groups:history`](https://docs.slack.dev/reference/scopes/groups.history/) | 公開 / 非公開チャンネルの履歴取得：コメントのスレッド通知、返信取り込み・まとめ保存、Slackリンクカード |
+| [`channels:read`](https://docs.slack.dev/reference/scopes/channels.read/) / [`groups:read`](https://docs.slack.dev/reference/scopes/groups.read/) | 公開 / 非公開チャンネルの情報取得：名前での自動対応付け、メール抑止の参加確認、Slackリンクカード |
+| [`im:history`](https://docs.slack.dev/reference/scopes/im.history/) ＋ [`im:read`](https://docs.slack.dev/reference/scopes/im.read/) / [`mpim:history`](https://docs.slack.dev/reference/scopes/mpim.history/) ＋ [`mpim:read`](https://docs.slack.dev/reference/scopes/mpim.read/) | DM / グループDMのSlackリンクカード。通常のリマインダーDM送信には不要 |
+| [`links:read`](https://docs.slack.dev/reference/scopes/links.read/) ＋ [`links:write`](https://docs.slack.dev/reference/scopes/links.write/) | Redmine URLのWork Object展開・再読み込み |
+| [`commands`](https://docs.slack.dev/reference/scopes/commands/) | スラッシュコマンド、メッセージショートカットからのチケット作成 |
+
+通知やメッセージでの応答には共通で `chat:write` が必要です。以下の権限は上の表から組み合わせて設定します。公開・非公開チャンネルの権限は、利用するチャンネル種別に応じて選びます。各機能の詳細と制限はリンク先を参照してください。
+
+| 機能 | 必要なSlack権限 | Slack側での追加設定 | YAML・運用上の要件 |
+| --- | --- | --- | --- |
+| 通常のチャンネル通知 | `chat:write` | Botを通知先へ招待 | Bot Token、通知先チャンネル、`slack` キューワーカー |
+| [Issueの画像表示](#issue-の画像表示) | `files:write` | — | Redmineに添付された対応画像 |
+| [担当者のメンション](#担当者のメンション) | 明示的な対応付けなら追加不要。名前の自動照合は `users:read` | — | `users` または `slack.auto_map_users_by_name: true` |
+| [メールでのユーザー対応付け](#メールアドレスで閲覧ユーザーを自動対応付けする) | `users:read`、`users:read.email` | — | `slack.auto_map_users_by_email: true`、`slack.events.team_id` |
+| [チャンネル名の自動対応付け](#プロジェクト名とチャンネル名の自動マッチング) | `channels:read` / `groups:read` | Botを対象チャンネルへ招待 | `slack.auto_map_channels_by_name: true` |
+| [Work Object通知プレビュー](#チケットの-work-object-previews) | `chat:write` | Work Object PreviewsをON、Taskを選択 | `slack.work_object_previews: true` |
+| [Work Objectの詳細表示](#チケットの-work-object-previews) | 詳細表示自体の追加スコープなし | Event Subscriptionsで `entity_details_requested` を購読 | `slack.work_object_previews: true`、`slack.events`、ユーザー対応付け |
+| Work ObjectのURL展開・再読み込み | `links:read`、`links:write` | `link_shared` を購読、App unfurl domainsにRedmineのホストを登録 | `slack.work_object_previews: true`、`slack.events`、ユーザー対応付け |
+| [Work Objectからの編集・コメント](#work-object-カードと詳細パネルからの操作) | 操作自体の追加スコープなし | InteractivityをON | `slack.work_object_previews: true`、`slack.work_object_actions: true`、`slack.events`、ユーザー対応付け、Redmineの操作権限 |
+| [コメント通知をスレッドへ投稿](#redmineコメント通知をスレッドにまとめる) | `channels:history` / `groups:history` | イベント購読は不要 | `slack.comment_notifications_in_threads: true`、`slack.events.app_id` |
+| [Slack返信のコメント取り込み](#通知スレッドからredmineにコメントを追加) | `channels:history` / `groups:history`、`users:read`。添付取り込みは `files:read` も必要 | `message.channels` / `message.groups` を購読 | `slack.thread_comments: true`、`slack.events`、ユーザー対応付け、Redmineのコメント・添付権限 |
+| [メッセージからチケット作成](#slackメッセージからチケット作成) | `commands` | メッセージショートカットのCallback IDを `slackmine_message_create` に設定、InteractivityをON | `slack.slash_command`、全体のBot Token・`slack.events`、ユーザー対応付け、Redmineのチケット追加権限 |
+| [スラッシュコマンド](#スラッシュコマンド) | `commands`、応答用の `chat:write` | コマンド登録、InteractivityをON | `slack.slash_command`、全体のBot Token・`slack.events`、ユーザー対応付け |
+| [App Home](#app-homeのチケット一覧) | 表示自体の追加スコープなし | Home TabをON、`app_home_opened` を購読。フォーム操作はInteractivityをON | 全体の `slack.app_home: true`、Bot Token・`slack.events`、ユーザー対応付け |
+| [期日リマインダーDM](#毎日の期日リマインダー-dm) | `chat:write`、`im:write` | Messages TabをON | `due_reminders.enabled: true`、ユーザー対応付け、毎日のrakeタスク実行 |
+| [個人の通知メール抑止](#個人ごとの通知メール設定) | `channels:read` / `groups:read`。自動マッチングは `users:read`、`users:read.email` も必要 | Botを通知先へ招待 | 本人のメール抑止設定、ユーザー対応付け、通知先への本人の参加 |
+| [Redmine本文内のSlackリンクカード](#redmine本文内のslackリンクカード) | 対象の会話の `*:history`・`*:read`、`users:read` | Botを対象の会話へ参加させる。イベント購読は不要 | `slack.link_cards.enabled: true`、Bot Token |
+
+ユーザー対応付けは `users` の明示的な設定、または対応する機能でのメール自動照合を使います。名前での自動照合はSlackからの閲覧・編集の許可には使いません。Slackのスコープを付けてもRedmineの権限は増えません。
+
+| Slack設定画面の項目 | 設定値・用途 |
+| --- | --- |
+| Event Subscriptions → Request URL | `https://redmine.example.com/slackmine/events`。使う機能のイベントをSubscribe to bot eventsに登録 |
+| Interactivity & Shortcuts → Request URL | `https://redmine.example.com/slackmine/interactions`。ボタン、フォーム、メッセージショートカットの受付 |
+| Slash Commands → Request URL | `https://redmine.example.com/slackmine/commands`。コマンド名を `slack.slash_command` と一致させる |
+| Select Menus → Options Load URL | **空欄**。現在のSlackmineは選択肢をフォームと一緒に送るため、外部検索用URLは不要 |
+
+`slack.events` にはApp ID、Team ID、Signing Secretを設定します。Signing SecretはBot Tokenとは別です。YAML変更後はRedmineとSidekiqを再起動してください。詳細表示・モーダル・App Homeには専用の追加OAuthスコープがなく、設定とユーザー照合が必要です（[詳細表示](https://docs.slack.dev/reference/methods/entity.presentDetails/)、[モーダル](https://docs.slack.dev/reference/methods/views.open/)、[App Homeイベント](https://docs.slack.dev/reference/events/app_home_opened/)）。
 
 最小限の設定例:
 

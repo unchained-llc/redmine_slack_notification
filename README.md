@@ -35,6 +35,8 @@ Work Object previews/actions, slash commands, thread integration, and reminders 
 
 The images below illustrate supported feature content and controls using fictional English data. They are not live screenshots or pixel-exact reproductions of Slack; surrounding navigation is omitted, and configuration examples show YAML rather than a settings GUI. Both language versions share the same images.
 
+See the [Slack scopes and feature setup tables](#slack-scopes-and-feature-setup) for the permissions and app settings needed by each feature.
+
 ## Requirements and setup
 
 - Redmine 7.0 or later.
@@ -54,6 +56,57 @@ The images below illustrate supported feature content and controls using fiction
 3. Set the Bot Token and a default or project-specific channel ID. Keep the real YAML file out of Git.
 4. Configure Sidekiq to process the `slack` queue and invite the bot to the configured channels.
 5. Restart Redmine and Sidekiq. Both processes cache the YAML configuration.
+
+### Slack scopes and feature setup
+
+Add only the scopes needed for your features under **OAuth & Permissions → Bot Token Scopes**. Basic channel notifications start with `chat:write`. Reinstall the app after changing scopes and invite the bot to the destination channels.
+
+| Bot Token scope | Used for |
+| --- | --- |
+| [`chat:write`](https://docs.slack.dev/reference/scopes/chat.write/) | Notifications, feedback, and deleting the bot's own feedback messages |
+| [`im:write`](https://docs.slack.dev/reference/scopes/im.write/) | Sending due-date reminder DMs |
+| [`files:write`](https://docs.slack.dev/reference/scopes/files.write/) | Uploading Redmine attachment images into Slack notifications |
+| [`files:read`](https://docs.slack.dev/reference/scopes/files.read/) | Importing Slack thread attachments into Redmine |
+| [`users:read`](https://docs.slack.dev/reference/scopes/users.read/) | Automatic name matching, excluding bot-directed mentions, and author/mention profiles in link cards |
+| [`users:read.email`](https://docs.slack.dev/reference/scopes/users.read.email/) plus [`users:read`](https://docs.slack.dev/reference/scopes/users.read/) | Matching viewers by email; automatic user matching for personal email suppression |
+| [`channels:history`](https://docs.slack.dev/reference/scopes/channels.history/) / [`groups:history`](https://docs.slack.dev/reference/scopes/groups.history/) | Public / private channel history for threaded comment notifications, reply imports/batching, and Slack link cards |
+| [`channels:read`](https://docs.slack.dev/reference/scopes/channels.read/) / [`groups:read`](https://docs.slack.dev/reference/scopes/groups.read/) | Public / private channel information for name matching, email-suppression membership checks, and Slack link cards |
+| [`im:history`](https://docs.slack.dev/reference/scopes/im.history/) plus [`im:read`](https://docs.slack.dev/reference/scopes/im.read/) / [`mpim:history`](https://docs.slack.dev/reference/scopes/mpim.history/) plus [`mpim:read`](https://docs.slack.dev/reference/scopes/mpim.read/) | Slack link cards from DMs / group DMs. Not needed to send ordinary reminder DMs |
+| [`links:read`](https://docs.slack.dev/reference/scopes/links.read/) plus [`links:write`](https://docs.slack.dev/reference/scopes/links.write/) | Unfurling and refreshing Redmine URL Work Objects |
+| [`commands`](https://docs.slack.dev/reference/scopes/commands/) | Slash commands and creating issues through a message shortcut |
+
+Notifications and message responses share the `chat:write` requirement. Combine the scopes above for the features you use. Choose public/private channel scopes according to the conversation type. Follow each feature link for its limits and detailed setup.
+
+| Feature | Required Slack scopes | Additional Slack app setup | YAML and operational requirements |
+| --- | --- | --- | --- |
+| Channel notifications | `chat:write` | Invite the bot to the destination | Bot Token, destination channel, `slack` queue worker |
+| [Inline Issue images](#inline-issue-images) | `files:write` | — | Supported images attached to Redmine |
+| [Assignee mentions](#assignee-mentions) | No extra scope for explicit mappings; `users:read` for automatic name matching | — | `users` or `slack.auto_map_users_by_name: true` |
+| [Match viewers by email](#match-viewers-by-email) | `users:read`, `users:read.email` | — | `slack.auto_map_users_by_email: true`, `slack.events.team_id` |
+| [Match channels by name](#match-projects-to-channels-by-name) | `channels:read` / `groups:read` | Invite the bot to the channels | `slack.auto_map_channels_by_name: true` |
+| [Work Object notification previews](#ticket-work-object-previews) | `chat:write` | Enable Work Object Previews and select Task | `slack.work_object_previews: true` |
+| [Work Object details](#ticket-work-object-previews) | No additional scope for details themselves | Subscribe to `entity_details_requested` in Event Subscriptions | `slack.work_object_previews: true`, `slack.events`, user mapping |
+| Work Object URL unfurl/refresh | `links:read`, `links:write` | Subscribe to `link_shared`; register the Redmine host in App unfurl domains | `slack.work_object_previews: true`, `slack.events`, user mapping |
+| [Work Object edits/comments](#work-object-card-and-detail-actions) | No additional scope for the action itself | Enable Interactivity | `slack.work_object_previews: true`, `slack.work_object_actions: true`, `slack.events`, user mapping, Redmine action permissions |
+| [Threaded comment notifications](#threaded-redmine-comment-notifications) | `channels:history` / `groups:history` | No event subscription needed | `slack.comment_notifications_in_threads: true`, `slack.events.app_id` |
+| [Import Slack replies as comments](#add-redmine-comments-from-notification-threads) | `channels:history` / `groups:history`, `users:read`; also `files:read` for attachments | Subscribe to `message.channels` / `message.groups` | `slack.thread_comments: true`, `slack.events`, user mapping, Redmine comment/attachment permissions |
+| [Create from a message](#create-an-issue-from-a-slack-message) | `commands` | Set the message shortcut callback ID to `slackmine_message_create`; enable Interactivity | `slack.slash_command`, global Bot Token and `slack.events`, user mapping, Redmine issue-creation permission |
+| [Slash commands](#slash-command) | `commands`, `chat:write` for responses | Register the command; enable Interactivity | `slack.slash_command`, global Bot Token and `slack.events`, user mapping |
+| [App Home](#app-home-issue-lists) | No additional scope for display itself | Enable Home Tab; subscribe to `app_home_opened`; enable Interactivity for form controls | Global `slack.app_home: true`, Bot Token and `slack.events`, user mapping |
+| [Due-date reminder DMs](#daily-due-date-dms) | `chat:write`, `im:write` | Enable Messages Tab | `due_reminders.enabled: true`, user mapping, daily rake task schedule |
+| [Personal email suppression](#personal-email-preference) | `channels:read` / `groups:read`; also `users:read` and `users:read.email` for automatic matching | Invite the bot to the destination | User's email-suppression preference, user mapping, recipient's channel membership |
+| [Slack link cards in Redmine](#slack-message-cards-in-issue-text) | The conversation's `*:history` and `*:read`, `users:read` | Bot membership in the conversation; no event subscription needed | `slack.link_cards.enabled: true`, Bot Token |
+
+User mapping uses explicit `users` entries or email matching where supported. Automatic name matching does not authorize inbound viewing or editing. Slack scopes do not grant additional Redmine permissions.
+
+| Slack app setting | Value and purpose |
+| --- | --- |
+| Event Subscriptions → Request URL | `https://redmine.example.com/slackmine/events`. Subscribe to the bot events for the enabled features |
+| Interactivity & Shortcuts → Request URL | `https://redmine.example.com/slackmine/interactions`. Receives buttons, forms, and message shortcuts |
+| Slash Commands → Request URL | `https://redmine.example.com/slackmine/commands`. Match the registered command name to `slack.slash_command` |
+| Select Menus → Options Load URL | **Leave empty**. Slackmine sends options with its forms and does not need an external options endpoint |
+
+Configure App ID, Team ID, and Signing Secret under `slack.events`. The Signing Secret is separate from the Bot Token. Restart Redmine and Sidekiq after YAML changes. Details, modals, and App Home have no dedicated additional OAuth scope; they still require setup and user mapping ([details](https://docs.slack.dev/reference/methods/entity.presentDetails/), [modals](https://docs.slack.dev/reference/methods/views.open/), [App Home event](https://docs.slack.dev/reference/events/app_home_opened/)).
 
 A minimal configuration is:
 
