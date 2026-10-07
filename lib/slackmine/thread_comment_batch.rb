@@ -21,12 +21,7 @@ module Slackmine
       :waiting
     end
 
-    def collect(issue, app_id, team_id, event)
-      mention_cache = {}
-      return [] if ThreadComments.addressed_to_bot?(event, issue.project, cache: mention_cache)
-
-      wait, maximum = timing(issue.project)
-      return [event] if wait.zero?
+    def history_replies(project, event, mention_cache: {})
       # Slack is the buffer. Every job reconstructs the same deterministic
       # group; the existing Issue lock + first-post Journal identity deduplicates it.
       messages = []
@@ -34,7 +29,7 @@ module Slackmine
       10.times do
         body = { 'channel' => event['channel'], 'ts' => event['thread_ts'], 'limit' => 100 }
         body['cursor'] = cursor if cursor
-        response = Slackmine.slack_api('conversations.replies', body, Slackmine.bot_token(issue.project), form: true)
+        response = Slackmine.slack_api('conversations.replies', body, Slackmine.bot_token(project), form: true)
         messages.concat(Array(response['messages']))
         cursor = response.dig('response_metadata', 'next_cursor').to_s
         break if cursor.empty? && !response['has_more']
@@ -42,13 +37,14 @@ module Slackmine
         raise 'Slack thread batching history is incomplete' if cursor.empty?
       end
       raise 'Slack thread batching history exceeds 1000 messages' unless cursor.to_s.empty?
-      replies = messages.select { |message| message.is_a?(Hash) }.map do |message|
+      messages.select { |message| message.is_a?(Hash) }.map do |message|
         message.merge('type' => 'message', 'channel' => event['channel'], 'thread_ts' => event['thread_ts'])
       end.select { |message| ThreadComments.reply_event?(message) }
-         .reject { |message| ThreadComments.addressed_to_bot?(message, issue.project, cache: mention_cache) }
+         .reject { |message| ThreadComments.addressed_to_bot?(message, project, cache: mention_cache) }
          .uniq { |message| message['ts'] }.sort_by { |message| ThreadComments.posted_at(message['ts']) }
-      # The accepted event remains authoritative if Slack history has changed.
-      return [event] unless replies.any? { |reply| reply['ts'] == event['ts'] }
+    end
+
+    def groups_for(replies, wait, maximum)
       groups = []
       replies.each do |reply|
         time = ThreadComments.posted_at(reply['ts'])
@@ -61,6 +57,37 @@ module Slackmine
           current << reply
         end
       end
+      groups
+    end
+
+    def previous_turn(issue, event)
+      wait, maximum = timing(issue.project)
+      mention_cache = {}
+      return if wait.zero? || ThreadComments.addressed_to_bot?(event, issue.project, cache: mention_cache)
+
+      replies = history_replies(issue.project, event, mention_cache: mention_cache)
+      # The signed incoming event can precede its appearance in Slack history.
+      replies.reject! { |reply| reply['ts'] == event['ts'] }
+      replies << event
+      replies.sort_by! { |reply| ThreadComments.posted_at(reply['ts']) }
+      groups = groups_for(replies, wait, maximum)
+      index = groups.index { |items| items.any? { |reply| reply['ts'] == event['ts'] } }
+      return if index.zero?
+
+      previous = groups[index - 1]
+      previous if previous.last['user'] != event['user']
+    end
+
+    def collect(issue, app_id, team_id, event)
+      mention_cache = {}
+      return [] if ThreadComments.addressed_to_bot?(event, issue.project, cache: mention_cache)
+
+      wait, maximum = timing(issue.project)
+      return [event] if wait.zero?
+      replies = history_replies(issue.project, event, mention_cache: mention_cache)
+      # The accepted event remains authoritative if Slack history has changed.
+      return [event] unless replies.any? { |reply| reply['ts'] == event['ts'] }
+      groups = groups_for(replies, wait, maximum)
       index = groups.index { |items| items.any? { |reply| reply['ts'] == event['ts'] } }
       group = groups[index]
       # A later group closes this run. Do not let A -> B -> A merge A's

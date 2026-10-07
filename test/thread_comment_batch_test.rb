@@ -22,7 +22,7 @@ class ThreadCommentBatchTest < Minitest::Test
       'thread_ts' => "#{@start - 1}.000001", 'ts' => "#{@start + seconds}.000001" }
   end
 
-  def collect(messages, now, event = @event)
+  def collect(messages, now, event = @event, previous: false)
     Slackmine.stub(:config, @settings) do
       Slackmine.stub(:slack_api, ->(method, body, *_args, **_options) {
         if method == 'users.info'
@@ -33,7 +33,9 @@ class ThreadCommentBatchTest < Minitest::Test
         { 'messages' => messages }
       }) do
         BATCH.stub(:schedule, ->(*args) { @scheduled << args }) do
-          Time.stub(:now, Time.at(@start + now).utc) { BATCH.collect(@issue, 'ATEST', 'TTEST', event) }
+          Time.stub(:now, Time.at(@start + now).utc) do
+            previous ? BATCH.previous_turn(@issue, event) : BATCH.collect(@issue, 'ATEST', 'TTEST', event)
+          end
         end
       end
     end
@@ -68,6 +70,70 @@ class ThreadCommentBatchTest < Minitest::Test
     messages = [reply(0), reply(3), reply(5, 'UOTHER'), reply(8)]
     groups = messages.map { |message| collect(messages, 30, message) }.uniq
     assert_equal [messages.first(2), [messages[2]], [messages[3]]], groups
+  end
+
+  def test_new_author_closes_previous_turn_before_its_quiet_deadline
+    messages = [reply(0), reply(3), reply(5, 'UOTHER'), reply(8)]
+    assert_equal messages.first(2), collect(messages, 5, messages[2], previous: true)
+    assert_equal [messages[2]], collect(messages, 8, messages.last, previous: true)
+    assert_nil collect(messages, 3, messages[1], previous: true)
+    assert_nil collect(messages, 0, messages.first, previous: true)
+    # A signed event need not already appear in conversations.replies.
+    assert_equal messages.first(2), collect(messages.first(2), 5, messages[2], previous: true)
+    assert_empty @scheduled
+  end
+
+  def test_bots_and_bot_directed_messages_do_not_close_a_human_turn
+    @members['UBOT'] = { 'id' => 'UBOT', 'is_bot' => true }
+    request = reply(5, 'UOTHER').merge('text' => 'Ask <@UBOT>')
+    messages = [reply(0), request, reply(7, 'UBOT').merge('bot_id' => 'B123'), reply(10)]
+    assert_nil collect(messages, 5, request, previous: true)
+    assert_nil collect(messages, 10, messages.last, previous: true)
+  end
+
+  def test_author_change_saves_previous_batch_before_scheduling_new_turn_and_late_jobs_are_duplicates
+    @settings['slack']['thread_comments'] = true
+    messages = [reply(0), reply(3), reply(5, 'UOTHER')]
+    actions = []
+    saved = {}
+    comments = Slackmine::ThreadComments
+    Slackmine.stub(:config, @settings) do
+      Slackmine.stub(:channel_id, 'C123') do
+        Slackmine.stub(:slack_api, ->(method, *, **_) {
+          { 'messages' => method == 'conversations.replies' ? messages : [] }
+        }) do
+          comments.stub(:contexts, [@project]) do
+            comments.stub(:issue_from_parent, @issue) do
+              Slackmine::WorkObjects.stub(:integration_for, true) do
+                comments.stub(:persist_reply, ->(issue, event, team, events: [event]) {
+                  next :duplicate if saved[event['ts']]
+                  saved[event['ts']] = events
+                  actions << [:save, events]
+                  :saved
+                }) do
+                  comments.stub(:feedback, ->(_issue, event, result) { actions << [:feedback, event, result] }) do
+                    BATCH.stub(:schedule, ->(*args) { actions << [:schedule, args[2]]; :waiting }) do
+                      assert_equal :waiting, comments.process('ATEST', 'TTEST', messages.last)
+                      assert_equal [:save, messages.first(2)], actions[0]
+                      assert_equal :feedback, actions[1][0]
+                      assert_equal [:schedule, messages.last], actions[2]
+                      Time.stub(:now, Time.at(@start + 6).utc) do
+                        assert_equal :duplicate, comments.process('ATEST', 'TTEST', messages.first, batch_ready: true)
+                      end
+                      assert_equal 3, actions.size
+                      Time.stub(:now, Time.at(@start + 21).utc) do
+                        assert_equal :saved, comments.process('ATEST', 'TTEST', messages.last, batch_ready: true)
+                      end
+                      assert_equal [messages.first(2), [messages.last]], saved.values
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
   end
 
   def test_bot_directed_posts_are_excluded_from_batches_but_human_mentions_remain

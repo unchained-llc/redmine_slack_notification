@@ -101,6 +101,8 @@ slack:
   suppress_thread_comment_notifications: true
   # Combine replies from the same author in the same thread into one note.
   # This example waits for 60 seconds of silence, at most 300 seconds from the first reply.
+  # A different human author flushes the preceding turn in the incoming reply job.
+  # The new author starts the normal wait; Bot posts and Bot-directed mentions do not flush.
   # Omitted wait_seconds or 0 saves immediately. Omitted max_wait_seconds defaults to 300.
   # Requires a scheduled-job worker and conversations.replies access when batching is enabled.
   thread_comment_batch:

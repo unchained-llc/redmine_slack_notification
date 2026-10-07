@@ -121,23 +121,29 @@ module Slackmine
 
           wait = ThreadCommentBatch.timing(issue.project).first
           unless batch_ready || wait.zero?
+            previous = ThreadCommentBatch.previous_turn(issue, event)
+            save_batch(issue, previous, team_id) if previous
             return ThreadCommentBatch.schedule(app_id, team_id, event, wait)
           end
           events = batch_ready ? ThreadCommentBatch.collect(issue, app_id, team_id, event) : [event]
           return :waiting unless events
           return :ignored if events.empty?
-          result = if events.size == 1
-                     persist_reply(issue, events.first, team_id)
-                   else
-                     persist_reply(issue, events.first, team_id, events: events)
-                   end
-          # A duplicate never creates a second Journal or a second feedback post.
-          feedback(issue, events.first, result) if result != :duplicate
-          return result
+          return save_batch(issue, events, team_id)
         end
         return
       end
       nil
+    end
+
+    def save_batch(issue, events, team_id)
+      result = if events.size == 1
+                 persist_reply(issue, events.first, team_id)
+               else
+                 persist_reply(issue, events.first, team_id, events: events)
+               end
+      # A duplicate never creates a second Journal or a second feedback post.
+      feedback(issue, events.first, result) if result != :duplicate
+      result
     end
 
     def feedback(issue, event, result)
