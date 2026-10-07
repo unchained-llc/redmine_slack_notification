@@ -67,6 +67,7 @@ class StandardNotificationsTest < Minitest::Test
   def test_default_messages_are_english_and_match_example_keys
     defaults = Slackmine::Formatter::DEFAULT_MESSAGES
     example = YAML.safe_load(File.read(File.expand_path('../config/slackmine.messages.yml.example', __dir__))).fetch('messages')
+    japanese = YAML.safe_load(File.read(File.expand_path('../config/slackmine.messages.ja.yml.example', __dir__))).fetch('messages')
     operations = YAML.safe_load(File.read(File.expand_path('../config/slackmine.yml.example', __dir__)))
     refute operations.key?('messages')
     flatten = ->(entries, prefix = '') do
@@ -76,6 +77,13 @@ class StandardNotificationsTest < Minitest::Test
     end
     default_values = flatten.call(defaults)
     assert_equal default_values.keys.sort, flatten.call(example).keys.sort
+    japanese_values = flatten.call(japanese)
+    assert_equal default_values.keys.sort, japanese_values.keys.sort
+    default_values.each do |key, value|
+      assert_equal value.to_s.scan(/%\{[^}]+\}/).sort,
+                   japanese_values.fetch(key).to_s.scan(/%\{[^}]+\}/).sort, key
+    end
+    assert_equal 'Redmine', japanese.dig('work_objects', 'product_name')
     assert_empty default_values.select { |_, value| value.to_s.match?(/[ぁ-んァ-ヶ一-龠]/) }
   end
 

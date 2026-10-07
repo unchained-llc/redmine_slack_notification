@@ -54,7 +54,7 @@ See the [Slack scopes and feature setup tables](#slack-scopes-and-feature-setup)
    ```
 
 2. Copy the [behavior configuration example](config/slackmine.yml.example) to the application's `config/slackmine.yml`.
-3. Set the Bot Token and a default or project-specific channel ID. To customize wording, copy the [English message example](config/slackmine.messages.yml.example) to `config/slackmine.messages.yml` and edit it. Keep the real YAML files out of Git.
+3. Set the Bot Token and a default or project-specific channel ID. To use Japanese wording, copy the [Japanese message example](config/slackmine.messages.ja.yml.example) to `config/slackmine.messages.yml`; to customize English wording, start from the [English message example](config/slackmine.messages.yml.example). Keep the real configuration files out of Git.
 4. Configure Sidekiq to process the `slack` queue and invite the bot to the configured channels.
 5. Restart Redmine and Sidekiq. Both processes cache the YAML configuration.
 
@@ -764,9 +764,9 @@ To share a newly uploaded private file with the channel, the plugin posts a temp
 
 ### Wording and templates
 
-The `messages` tree in `slackmine.messages.yml` changes notification wording, icons, and colors; it does not control whether an event is sent. All keys are optional. Omitted or empty strings use built-in defaults. `messages.templates.icon_fallback` sets the icon for unknown events. The [message example](config/slackmine.messages.yml.example) lists every available key with sample values:
+The `messages` tree in `slackmine.messages.yml` changes notification wording, icons, and colors; it does not control whether an event is sent. All keys are optional. Omitted or empty strings use built-in defaults. `messages.templates.icon_fallback` sets the icon for unknown events. The [English](config/slackmine.messages.yml.example) and [Japanese](config/slackmine.messages.ja.yml.example) examples list every available key with sample values:
 
-English defaults are stored in [config/slackmine.messages.yml.example](config/slackmine.messages.yml.example). Put deployment-specific wording in a Git-ignored `config/slackmine.messages.yml`; a file in the Redmine application's `config` directory takes precedence over one in the plugin directory. Project overrides belong under `projects.<identifier>.messages` in the same file. During migration, the plugin still reads legacy `messages` values from `slackmine.yml`, but the separate message file wins. Thread connection dialogs, feedback, errors, and the saved history heading use `messages.thread_connections`. Slack quote cards and their plain-text fallbacks use `messages.link_cards`. Unknown event and relation labels use `messages.templates.event_fallback` and `relation_fallback`. Legacy `slack.link_cards.link_text` applies only when the separate file does not set `messages.link_cards.open`.
+English defaults are stored in [config/slackmine.messages.yml.example](config/slackmine.messages.yml.example), with a [Japanese example](config/slackmine.messages.ja.yml.example) available to copy. Put customized wording in a Git-ignored `config/slackmine.messages.yml`; a file in the Redmine application's `config` directory takes precedence over one in the plugin directory. Project overrides belong under `projects.<identifier>.messages` in the same file. During migration, the plugin still reads legacy `messages` values from `slackmine.yml`, but the separate message file wins. Thread connection dialogs, feedback, errors, and the saved history heading use `messages.thread_connections`. Slack quote cards and their plain-text fallbacks use `messages.link_cards`. Unknown event and relation labels use `messages.templates.event_fallback` and `relation_fallback`. Legacy `slack.link_cards.link_text` applies only when the separate file does not set `messages.link_cards.open`.
 
 ```yaml
 messages:
@@ -1240,7 +1240,7 @@ version numbers are editorial labels, not a record of published releases or Git 
 
 | Version | Highlights |
 | --- | --- |
-| **1.4.0** | Separate display wording from operational settings so it can be customized in a dedicated file. Improve duplicate-operation handling and failure responses for Slack interactions. |
+| **1.4.0** | Separate display wording from operational settings and add a Japanese wording example. Improve duplicate-operation handling and failure responses for Slack interactions. |
 | **1.3.0** | Process Work Object details and short actions in the Web process; queue URL unfurls, post-save refreshes, App Home lists, slash command delivery, connection saves, and quote-heavy form saves. Review thread history in the Web process first, falling back to Sidekiq after two seconds. |
 | **1.2.2** | Added file-transfer restrictions for audit and internal policies: use source links instead of transferring files, allow per-project exceptions, or enforce the restriction globally. |
 | **1.2.1** | Added switches to disable Slack link retrieval, quote imports, and all cards, or only Redmine web cards. Documented how to disable assignee mentions. |

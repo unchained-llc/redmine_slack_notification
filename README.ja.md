@@ -52,7 +52,7 @@ Work Objectのプレビュー・操作、スラッシュコマンド、スレッ
    ```
 
 2. [動作設定例](config/slackmine.yml.example)を Redmine アプリケーションの `config/slackmine.yml` にコピーします。
-3. Bot Token と、デフォルトまたはプロジェクト固有のチャンネル ID を設定します。文言を変更する場合は[英語の文言例](config/slackmine.messages.yml.example)を `config/slackmine.messages.yml` にコピーして編集します。実際の YAML ファイルは Git に含めないでください。
+3. Bot Token と、デフォルトまたはプロジェクト固有のチャンネル ID を設定します。日本語で表示する場合は[日本語の文言例](config/slackmine.messages.ja.yml.example)、英語の文言を変更する場合は[英語の文言例](config/slackmine.messages.yml.example)を `config/slackmine.messages.yml` にコピーして編集します。実際の設定ファイルは Git に含めないでください。
 4. Sidekiq が `slack` キューを処理するように設定し、ボットを通知先チャンネルに招待します。
 5. Redmine と Sidekiq を再起動します。どちらのプロセスも YAML 設定をキャッシュします。
 
@@ -743,9 +743,9 @@ slack:
 
 ### 文言とテンプレート
 
-`slackmine.messages.yml` の `messages` ツリーで通知文言・アイコン・色を変更できます。イベントを送るかどうかは制御しません。すべてのキーは任意です。省略した値や空文字列には組み込みの初期値を使います。未知のイベントに使うアイコンは `messages.templates.icon_fallback` で指定できます。[文言の設定例](config/slackmine.messages.yml.example)には、使用できるすべてのキーとサンプル値を掲載しています。
+`slackmine.messages.yml` の `messages` ツリーで通知文言・アイコン・色を変更できます。イベントを送るかどうかは制御しません。すべてのキーは任意です。省略した値や空文字列には組み込みの初期値を使います。未知のイベントに使うアイコンは `messages.templates.icon_fallback` で指定できます。[日本語](config/slackmine.messages.ja.yml.example)と[英語](config/slackmine.messages.yml.example)の設定例には、使用できるすべてのキーとサンプル値を掲載しています。
 
-英語の既定文言は [config/slackmine.messages.yml.example](config/slackmine.messages.yml.example) にまとめています。Redmine固有の日本語は Git 管理対象外の `config/slackmine.messages.yml` に置きます。Redmine 本体の `config` に置いたファイルがプラグイン内のファイルより優先されます。プロジェクト別の上書きは同じファイルの `projects.<識別子>.messages` に指定できます。移行中は旧 `slackmine.yml` 内の `messages` も読み取りますが、新しい文言ファイルの値を優先します。スレッド接続の画面・結果通知・エラー・保存する過去会話の見出しは `messages.thread_connections`、Slack引用カードとプレーンテキストの代替表示は `messages.link_cards` で変更できます。未知のイベント名・関連種別の表示は `messages.templates.event_fallback` と `relation_fallback` で変更できます。旧 `slack.link_cards.link_text` は別ファイルに `messages.link_cards.open` がない場合だけ使います。
+英語の既定文言は [config/slackmine.messages.yml.example](config/slackmine.messages.yml.example) にまとめています。日本語の設定例は [config/slackmine.messages.ja.yml.example](config/slackmine.messages.ja.yml.example) です。コピーした `config/slackmine.messages.yml` は Git 管理対象外にしてください。Redmine 本体の `config` に置いたファイルがプラグイン内のファイルより優先されます。プロジェクト別の上書きは同じファイルの `projects.<識別子>.messages` に指定できます。移行中は旧 `slackmine.yml` 内の `messages` も読み取りますが、新しい文言ファイルの値を優先します。スレッド接続の画面・結果通知・エラー・保存する過去会話の見出しは `messages.thread_connections`、Slack引用カードとプレーンテキストの代替表示は `messages.link_cards` で変更できます。未知のイベント名・関連種別の表示は `messages.templates.event_fallback` と `relation_fallback` で変更できます。旧 `slack.link_cards.link_text` は別ファイルに `messages.link_cards.open` がない場合だけ使います。
 
 ```yaml
 messages:
@@ -1208,7 +1208,7 @@ ruby -Itest test/thread_comment_feedback_cleanup_test.rb
 
 | バージョン | 主な変更 |
 | --- | --- |
-| **1.4.0** | 表示文言を動作設定から分離し、専用ファイルで変更できるようにしました。Slack操作の重複実行や処理失敗時の応答も改善しました。 |
+| **1.4.0** | 表示文言を動作設定から分離し、日本語の設定例を追加しました。Slack操作の重複実行や処理失敗時の応答も改善しました。 |
 | **1.3.0** | Work Objectの即時表示・軽い操作をWebで処理。URL展開・保存後の更新、App Home一覧、スラッシュコマンド配信、スレッド接続の保存、時間のかかる引用付きフォーム保存をSidekiqで処理。接続先選択後の履歴確認はWebを優先し、2秒を超えた場合にキューへ切り替えます。 |
 | **1.2.2** | 監査・社内規程向けのファイル転送制限を追加。ファイル本体の代わりに元の保存場所へのリンクで連携し、プロジェクト別の例外設定と全体強制に対応しました。 |
 | **1.2.1** | Slackリンクの本文取得・引用保存・カード表示全体と、Redmine画面のカード表示をそれぞれOFFにできる設定を追加。メンションを無効にする設定方法も追記。 |

@@ -1,0 +1,330 @@
+# Japanese wording example. Copy to config/slackmine.messages.yml to use it.
+# Place this file under the Redmine application's config directory or this
+# plugin's config directory. The Redmine application directory takes priority.
+# The copied file is ignored by Git. Project-specific wording may be placed under
+# projects.<identifier>.messages in the same file.
+---
+messages:
+  app_home:
+    title: マイチケット
+    all: すべての一覧
+    my: 自分の担当
+    reported: 報告したチケット
+    updated: 更新したチケット
+    this_week: 今週が期限
+    refresh: 更新
+    detail: 詳細を開く
+    open: Redmineで開く
+    empty: 未完了のチケットはありません
+    unmapped: Slackアカウントが有効なRedmineユーザーに紐づいていません
+    limit: 各セクション最大10件の未完了チケットを表示します。最新情報を取得するには、詳細を開くか更新してください
+  commands:
+    project: プロジェクト
+    continue: 次へ
+    message_project: プロジェクトを選択してください（最大100件）次のフォームに、選択したメッセージと投稿元リンクが入ります
+    source_message: 元のSlackメッセージ
+    message_expired: フォームの有効期限が切れました。メッセージのショートカットから開き直してください
+    message_retry: 投稿元リンクを取得できませんでした。もう一度お試しください
+    processing: この操作は現在処理中です。再実行する前にチケットを確認してください
+    background_saved: Redmineにチケットの変更を保存しました
+    background_failed: チケットの変更を保存できませんでした。再試行する前にチケットを確認してください
+    full_form: Redmineで完全なフォームを開く
+    help: |-
+      *%{command} — チケット操作*
+      • `%{command} my` — 自分が担当する未完了チケットを表示（最大10件）
+      • `%{command} due` — 自分の期限超過・3日以内が期日のチケットを表示（最大10件）
+      • `%{command} reminders` — 設定されたリマインダー期間に基づいて、自分の期限リマインダーを表示。日数の指定はできません
+      • `%{command} search キーワード` — チケットの題名を検索（最大10件）
+      • `%{command} 123` — チケットを1件表示。Work Objectプレビューが設定されている場合は、自動的にカードで表示
+      • `%{command} new [プロジェクト識別子]` — プロジェクトを選択して、チケット作成フォームを開く
+      • `%{command} comment 123` — 表示されたボタンからコメント入力フォームを開く。コメント本文はフォームに入力
+      • `%{command} status 123 [ステータス名またはID]` — ステータスを直接変更。値を省略すると選択フォームを開く
+      • `%{command} assign 123 [ユーザーログイン名、名前、またはID]` — 担当者を直接変更。`me` で自分、`none` で未割当を指定可能。値を省略すると選択フォームを開く
+      • `%{command} help` — このヘルプを表示
+
+      結果は自分にのみ表示されます。一覧はリマインダー形式、1件の場合は設定に応じてカードで表示します
+    denied: 利用できません。アカウントの紐付け、権限、設定を確認してください
+    empty: 該当する結果がありません
+    results: チケット（最大10件）
+    choose_project: プロジェクトを選択してください（最大20件）。new <プロジェクト識別子> で候補を絞り込めます
+    my: 自分の担当チケット
+    search: 検索結果
+    due: 期限が近いチケット
+    reminders: 自分の期限リマインダー
+    reminders_empty: 現在のリマインダー設定に該当するチケットはありません
+    new: 新しいチケット
+    comment: コメントを追加
+    status: ステータスを変更
+    assign: 担当者を変更
+    updated: チケットを更新しました
+    unchanged: チケットはすでに指定された値になっています
+    no_match: 変更可能な候補を1件に特定できませんでした。IDを指定するか、表示されたボタンから選択してください
+    save: 保存
+    cancel: キャンセル
+    tracker: トラッカー
+    subject: 題名
+    description: 説明
+  work_objects:
+    product_name: Redmine
+    display_type: チケット
+    edit_issue: チケットを編集
+    change_assignee: 担当者変更
+    open_issue: "%{product_name} で開く"
+    assign_to_me: 自分が担当
+    start_work: 作業開始
+    complete_work: 作業完了
+    log_time: 時間記録
+    watch_settings: ウォッチ設定
+    watching: ウォッチしました
+    not_watching: ウォッチ解除しました
+    watch: ウォッチ
+    unwatch: ウォッチ解除
+    add_comment: コメント追加
+    reply: 返信
+    reply_hint: 直近の担当者に戻してコメントを追加します。担当者を戻せない場合は、コメントのみ追加します
+    comment_placeholder: コメントを入力
+    edit_title: "#%{id} を編集"
+    save: 保存
+    cancel: キャンセル
+    edit_failed: "⚠️ #%{id} を更新できませんでした。権限と現在の状態を確認してください"
+    operation_failed: ⚠️ 操作を実行できませんでした。権限と現在の状態を確認してください
+  thread_notifications:
+    added_header: "%{product_name} #%{id} 新しいコメント"
+    updated_header: "%{product_name} #%{id} のコメント更新"
+    deleted_header: "%{product_name} #%{id} のコメント削除"
+  thread_comments:
+    saved: "✅ Redmine #%{id} にコメントを追加しました"
+    restricted: "  コメントを追加できませんでした。ユーザーの対応付け、チケットの権限・状態、テキストの長さを確認してください"
+    image_failed: "  返信を保存できませんでした。ファイルサイズ、ファイルへのアクセス権、Bot の files:read スコープを確認してください"
+  events:
+    document:
+      created: 文書を作成
+      updated: 文書を更新
+      deleted: 文書を削除
+    file:
+      added: ファイルを追加
+      updated: ファイルを更新
+      deleted: ファイルを削除
+    message:
+      posted: 掲示板に投稿
+      updated: 掲示板の投稿を更新
+      deleted: 掲示板の投稿を削除
+    issue:
+      created: チケットを作成
+      updated: チケットを更新
+      deleted: チケットを削除
+    comment:
+      added: コメントを追加
+      updated: コメントを更新
+      deleted: コメントを削除
+    wiki:
+      created: Wikiページを作成
+      updated: Wikiページを更新
+      deleted: Wikiページを削除
+    news:
+      created: ニュースを作成
+      updated: ニュースを更新
+      deleted: ニュースを削除
+    news_comment:
+      added: ニュースにコメントを追加
+      updated: ニュースのコメントを更新
+      deleted: ニュースのコメントを削除
+    time_entry:
+      created: 作業時間を記録
+      updated: 作業時間を更新
+      deleted: 作業時間を削除
+    version:
+      created: バージョンを作成
+      updated: バージョンを更新
+      deleted: バージョンを削除
+    project:
+      updated: プロジェクトを更新
+  icons:
+    document:
+      created: 📄
+      updated: ✏️
+      deleted: 🗑️
+    file:
+      added: 📎
+      updated: ✏️
+      deleted: 🗑️
+    message:
+      posted: 💬
+      updated: ✏️
+      deleted: 🗑️
+    issue:
+      created: 🆕
+      updated: 🔄
+      deleted: 🗑️
+    comment:
+      added: 💬
+      updated: 💬
+      deleted: 🗑️
+    wiki:
+      created: 📚
+      updated: ✏️
+      deleted: 🗑️
+    news:
+      created: 📰
+      updated: 📰
+      deleted: 🗑️
+    news_comment:
+      added: 💬
+      updated: ✏️
+      deleted: 🗑️
+    time_entry:
+      created: ⏱️
+      updated: ⏱️
+      deleted: 🗑️
+    version:
+      created: 🏷️
+      updated: 🏷️
+      deleted: 🗑️
+    project:
+      updated: 🗂️
+  sections:
+    content: 内容
+    comment: コメント
+    summary: 概要
+    changes: 変更内容
+    metadata: メタデーター
+    added_comment: 追加コメント
+    updated_comment: 変更後のコメント
+    description: 説明
+    body: 本文
+  fields:
+    project: プロジェクト
+    updater: 更新者
+    poster: 投稿者
+    tracker: トラッカー
+    category: カテゴリー
+    priority: 優先度
+    status: ステータス
+    assignee: 担当者
+    target_version: 対象バージョン
+    parent_issue: 親チケット
+    child_issue: 子チケット
+    subject: 題名
+    description: 説明
+    start_date: 開始日
+    due_date: 期日
+    attachment: 添付ファイル
+    relation: 関連チケット（%{type}）
+    location: 変更箇所
+    hours: 作業時間
+    spent_on: 作業日
+    author: 作成者
+    estimated_hours: 予定工数
+    done_ratio: 進捗率
+    last_comment: 最終コメント
+    children: 子チケット
+    relations: 関連するチケット
+    attachments: 添付ファイル
+    watchers: ウォッチャー
+    custom_fields: カスタムフィールド
+  relations:
+    relates: 関連
+    duplicates: 重複
+    duplicated: 重複元
+    blocks: ブロック
+    blocked: ブロック元
+    precedes: 先行
+    follows: 後続
+    copied_to: コピー先
+    copied_from: コピー元
+  values:
+    unknown_user: 不明なユーザー
+    unknown: 不明
+    unset: 未設定
+    unassigned: 未割当
+    none: なし
+    empty: （空）
+    added: 追加
+    removed: 解除
+    created: 作成
+    updated: 更新
+    deleted: 削除
+  diff:
+    heading: "%{label}の差分"
+    omitted: 差分を一部省略。全文はリンク先で確認
+  images:
+    alt: 画像
+    link_label: '画像: %{name}'
+  templates:
+    icon_fallback: 🔧
+    event_fallback: '不明なイベント: %{noun} / %{action}'
+    relation_fallback: 関連 (%{type})
+    issue_updated_header: "%{actor} *%{event}*"
+    issue_fallback: "[%{project}] %{actor} %{action} %{tracker} #%{id}: %{subject}"
+    journal_fallback: "[%{project}] %{actor} %{event} %{tracker} #%{id}: %{subject}"
+    generic_fallback: "%{event} - %{subject}"
+  due_reminders:
+    part_suffix: " (%{part}/%{total_parts})"
+    fallback: '期日リマインダー%{suffix}: %{count}件（期限超過%{overdue_count}件・本日期日%{today_count}件）'
+    title: 📋 *期日リマインダー %{count}件%{suffix}*
+    overdue_label: 🚨 期限超過
+    today_label: ⏰ 本日期日
+    upcoming_label: 📅 期日が近い課題
+    group_fallback: "%{label}: %{count}件"
+    group_heading: "*%{label}（%{count}件）*"
+    group_continued: "*%{label}（続き）*"
+    overdue_timing: "%{days}日超過"
+    upcoming_timing: 残り%{days}日
+    timing_suffix: " · %{timing}"
+    issue_line: • <%{url}|#%{id} %{subject}> · %{project}%{timing}
+  thread_connections:
+    title: スレッドをチケットに接続
+    close: 閉じる
+    loading_picker: このスレッドの接続設定を確認しています…
+    unsupported_source: ユーザーの対応付けとチャンネルを確認してください。DMには対応していません。
+    destination: 接続先
+    disconnect: 接続を解除
+    save_history: これまでの会話も保存する
+    picker_hint: 接続するチケット番号を入力してください。確認画面で過去の発言を選べます。
+    issue_number: チケット番号
+    history: 過去の会話
+    review: 内容を確認
+    invalid_review: 確認情報が無効です。メニューからやり直してください。
+    issue_denied: チケットが見つからないか、接続する権限がありません。
+    loading_preview: チケットとスレッドの内容を確認しています…
+    destination_number: 接続先チケット番号
+    save_post: この発言を保存する
+    import: 取り込み
+    connect: 接続する
+    preview_failed: 確認できませんでした。権限・Botの参加・スコープを確認してください。過去分は人の発言20件、スレッド全体は1000件までです。メニューからやり直せます。
+    denied: 操作する権限がありません。
+    destination_changed: 接続先を変える場合はメニューからやり直してください。
+    review_incomplete: 確認が完了していません。
+    connected: このスレッドを接続しました。以後の返信・添付を保存します。
+    disconnected: 接続を解除しました。保存済みコメントは残ります。
+    already_connected: 既に別の接続が設定されています。メニューから確認してください。
+    connection_conflict: 別の接続が先に設定されました。メニューから確認してください。
+    attachment_only: "[添付ファイル]"
+    operation_failed: 処理を完了できませんでした。スレッドとチケットの保存結果を確認してください。確認後に会話が変わった場合は、接続を解除してから再確認してください。
+    submission_pending: 処理中、または保存結果の確認が必要です。スレッドとチケットを確認してください。
+    submission_failed: 処理を完了できませんでした。スレッドとチケットの保存結果を確認してから、メニューを開き直してください。
+    current_connection: 'このスレッドは #%{id} に接続されています。解除しても保存済みコメントは残ります。'
+    preview_hint: |-
+      #%{id} %{subject}
+      過去分はあなたの名義の1件の引用コメントにまとめます。保存する発言を選んでください。確認中に届いた返信も権限に応じて保存します。
+    post_preview: |-
+      %{author} · %{timestamp}
+      %{text}
+      添付: %{count}件
+    history_heading: Slackスレッドから取り込み（接続前の会話）
+  link_cards:
+    open: Slackで開く
+    parent_open: Slackで親メッセージを開く
+    thread_reply: ↳ スレッド返信
+    reply_count: スレッド返信 %{count}件
+    plain_parent: |
+      スレッドの親メッセージ: %{author}
+      %{text}
+
+      スレッド返信
+    plain_quote: |-
+      Slack — %{author} · #%{channel} · %{timestamp}
+      %{urls}
+      %{prefix}%{text}
+    unknown_author: Slack
+    compact_open: Slack ↗
