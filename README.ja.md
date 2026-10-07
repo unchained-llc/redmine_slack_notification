@@ -38,8 +38,8 @@ Work Objectのプレビュー・操作、スラッシュコマンド、スレッ
 ## 要件とセットアップ
 
 - Redmine 7.0 以降。
-- Bot Token と [`chat:write`](https://docs.slack.dev/reference/methods/chat.postMessage/) スコープを持つ Slack アプリ。期日リマインダーの DM には [`im:write`](https://docs.slack.dev/reference/methods/conversations.open/)、Issue の画像を本文内に表示するには [`files:write`](https://docs.slack.dev/reference/methods/files.getUploadURLExternal/)、名前によるユーザーの自動対応付けには [`users:read`](https://docs.slack.dev/reference/methods/users.list/) も必要です。スコープを変更したら、Slack アプリを再インストールして Bot Token に反映してください。
-- [個人の通知メール抑止](#個人ごとの通知メール設定)でユーザーの自動マッチングを使う場合は、`users:read`と`users:read.email`の両方を追加し、Slackアプリを再インストールしてください。
+- Bot Token と [`chat:write`](https://docs.slack.dev/reference/scopes/chat.write/) スコープを持つ Slack アプリ。期日リマインダーの DM には [`im:write`](https://docs.slack.dev/reference/scopes/im.write/)、Issue の画像を本文内に表示するには [`files:write`](https://docs.slack.dev/reference/scopes/files.write/)、名前によるユーザーの自動対応付けには [`users:read`](https://docs.slack.dev/reference/scopes/users.read/) も必要です。スコープを変更したら、Slack アプリを再インストールして Bot Token に反映してください。
+- [個人の通知メール抑止](#個人ごとの通知メール設定)でユーザーの自動マッチングを使う場合は、[`users:read`](https://docs.slack.dev/reference/scopes/users.read/)と[`users:read.email`](https://docs.slack.dev/reference/scopes/users.read.email/)の両方を追加し、Slackアプリを再インストールしてください。
 - プロジェクトごとの通知先チャンネル、またはデフォルトのチャンネル。非公開チャンネルを含め、通知先にはボットを招待してください。
 - 期日リマインダーの DM を使う場合は、Slack アプリの **App Home → Display Messages tab** を有効にしてください。
 - `slack` キューを処理する ActiveJob ワーカー。本番環境では Sidekiq を推奨します。
@@ -57,7 +57,7 @@ Work Objectのプレビュー・操作、スラッシュコマンド、スレッ
 
 ### Slack権限と機能別の設定一覧
 
-**OAuth & Permissions → Bot Token Scopes** に、使う機能の権限だけを追加します。通常のチャンネル通知は `chat:write` から始められます。スコープを変更したらアプリを再インストールし、Botを対象チャンネルへ招待してください。
+**OAuth & Permissions → Bot Token Scopes** に、使う機能の権限だけを追加します。通常のチャンネル通知は [`chat:write`](https://docs.slack.dev/reference/scopes/chat.write/) から始められます。スコープを変更したらアプリを再インストールし、Botを対象チャンネルへ招待してください。
 
 | Bot Tokenスコープ | 必要になる機能 |
 | --- | --- |
@@ -73,27 +73,27 @@ Work Objectのプレビュー・操作、スラッシュコマンド、スレッ
 | [`links:read`](https://docs.slack.dev/reference/scopes/links.read/) ＋ [`links:write`](https://docs.slack.dev/reference/scopes/links.write/) | Redmine URLのWork Object展開・再読み込み |
 | [`commands`](https://docs.slack.dev/reference/scopes/commands/) | スラッシュコマンド、メッセージショートカットからのチケット作成 |
 
-通知やメッセージでの応答には共通で `chat:write` が必要です。以下の権限は上の表から組み合わせて設定します。公開・非公開チャンネルの権限は、利用するチャンネル種別に応じて選びます。各機能の詳細と制限はリンク先を参照してください。
+通知やメッセージでの応答には共通で [`chat:write`](https://docs.slack.dev/reference/scopes/chat.write/) が必要です。以下の権限は上の表から組み合わせて設定します。公開・非公開チャンネルの権限は、利用するチャンネル種別に応じて選びます。各機能の詳細と制限はリンク先を参照してください。
 
 | 機能 | 必要なSlack権限 | Slack側での追加設定 | YAML・運用上の要件 |
 | --- | --- | --- | --- |
-| 通常のチャンネル通知 | `chat:write` | Botを通知先へ招待 | Bot Token、通知先チャンネル、`slack` キューワーカー |
-| [Issueの画像表示](#issue-の画像表示) | `files:write` | — | Redmineに添付された対応画像 |
-| [担当者のメンション](#担当者のメンション) | 明示的な対応付けなら追加不要。名前の自動照合は `users:read` | — | `users` または `slack.auto_map_users_by_name: true` |
-| [メールでのユーザー対応付け](#メールアドレスで閲覧ユーザーを自動対応付けする) | `users:read`、`users:read.email` | — | `slack.auto_map_users_by_email: true`、`slack.events.team_id` |
-| [チャンネル名の自動対応付け](#プロジェクト名とチャンネル名の自動マッチング) | `channels:read` / `groups:read` | Botを対象チャンネルへ招待 | `slack.auto_map_channels_by_name: true` |
-| [Work Object通知プレビュー](#チケットの-work-object-previews) | `chat:write` | Work Object PreviewsをON、Taskを選択 | `slack.work_object_previews: true` |
-| [Work Objectの詳細表示](#チケットの-work-object-previews) | 詳細表示自体の追加スコープなし | Event Subscriptionsで `entity_details_requested` を購読 | `slack.work_object_previews: true`、`slack.events`、ユーザー対応付け |
-| Work ObjectのURL展開・再読み込み | `links:read`、`links:write` | `link_shared` を購読、App unfurl domainsにRedmineのホストを登録 | `slack.work_object_previews: true`、`slack.events`、ユーザー対応付け |
+| 通常のチャンネル通知 | [`chat:write`](https://docs.slack.dev/reference/scopes/chat.write/) | Botを通知先へ招待 | Bot Token、通知先チャンネル、`slack` キューワーカー |
+| [Issueの画像表示](#issue-の画像表示) | [`files:write`](https://docs.slack.dev/reference/scopes/files.write/) | — | Redmineに添付された対応画像 |
+| [担当者のメンション](#担当者のメンション) | 明示的な対応付けなら追加不要。名前の自動照合は [`users:read`](https://docs.slack.dev/reference/scopes/users.read/) | — | `users` または `slack.auto_map_users_by_name: true` |
+| [メールでのユーザー対応付け](#メールアドレスで閲覧ユーザーを自動対応付けする) | [`users:read`](https://docs.slack.dev/reference/scopes/users.read/)、[`users:read.email`](https://docs.slack.dev/reference/scopes/users.read.email/) | — | `slack.auto_map_users_by_email: true`、`slack.events.team_id` |
+| [チャンネル名の自動対応付け](#プロジェクト名とチャンネル名の自動マッチング) | [`channels:read`](https://docs.slack.dev/reference/scopes/channels.read/) / [`groups:read`](https://docs.slack.dev/reference/scopes/groups.read/) | Botを対象チャンネルへ招待 | `slack.auto_map_channels_by_name: true` |
+| [Work Object通知プレビュー](#チケットの-work-object-previews) | [`chat:write`](https://docs.slack.dev/reference/scopes/chat.write/) | Work Object PreviewsをON、Taskを選択 | `slack.work_object_previews: true` |
+| [Work Objectの詳細表示](#チケットの-work-object-previews) | 詳細表示自体の追加スコープなし | Event Subscriptionsで [`entity_details_requested`](https://docs.slack.dev/reference/events/entity_details_requested/) を購読 | `slack.work_object_previews: true`、`slack.events`、ユーザー対応付け |
+| Work ObjectのURL展開・再読み込み | [`links:read`](https://docs.slack.dev/reference/scopes/links.read/)、[`links:write`](https://docs.slack.dev/reference/scopes/links.write/) | [`link_shared`](https://docs.slack.dev/reference/events/link_shared/) を購読、App unfurl domainsにRedmineのホストを登録 | `slack.work_object_previews: true`、`slack.events`、ユーザー対応付け |
 | [Work Objectからの編集・コメント](#work-object-カードと詳細パネルからの操作) | 操作自体の追加スコープなし | InteractivityをON | `slack.work_object_previews: true`、`slack.work_object_actions: true`、`slack.events`、ユーザー対応付け、Redmineの操作権限 |
-| [コメント通知をスレッドへ投稿](#redmineコメント通知をスレッドにまとめる) | `channels:history` / `groups:history` | イベント購読は不要 | `slack.comment_notifications_in_threads: true`、`slack.events.app_id` |
-| [Slack返信のコメント取り込み](#通知スレッドからredmineにコメントを追加) | `channels:history` / `groups:history`、`users:read`。添付取り込みは `files:read` も必要 | `message.channels` / `message.groups` を購読 | `slack.thread_comments: true`、`slack.events`、ユーザー対応付け、Redmineのコメント・添付権限 |
-| [メッセージからチケット作成](#slackメッセージからチケット作成) | `commands` | メッセージショートカットのCallback IDを `slackmine_message_create` に設定、InteractivityをON | `slack.slash_command`、全体のBot Token・`slack.events`、ユーザー対応付け、Redmineのチケット追加権限 |
-| [スラッシュコマンド](#スラッシュコマンド) | `commands`、応答用の `chat:write` | コマンド登録、InteractivityをON | `slack.slash_command`、全体のBot Token・`slack.events`、ユーザー対応付け |
-| [App Home](#app-homeのチケット一覧) | 表示自体の追加スコープなし | Home TabをON、`app_home_opened` を購読。フォーム操作はInteractivityをON | 全体の `slack.app_home: true`、Bot Token・`slack.events`、ユーザー対応付け |
-| [期日リマインダーDM](#毎日の期日リマインダー-dm) | `chat:write`、`im:write` | Messages TabをON | `due_reminders.enabled: true`、ユーザー対応付け、毎日のrakeタスク実行 |
-| [個人の通知メール抑止](#個人ごとの通知メール設定) | `channels:read` / `groups:read`。自動マッチングは `users:read`、`users:read.email` も必要 | Botを通知先へ招待 | 本人のメール抑止設定、ユーザー対応付け、通知先への本人の参加 |
-| [Redmine本文内のSlackリンクカード](#redmine本文内のslackリンクカード) | 対象の会話の `*:history`・`*:read`、`users:read` | Botを対象の会話へ参加させる。イベント購読は不要 | `slack.link_cards.enabled: true`、Bot Token |
+| [コメント通知をスレッドへ投稿](#redmineコメント通知をスレッドにまとめる) | [`channels:history`](https://docs.slack.dev/reference/scopes/channels.history/) / [`groups:history`](https://docs.slack.dev/reference/scopes/groups.history/) | イベント購読は不要 | `slack.comment_notifications_in_threads: true`、`slack.events.app_id` |
+| [Slack返信のコメント取り込み](#通知スレッドからredmineにコメントを追加) | [`channels:history`](https://docs.slack.dev/reference/scopes/channels.history/) / [`groups:history`](https://docs.slack.dev/reference/scopes/groups.history/)、[`users:read`](https://docs.slack.dev/reference/scopes/users.read/)。添付取り込みは [`files:read`](https://docs.slack.dev/reference/scopes/files.read/) も必要 | [`message.channels`](https://docs.slack.dev/reference/events/message.channels/) / [`message.groups`](https://docs.slack.dev/reference/events/message.groups/) を購読 | `slack.thread_comments: true`、`slack.events`、ユーザー対応付け、Redmineのコメント・添付権限 |
+| [メッセージからチケット作成](#slackメッセージからチケット作成) | [`commands`](https://docs.slack.dev/reference/scopes/commands/) | メッセージショートカットのCallback IDを `slackmine_message_create` に設定、InteractivityをON | `slack.slash_command`、全体のBot Token・`slack.events`、ユーザー対応付け、Redmineのチケット追加権限 |
+| [スラッシュコマンド](#スラッシュコマンド) | [`commands`](https://docs.slack.dev/reference/scopes/commands/)、応答用の [`chat:write`](https://docs.slack.dev/reference/scopes/chat.write/) | コマンド登録、InteractivityをON | `slack.slash_command`、全体のBot Token・`slack.events`、ユーザー対応付け |
+| [App Home](#app-homeのチケット一覧) | 表示自体の追加スコープなし | Home TabをON、[`app_home_opened`](https://docs.slack.dev/reference/events/app_home_opened/) を購読。フォーム操作はInteractivityをON | 全体の `slack.app_home: true`、Bot Token・`slack.events`、ユーザー対応付け |
+| [期日リマインダーDM](#毎日の期日リマインダー-dm) | [`chat:write`](https://docs.slack.dev/reference/scopes/chat.write/)、[`im:write`](https://docs.slack.dev/reference/scopes/im.write/) | Messages TabをON | `due_reminders.enabled: true`、ユーザー対応付け、毎日のrakeタスク実行 |
+| [個人の通知メール抑止](#個人ごとの通知メール設定) | [`channels:read`](https://docs.slack.dev/reference/scopes/channels.read/) / [`groups:read`](https://docs.slack.dev/reference/scopes/groups.read/)。自動マッチングは [`users:read`](https://docs.slack.dev/reference/scopes/users.read/)、[`users:read.email`](https://docs.slack.dev/reference/scopes/users.read.email/) も必要 | Botを通知先へ招待 | 本人のメール抑止設定、ユーザー対応付け、通知先への本人の参加 |
+| [Redmine本文内のSlackリンクカード](#redmine本文内のslackリンクカード) | 対象の会話の [`*:history`](https://docs.slack.dev/reference/scopes/)・[`*:read`](https://docs.slack.dev/reference/scopes/)、[`users:read`](https://docs.slack.dev/reference/scopes/users.read/) | Botを対象の会話へ参加させる。イベント購読は不要 | `slack.link_cards.enabled: true`、Bot Token |
 
 ユーザー対応付けは `users` の明示的な設定、または対応する機能でのメール自動照合を使います。名前での自動照合はSlackからの閲覧・編集の許可には使いません。Slackのスコープを付けてもRedmineの権限は増えません。
 
@@ -322,7 +322,7 @@ slack:
 
 Issue の作成通知には説明文、新しいコメントの通知にはコメント本文を含めます。Issue の更新通知には、有効な詳細変更と、該当する場合は説明文の差分だけを表示します。Wiki の更新では、編集コメントがあればそれを表示し、本文が変更された場合は差分も表示します。Wiki 作成時には本文全体を含めません。News の作成通知には説明文の要約を含めます。削除されたコメントでは削除行を表示します。レコードのタイトルから Redmine の全文へ移動できます。
 
-Redmine の Markdown は Slack 用テキストに変換します。番号付きリストには Slack の `markdown` ブロックを使い、繰り返し現れる `1.` が順序付きリストとして表示されるようにします。通知の概要・コメント・変更後の本文にある Markdown 表も `markdown` ブロックで表示します。チケット以外の通知も対象です。Slack の Markdown ブロックの上限である 12,000 文字を超える内容は `mrkdwn` セクションにフォールバックします。
+Redmine の Markdown は Slack 用テキストに変換します。番号付きリストには Slack の `markdown` ブロックを使い、繰り返し現れる `1.` が順序付きリストとして表示されるようにします。通知の概要・コメント・変更後の本文にある Markdown 表も `markdown` ブロックで表示します。チケット以外の通知も対象です。Slack の Markdown ブロックの上限である 12,000 文字を超える内容は [`mrkdwn`](https://docs.slack.dev/messaging/formatting-message-text/) セクションにフォールバックします。
 
 ### チケットの Work Object Previews
 
@@ -346,15 +346,15 @@ projects:
 
 全体設定を `false` にして特定プロジェクトだけ `true` にすることもできます。YAML の変更後は Redmine と Sidekiq を再起動してください。
 
-Slack アプリの管理画面でも **Work Object Previews → ON → Task を選択 → Save** を設定してください。ワークスペース側でプレビューが制限されている場合は、その設定も確認してください。通知は既存の `chat.postMessage` で送信します。通知プレビューだけのために新しいイベント購読やリンク展開のスコープを追加する必要はありません。[Slack の実装仕様](https://docs.slack.dev/messaging/work-objects-implementation/#notifications-implementation)
+Slack アプリの管理画面でも **Work Object Previews → ON → Task を選択 → Save** を設定してください。ワークスペース側でプレビューが制限されている場合は、その設定も確認してください。通知は既存の [`chat.postMessage`](https://docs.slack.dev/reference/methods/chat.postMessage/) で送信します。通知プレビューだけのために新しいイベント購読やリンク展開のスコープを追加する必要はありません。[Slack の実装仕様](https://docs.slack.dev/messaging/work-objects-implementation/#notifications-implementation)
 
 件名・チケット番号・トラッカーを Work Object の見出しに使います。ステータス、優先度、担当者、作成者、期日は `slack.metadata.issue` で表示が有効な場合だけ標準フィールドとして送ります。プロジェクト、トラッカー、カテゴリ、更新者、対象バージョンも同じ表示設定に従ってカスタムフィールドとして送ります。ラベルには `messages.fields` を使います。それ以外の項目と説明文・コメント本文は既存の通知カードで表示します。担当者・作成者は表示名を使い、Work Object 用に新たなメンションやユーザー一覧取得を行いません。
 
 チケットの URL の SHA-256 値を `external_ref.id` に使い、Slack の ID 文字制限を満たしながら、同じチケットの作成・更新・コメントで共通の識別子を送ります。別の Redmine の同番号チケットとは区別されます。Redmine のホスト名を変更すると識別子も変わります。リンク先の `url` は元のチケット URL のままです。
 
-通知カードは**通知を生成した時点の情報**です。カードを開いたときと詳細パネルの再読み込み時には、`entity_details_requested` を受け取り、`entity.presentDetails` で最新のチケット情報を返します。[Slack の詳細表示 API](https://docs.slack.dev/reference/methods/entity.presentDetails/)
+通知カードは**通知を生成した時点の情報**です。カードを開いたときと詳細パネルの再読み込み時には、[`entity_details_requested`](https://docs.slack.dev/reference/events/entity_details_requested/) を受け取り、[`entity.presentDetails`](https://docs.slack.dev/reference/methods/entity.presentDetails/) で最新のチケット情報を返します。[Slack の詳細表示 API](https://docs.slack.dev/reference/methods/entity.presentDetails/)
 
-Slack標準のWork Object再読み込みは `link_shared` と `chat.unfurl` で処理します。`links:read`・`links:write`、`link_shared` の購読、**App unfurl domains**へのチケットURLのホスト登録を設定し、権限・ドメイン変更後にアプリを再インストールしてください。`cannot_unfurl_url` が出る場合は、**ワークスペースの設定と権限 → 添付 → ブロックされたプレビュー**を確認してください。対象ドメインがブロックされていると、権限が正しくても新規展開・再読み込みが失敗します。[Slack の更新イベント仕様](https://docs.slack.dev/reference/events/link_shared/)
+Slack標準のWork Object再読み込みは [`link_shared`](https://docs.slack.dev/reference/events/link_shared/) と [`chat.unfurl`](https://docs.slack.dev/reference/methods/chat.unfurl/) で処理します。[`links:read`](https://docs.slack.dev/reference/scopes/links.read/)・[`links:write`](https://docs.slack.dev/reference/scopes/links.write/)、[`link_shared`](https://docs.slack.dev/reference/events/link_shared/) の購読、**App unfurl domains**へのチケットURLのホスト登録を設定し、権限・ドメイン変更後にアプリを再インストールしてください。[`cannot_unfurl_url`](https://docs.slack.dev/reference/methods/chat.unfurl/#errors) が出る場合は、**ワークスペースの設定と権限 → 添付 → ブロックされたプレビュー**を確認してください。対象ドメインがブロックされていると、権限が正しくても新規展開・再読み込みが失敗します。[Slack の更新イベント仕様](https://docs.slack.dev/reference/events/link_shared/)
 
 詳細表示を使う場合は、次の設定を追加してください。`signing_secret` は Slack アプリの **Basic Information → App Credentials → Signing Secret** の値です。Bot Token とは別の値です。環境変数 `SLACK_SIGNING_SECRET` でも指定できます。
 
@@ -371,7 +371,7 @@ users:
 
 1. コードと YAML を配置し、Redmine と Sidekiq を再起動します。Sidekiq が `slack` キューを処理していることを確認してください。
 2. Slack アプリの **Event Subscriptions → Enable Events** を ON にします。Request URL を `https://redmine.example.com/slackmine/events` にし、**Verified** を確認します。別のサーバーでは Redmine の公開 URL に合わせてください。サブディレクトリ配置の場合は、そのパスも含めます。
-3. **Subscribe to bot events** に `entity_details_requested` を追加し、**Save Changes** します。このイベントと `entity.presentDetails` に追加 OAuth スコープは不要です。
+3. **Subscribe to bot events** に [`entity_details_requested`](https://docs.slack.dev/reference/events/entity_details_requested/) を追加し、**Save Changes** します。このイベントと [`entity.presentDetails`](https://docs.slack.dev/reference/methods/entity.presentDetails/) に追加 OAuth スコープは不要です。
 4. チャンネルの Work Object カードを開き、ステータス・担当者・期日・説明文を確認します。Redmine で変更後、詳細パネルを再読み込みし、最新値になることを確認します。新しい通知を送る必要はありません。
 
 要求の署名・タイムスタンプ・アプリとワークスペースを検証してから、既存の `slack` キューで応答します。閲覧ユーザーは `users` の明示的なログイン名／メールアドレスと Slack ID の対応付け、または有効な `auto_map_users_by_email` のメール一致で確認します。`auto_map_users_by_name` は閲覧許可に使いません。未対応付け・ロック済み・閲覧権限なしのユーザー、非公開チケット、無効なプロジェクト、`work_object_previews: false` のプロジェクトには内容を返さず、アクセス制限を表示します。プロジェクト別の Slack アプリでは `projects.<identifier>.slack.events` と `users` を上書きできます。
@@ -507,7 +507,7 @@ slack:
   auto_map_users_by_email: true
 ```
 
-Bot Tokenに `users:read` と `users:read.email` の両方を追加し、アプリを再インストールしてください。権限確認ごとに `users.info` で最新のユーザー情報を取得します。メール未取得・複数の有効ユーザーに一致・無効ユーザー・Bot・削除済みSlackユーザー・別ワークスペースのユーザー・APIエラー時は自動許可しません。設定された `slack.events.team_id` とSlackユーザーのワークスペースが一致する必要があります。メール情報はキャッシュせず、追加テーブル・Redis・ファイルへの保存や診断ログへの出力も行いません。`projects.<identifier>.slack.auto_map_users_by_email` で上書きできます。
+Bot Tokenに [`users:read`](https://docs.slack.dev/reference/scopes/users.read/) と [`users:read.email`](https://docs.slack.dev/reference/scopes/users.read.email/) の両方を追加し、アプリを再インストールしてください。権限確認ごとに [`users.info`](https://docs.slack.dev/reference/methods/users.info/) で最新のユーザー情報を取得します。メール未取得・複数の有効ユーザーに一致・無効ユーザー・Bot・削除済みSlackユーザー・別ワークスペースのユーザー・APIエラー時は自動許可しません。設定された `slack.events.team_id` とSlackユーザーのワークスペースが一致する必要があります。メール情報はキャッシュせず、追加テーブル・Redis・ファイルへの保存や診断ログへの出力も行いません。`projects.<identifier>.slack.auto_map_users_by_email` で上書きできます。
 
 名前による `auto_map_users_by_name` は送信時のメンションと期日リマインダーの対応付け用です。メール一致は受信側の詳細閲覧・コメント権限確認用であり、送信時のメンションやDMを自動的に有効化するものではありません。
 
@@ -543,7 +543,7 @@ projects:
 
 各プロジェクトで `slack.default_channel_id`、旧形式の `channel_id`、一意な名前一致の順に確認します。子自身、近い親から順に祖先を確認し、最初に見つかったチャンネルを使います。どの階層にもなければ共通の `slack.default_channel_id` を使います。一致なし・複数候補・APIエラー時は共通の通知先に戻り、共通設定もなければ通知をスキップしてログに記録します。スイッチはプロジェクト別に上書きできます。
 
-`users.conversations` でBotが参加しているチャンネルだけを取得します。公開チャンネルには `channels:read`、非公開チャンネルには `groups:read` を追加し、アプリを再インストールしてください。スレッド通知に使う `*:history` とは別のスコープです。アーカイブ済みチャンネルとDMは除外します。一覧はBot Token別にプロセスのメモリへ10分間キャッシュし、DB・Redis・ファイル・Railsキャッシュには保存しません。名前・参加状態の変更が反映されるまで最大10分かかり、ワーカーの再起動でキャッシュは消えます。取得は200件ずつ最大10ページに制限し、不完全な一覧や取得失敗時は自動照合に使いません。キャッシュはワーカーごとに独立します。
+[`users.conversations`](https://docs.slack.dev/reference/methods/users.conversations/) でBotが参加しているチャンネルだけを取得します。公開チャンネルには [`channels:read`](https://docs.slack.dev/reference/scopes/channels.read/)、非公開チャンネルには [`groups:read`](https://docs.slack.dev/reference/scopes/groups.read/) を追加し、アプリを再インストールしてください。スレッド通知に使う [`*:history`](https://docs.slack.dev/reference/scopes/) とは別のスコープです。アーカイブ済みチャンネルとDMは除外します。一覧はBot Token別にプロセスのメモリへ10分間キャッシュし、DB・Redis・ファイル・Railsキャッシュには保存しません。名前・参加状態の変更が反映されるまで最大10分かかり、ワーカーの再起動でキャッシュは消えます。取得は200件ずつ最大10ページに制限し、不完全な一覧や取得失敗時は自動照合に使いません。キャッシュはワーカーごとに独立します。
 
 コメント通知のスレッド投稿とSlackからのコメント登録にも自動判定を適用します。共通スイッチがONならプロジェクト別のYAML設定は不要です。返信の権限確認と、明示的なユーザー対応付けまたは有効なメール自動照合は引き続き必要です。
 
@@ -560,7 +560,7 @@ slack:
     app_id: 'A0123456789'
 ```
 
-`projects.<identifier>.slack.comment_notifications_in_threads` でプロジェクト別に上書きできます。Botのチャンネル参加と、非公開チャンネルでは `groups:history`、公開チャンネルでは `channels:history` が必要です。スコープ追加後はアプリを再インストールしてください。`slack.events.app_id` でこのアプリの通知を識別します。コメント通知の送信だけならEvent Subscriptionの追加は不要です。
+`projects.<identifier>.slack.comment_notifications_in_threads` でプロジェクト別に上書きできます。Botのチャンネル参加と、非公開チャンネルでは [`groups:history`](https://docs.slack.dev/reference/scopes/groups.history/)、公開チャンネルでは [`channels:history`](https://docs.slack.dev/reference/scopes/channels.history/) が必要です。スコープ追加後はアプリを再インストールしてください。`slack.events.app_id` でこのアプリの通知を識別します。コメント通知の送信だけならEvent Subscriptionの追加は不要です。
 
 簡易通知の見出しは `messages.thread_notifications.added_header`・`updated_header`・`deleted_header` で変更できます。`%{product_name}`・`%{id}`・`%{actor}`・`%{subject}` を利用でき、`projects.<identifier>.messages` でプロジェクト別に上書きできます。既定値と設定例は英語です。見出しとコメント本文を分け、本文は一度だけ表示します。見出し内の `#%{id}` は、そのチケットのRedmineページへのリンクになります。
 
@@ -597,13 +597,13 @@ projects:
       thread_comments: false
 ```
 
-Bot自身の発言と、人がBotやアプリのユーザーに `@メンション` した発言は常に取り込み対象から除外し、保存結果も返信しません。人へのメンションを含む会話は引き続き取り込みます。まとめ保存でもBot宛ての発言は含めません。メンション先の確認には Bot Token スコープ `users:read` が必要です。確認APIの一時的な失敗時は、未確認の発言を取り込まずジョブを再試行します。
+Bot自身の発言と、人がBotやアプリのユーザーに `@メンション` した発言は常に取り込み対象から除外し、保存結果も返信しません。人へのメンションを含む会話は引き続き取り込みます。まとめ保存でもBot宛ての発言は含めません。メンション先の確認には Bot Token スコープ [`users:read`](https://docs.slack.dev/reference/scopes/users.read/) が必要です。確認APIの一時的な失敗時は、未確認の発言を取り込まずジョブを再試行します。
 
-Slack 側では非公開チャンネル用の Bot Token スコープ `groups:history` とイベント `message.groups` を追加してください。公開チャンネルの場合は `channels:history` と `message.channels` を使います。スコープ追加後はアプリを再インストールします。署名検証と Request URL は詳細表示と共通です。Bot が対象チャンネルに参加している必要があります。[Slack のメッセージイベント](https://docs.slack.dev/reference/events/message/)
+Slack 側では非公開チャンネル用の Bot Token スコープ [`groups:history`](https://docs.slack.dev/reference/scopes/groups.history/) とイベント [`message.groups`](https://docs.slack.dev/reference/events/message.groups/) を追加してください。公開チャンネルの場合は [`channels:history`](https://docs.slack.dev/reference/scopes/channels.history/) と [`message.channels`](https://docs.slack.dev/reference/events/message.channels/) を使います。スコープ追加後はアプリを再インストールします。署名検証と Request URL は詳細表示と共通です。Bot が対象チャンネルに参加している必要があります。[Slack のメッセージイベント](https://docs.slack.dev/reference/events/message/)
 
-ファイル付き返信（ファイルだけの投稿も含む）にはBot Tokenスコープ `files:read` が必要です。追加後にアプリを再インストールしてください。PDF・Office文書・圧縮ファイル・テキストなど、SlackにアップロードされたファイルをBot認証で取得し、返信者名義の通常のRedmineチケット添付として保存します。PNG・JPEG・GIF・WebPは検証して画像表示し、それ以外（SVG・動画を含む）は `attachment:"ファイル名"` の記法で保存し、ファイル名からRedmineの添付表示ページへリンクします。プレビューの可否はRedmineとファイル形式に依存します。取り込み時に添付IDをSlack引用の保存情報へ記録し、明示的に対応付けた添付だけを本文と「Open in Slack」の間にまとめます。通常のコメントや、この対応情報がない過去の返信は従来の表示を維持します。カードが表示されない場合は出典URLの下に添付参照を表示します。画像は添付ファイル名で参照し、`@2x`も維持してRedmineの画像サイズ補正を適用します。1返信につき最大10ファイル、1ファイルは10 MiBとRedmineの添付サイズ上限の小さい方まで、合計50 MiBまでです。Redmineの添付権限・拡張子制限も適用します。コメントと添付は同じトランザクションで保存し、取得・検証に失敗した場合はコメントだけを残しません。再送で保存済み添付を重複登録しません。外部ファイルは非対応です。ファイルの拒否時は失敗を返信し、一時的なAPI・通信エラーはジョブで再試行します。
+ファイル付き返信（ファイルだけの投稿も含む）にはBot Tokenスコープ [`files:read`](https://docs.slack.dev/reference/scopes/files.read/) が必要です。追加後にアプリを再インストールしてください。PDF・Office文書・圧縮ファイル・テキストなど、SlackにアップロードされたファイルをBot認証で取得し、返信者名義の通常のRedmineチケット添付として保存します。PNG・JPEG・GIF・WebPは検証して画像表示し、それ以外（SVG・動画を含む）は `attachment:"ファイル名"` の記法で保存し、ファイル名からRedmineの添付表示ページへリンクします。プレビューの可否はRedmineとファイル形式に依存します。取り込み時に添付IDをSlack引用の保存情報へ記録し、明示的に対応付けた添付だけを本文と「Open in Slack」の間にまとめます。通常のコメントや、この対応情報がない過去の返信は従来の表示を維持します。カードが表示されない場合は出典URLの下に添付参照を表示します。画像は添付ファイル名で参照し、`@2x`も維持してRedmineの画像サイズ補正を適用します。1返信につき最大10ファイル、1ファイルは10 MiBとRedmineの添付サイズ上限の小さい方まで、合計50 MiBまでです。Redmineの添付権限・拡張子制限も適用します。コメントと添付は同じトランザクションで保存し、取得・検証に失敗した場合はコメントだけを残しません。再送で保存済み添付を重複登録しません。外部ファイルは非対応です。ファイルの拒否時は失敗を返信し、一時的なAPI・通信エラーはジョブで再試行します。
 
-追加テーブル・DBマイグレーション・Redisへの処理済みID保存は不要です。返信先の親通知1件だけを `conversations.history` で取得し、アプリIDとチケット見出しの正規URLを検証します。対象は現在の設定で通知先になっているチャンネルです。既存の通知にも返信できますが、他のアプリ・ユーザーの投稿や任意のチケットリンクへの返信は登録しません。
+追加テーブル・DBマイグレーション・Redisへの処理済みID保存は不要です。返信先の親通知1件だけを [`conversations.history`](https://docs.slack.dev/reference/methods/conversations.history/) で取得し、アプリIDとチケット見出しの正規URLを検証します。対象は現在の設定で通知先になっているチャンネルです。既存の通知にも返信できますが、他のアプリ・ユーザーの投稿や任意のチケットリンクへの返信は登録しません。
 
 `users` に明示的に対応付けた、または有効なメール自動照合で特定したユーザーについて、チケットの閲覧権限とトラッカーを含むコメント追加権限を確認します。非公開チケット・無効なプロジェクト・未対応付けユーザーは拒否します。返信の本文は最大10,000文字まで受け付けます。コメントには元メッセージへのURLを保存し、リンクカードが有効なら既存の引用取り込み処理で本文を保存・カード表示します。既存のJournalの `created_on` と `updated_on` の両方にSlackの元の投稿時刻を設定し、浮動小数点を経由せずマイクロ秒まで保持します。新規取り込み時には「編集済み」を付けず、その後Redmineで編集した場合は通常どおり編集日時が更新されます。同じチケット・対応付けた投稿者・投稿時刻のコメントがあれば再送と判断します。既存のチケット行ロック中に重複確認と保存を行います。追加テーブル・カラム・Redisへの状態保存・状態ファイルは不要です。本文をRedmineで編集しても重複判定は維持されます。旧バージョンの出典行付きコメントも重複確認の対象です。
 
@@ -632,7 +632,7 @@ slack:
   thread_comment_feedback_cleanup_seconds: -1
 ```
 
-プロジェクト別に上書きできます。遅延ジョブに元のイベントを渡し、実行時に `conversations.replies` でSlackのスレッドを取得します。新しいDBテーブルやキャッシュへの蓄積は行いません。ActiveJobの遅延ジョブに対応したワーカー（Sidekiq等）と、対象チャンネルの返信APIを取得できるBot権限が必要です。待機中はSlackへ投稿せず、保存済みのコメントはまとめ直しません。スレッド取得は最大1000投稿とし、超過時は不完全な取り込みをせずエラーにします。YAML変更後はRedmineとワーカーを再起動してください。
+プロジェクト別に上書きできます。遅延ジョブに元のイベントを渡し、実行時に [`conversations.replies`](https://docs.slack.dev/reference/methods/conversations.replies/) でSlackのスレッドを取得します。新しいDBテーブルやキャッシュへの蓄積は行いません。ActiveJobの遅延ジョブに対応したワーカー（Sidekiq等）と、対象チャンネルの返信APIを取得できるBot権限が必要です。待機中はSlackへ投稿せず、保存済みのコメントはまとめ直しません。スレッド取得は最大1000投稿とし、超過時は不完全な取り込みをせずエラーにします。YAML変更後はRedmineとワーカーを再起動してください。
 
 Slackのスレッドで会話を続けていると、返信のたびに「コメントを追加しました」という確認メッセージが入り、会話の流れを追いづらくなることがあります。保存結果を確認する時間を残しつつ、会話を読みやすく保つために、Botの結果メッセージを一定時間後に自動削除できます。たとえば `slack.thread_comment_feedback_cleanup_seconds: 60` なら、結果を表示してから60秒後に片付けます。成功・権限拒否・ファイル拒否の結果メッセージが対象です。
 
@@ -677,11 +677,11 @@ slack:
 
 ### Issue の画像表示
 
-公開 Issue の作成・コメント通知では、`![](screenshot.png)` のようなローカル Markdown 画像参照を認識します。作成時は Issue に添付された同名の画像を、コメントでは同じ Journal に添付された画像をアップロードできます。対応形式は PNG、JPEG、GIF です。画像は色付きカードの中に表示されます。外部 URL やファイルシステム上のパスは取得しません。画像は空でないことと、20 MiB 以下であることが必要です。Bot Token には `files:write` が必要です。
+公開 Issue の作成・コメント通知では、`![](screenshot.png)` のようなローカル Markdown 画像参照を認識します。作成時は Issue に添付された同名の画像を、コメントでは同じ Journal に添付された画像をアップロードできます。対応形式は PNG、JPEG、GIF です。画像は色付きカードの中に表示されます。外部 URL やファイルシステム上のパスは取得しません。画像は空でないことと、20 MiB 以下であることが必要です。Bot Token には [`files:write`](https://docs.slack.dev/reference/scopes/files.write/) が必要です。
 
 公開 Issue の既存コメントを編集した場合にも適用されます。`body_diff.issue.comment: false` では、対象の画像を更新後の本文の Markdown 上の位置に表示します。`true` では、コメントの差分の後に画像プレビューを表示します。削除されたコメントの画像は再アップロードしません。アップロードに成功すると、Markdown の画像参照を置き換え、重複した添付リンクは追加しません。画像がサイズ上限を超えるなどしてアップロードできない場合は、Redmine の添付ファイルまたは Issue へのリンクを通知に含めます。
 
-新しくアップロードした非公開ファイルをチャンネルに共有するため、プラグインはカード全体とともに一時的な最上位の参照を投稿し、その後 `chat.update` で一時プレビューを削除します。削除に失敗した場合は、通知を再投稿せずエラーを記録します。アップロード直後に利用可能になっていないファイルは、短時間リトライします。プラグイン更新前に投稿された Slack メッセージは書き換えません。
+新しくアップロードした非公開ファイルをチャンネルに共有するため、プラグインはカード全体とともに一時的な最上位の参照を投稿し、その後 [`chat.update`](https://docs.slack.dev/reference/methods/chat.update/) で一時プレビューを削除します。削除に失敗した場合は、通知を再投稿せずエラーを記録します。アップロード直後に利用可能になっていないファイルは、短時間リトライします。プラグイン更新前に投稿された Slack メッセージは書き換えません。
 
 ### 文言とテンプレート
 
@@ -734,7 +734,7 @@ users:
   alice: 'U0123456789'
 ```
 
-`slack.auto_map_users_by_name: true` を設定すると、Redmine の**ログイン名**と、有効な人間の Slack ユーザーの `profile.display_name` またはアカウントの `name` が大文字・小文字を区別せず完全一致する場合にも、自動で対応付けられます。明示的な対応付けが優先されます。対応するユーザーがいない場合や複数いる場合は、Redmine の名前をそのまま表示します。ユーザー一覧は 10 分間キャッシュし、API エラー時も名前表示へ戻します。自動対応付けには `users:read` と、スコープ追加後のアプリ再インストールが必要です。担当者メンションの対応付けではメールアドレスを読み込まず、`users:read.email` は不要です。[個人の通知メール抑止](#個人ごとの通知メール設定)にも名前の自動マッチングを使う場合は、本人確認のため`users:read.email`も必要です。
+`slack.auto_map_users_by_name: true` を設定すると、Redmine の**ログイン名**と、有効な人間の Slack ユーザーの `profile.display_name` またはアカウントの `name` が大文字・小文字を区別せず完全一致する場合にも、自動で対応付けられます。明示的な対応付けが優先されます。対応するユーザーがいない場合や複数いる場合は、Redmine の名前をそのまま表示します。ユーザー一覧は 10 分間キャッシュし、API エラー時も名前表示へ戻します。自動対応付けには [`users:read`](https://docs.slack.dev/reference/scopes/users.read/) と、スコープ追加後のアプリ再インストールが必要です。担当者メンションの対応付けではメールアドレスを読み込まず、[`users:read.email`](https://docs.slack.dev/reference/scopes/users.read.email/) は不要です。[個人の通知メール抑止](#個人ごとの通知メール設定)にも名前の自動マッチングを使う場合は、本人確認のため[`users:read.email`](https://docs.slack.dev/reference/scopes/users.read.email/)も必要です。
 
 担当者のメンションを止めたい場合は、`users` の該当ログイン名を `null` にし、`slack.auto_map_users_by_name: false` にします。同じユーザーのメールアドレスにもSlack IDを設定している場合は、そちらも `null` にしてください。対応するSlack IDがなくなると、Redmineの名前を通常のテキストで表示します。`null` はメンションだけの設定ではなく、他の機能で使う明示的なユーザー対応付けも外します。
 
@@ -754,9 +754,9 @@ users:
 
 ![Slackメッセージからチケット作成](docs/images/features/message-to-issue.webp)
 
-Slackアプリの **Interactivity & Shortcuts** でInteractivityを有効にし、Request URLを `https://redmine.example.com/slackmine/interactions` に設定します。**メッセージショートカット**を追加し、Callback IDを `slackmine_message_create`、名前を「チケットを作成」などにします。Botスコープに `commands` を追加し、スコープを変更した場合はアプリを再インストールしてください。[スラッシュコマンド](#スラッシュコマンド)の連携設定を共用するため、`slack.slash_command`、グローバルBot Token、署名シークレット、app/team ID、ユーザー対応付けが必要です。Work Objectプレビューは任意です。
+Slackアプリの **Interactivity & Shortcuts** でInteractivityを有効にし、Request URLを `https://redmine.example.com/slackmine/interactions` に設定します。**メッセージショートカット**を追加し、Callback IDを `slackmine_message_create`、名前を「チケットを作成」などにします。Botスコープに [`commands`](https://docs.slack.dev/reference/scopes/commands/) を追加し、スコープを変更した場合はアプリを再インストールしてください。[スラッシュコマンド](#スラッシュコマンド)の連携設定を共用するため、`slack.slash_command`、グローバルBot Token、署名シークレット、app/team ID、ユーザー対応付けが必要です。Work Objectプレビューは任意です。
 
-メッセージの「その他のアクション」からショートカットを実行し、プロジェクトを選択します。次のフォームでトラッカー・題名・説明を確認して保存します。最初の空でない行を題名にし、説明には本文と `chat.getPermalink` で取得した投稿元リンクを入れます。スレッド返信からも使用できますが、コピーするのは選択したメッセージだけです。通常の本文が空の場合は、Block Kitや添付カードのタイトル・本文・項目からテキストを取り込みます。添付ファイル・スレッド全体・AI要約は取り込みません。Slackの本文の書式記法はそのまま残ります。題名は255文字、説明は投稿元リンクを含め3,000文字までに短縮するため、保存前に確認してください。
+メッセージの「その他のアクション」からショートカットを実行し、プロジェクトを選択します。次のフォームでトラッカー・題名・説明を確認して保存します。最初の空でない行を題名にし、説明には本文と [`chat.getPermalink`](https://docs.slack.dev/reference/methods/chat.getPermalink/) で取得した投稿元リンクを入れます。スレッド返信からも使用できますが、コピーするのは選択したメッセージだけです。通常の本文が空の場合は、Block Kitや添付カードのタイトル・本文・項目からテキストを取り込みます。添付ファイル・スレッド全体・AI要約は取り込みません。Slackの本文の書式記法はそのまま残ります。題名は255文字、説明は投稿元リンクを含め3,000文字までに短縮するため、保存前に確認してください。
 
 候補は、対応付けられたユーザーにチケット作成権限があり、app/team連携が一致する有効なプロジェクトを最大100件表示します。投稿元チャンネルに対応するプロジェクトを先に並べます。次のフォームと保存時にも権限・トラッカーを確認します。メニューを開いたりプロジェクトを選んだりしただけでは作成しません。必須カスタムフィールドがある場合はRedmineの全項目フォームへのリンクを使用しますが、そのリンク先には下書きは引き継ぎません。保存は既存のチケット作成処理を使い、キャッシュによる再送対策と通常の通知が適用されます。
 
@@ -775,7 +775,7 @@ Redmineの標準 `IssueQuery` を使い、未完了・有効なプロジェク�
 
 1. 全体の `slack.app_home: true` を設定し、全体の `slack.bot_token` と `slack.events` のアプリID・チームID・Signing Secretを設定します。
 2. Slackアプリの **App Home → Show Tabs → Home Tab** を有効にします。
-3. **Event Subscriptions → Subscribe to bot events** に `app_home_opened` を追加します。Request URLは既存の `/slackmine/events` を使います。
+3. **Event Subscriptions → Subscribe to bot events** に [`app_home_opened`](https://docs.slack.dev/reference/events/app_home_opened/) を追加します。Request URLは既存の `/slackmine/events` を使います。
 4. Redmineユーザーとの対応付けを設定し、RedmineとSidekiqを再起動します。
 
 ホームを開いたとき、表示を切り替えたとき、「更新」を押したときに取得します。チケット変更後も、このホームから保存した場合は一覧を更新します。他の場所での更新は次の取得時に反映します。追加の定期ジョブやDB変更はありません。
@@ -788,7 +788,7 @@ Redmineの標準 `IssueQuery` を使い、未完了・有効なプロジェク�
 
 ![スラッシュコマンド](docs/images/features/slash-commands.webp)
 
-`slack.slash_command: /slackmine` を設定し、Slackアプリに同名のコマンドを登録します。省略すると無効です。Request URLは `https://redmine.example.com/slackmine/commands`。`commands` スコープを追加してアプリを再インストールしてください。Interactivityは `/slackmine/interactions` を使用します。既存の署名シークレット、app/team ID、Bot Token、ユーザー対応付けも必要です。グローバルの連携設定・ユーザー対応付けを使用し、同じ連携に属するプロジェクトだけを対象にします。
+`slack.slash_command: /slackmine` を設定し、Slackアプリに同名のコマンドを登録します。省略すると無効です。Request URLは `https://redmine.example.com/slackmine/commands`。[`commands`](https://docs.slack.dev/reference/scopes/commands/) スコープを追加してアプリを再インストールしてください。Interactivityは `/slackmine/interactions` を使用します。既存の署名シークレット、app/team ID、Bot Token、ユーザー対応付けも必要です。グローバルの連携設定・ユーザー対応付けを使用し、同じ連携に属するプロジェクトだけを対象にします。
 
 追加テーブル・DBマイグレーションは不要です。フォーム送信・直接変更の再送対策には既存の `Rails.cache` を使用し、処理中は5分、成功済みは24時間記録します。入力エラー時は記録を解除し、修正後に再送できます。例外時は保存結果が不明な可能性があるため、短時間の処理中記録を残します。DB保存とキャッシュ更新は一体ではないため、キャッシュ消失・期限切れ・プロセス内のみのキャッシュ・保存直後の異常終了では重複の可能性が残ります。直接変更はサーバーで生成したリクエスト識別子を使用し、Slackへの応答前に結果を記録するため、配信の再試行では保存済みの結果を再利用します。複数Web・コマンド処理プロセス間の抑止には、`unless_exist` を原子的に扱える共有キャッシュが必要です。プラグインから新しいキャッシュサービスを導入することはありません。
 
@@ -807,7 +807,7 @@ Redmineの標準 `IssueQuery` を使い、未完了・有効なプロジェク�
 
 `status`・`assign` は `#123` も受け付けます。値を省略した場合は、返されたボタンから選択フォームを開き、送信して初めて変更を保存します。`/slackmine status 123 終了` や `/slackmine assign 123 alice` のように値を指定すると、キューでコマンドを処理した時点で直接保存します。名前は大文字小文字を区別しない完全一致で、許可された候補を1件に特定できる必要があります。空白を含む名前も引用符なしで指定できます。名前が重複する場合はIDを使ってください。担当者は `me`（自分）、`none`・設定した未割当ラベルも指定できます。不明・重複・許可されない値では変更せず、選択フォームを開くボタンを返します。`/slackmine` は設定した `slack.slash_command` に置き換えてください。`slack.work_object_actions: true`、有効なRedmineユーザーへの対応付け、同じ連携に属する公開課題、対象項目の編集権限が必要です。この2つのコマンドにはWork Objectプレビューの有効化は不要です。ステータスは実行者のRedmineワークフローで許可された候補、担当者はRedmineで割当可能なユーザーと「未割当」を表示します。担当者は最大99人、ステータスは最大100件で、フォームを開けない場合はRedmineの課題編集画面を使用してください。保存時にも連携・権限・ワークフロー・割当候補を再確認し、既存の課題行ロック内で更新します。現在と同じ値を選んだ場合は履歴を追加せずフォームを閉じます。Slack側のコマンド追加登録やスコープ追加は不要です。 直接変更の成功時・値が同じ場合は、プレビュー設定済みなら最新のWork Objectカードを返し、既存の表示項目・ボタン設定を使います。プレビュー未設定では文字の確認応答を返します。配信前に結果を記録するため、再送時に変更やカード生成を繰り返しません。
 
-結果は実行した本人だけに表示します。番号指定、または `my`・`due`・`search` の結果が1件の場合、対象プロジェクトの `slack.work_object_previews: true` が有効でコマンドと同じBot Tokenを使用していれば、自動でWork Objectカードを表示します。項目・ボタンは既存のYAML設定に従い、新たな切替設定は不要です。未設定や非公開課題では簡易表示を使います。 本人だけに表示するカードのボタン押下では、Slackが課題URLと参照情報を省略する場合があるため、操作ボタンに課題IDを持たせています。自分のRedmineで課題を特定したうえで、連携・閲覧・編集権限を通常どおり確認します。本人だけに表示するカードからも、権限で許可されたステータス・優先度・担当者・期日・コメントの編集フォームを開けます。このカードは `chat.update` で更新できないため、保存後は番号指定で再取得してください。複数件の課題一覧はリマインダーと同じ色付き添付・件数見出し・箇条書きに統一し、チケットリンク・プロジェクト名・期日までの相対日数を表示します。期日なしでは日数を省略します。並び順は維持し、各行のボタンは表示しません。行の書式は `messages.due_reminders`、見出しは `messages.commands.my`・`.due`・`.search` を使います。コメント操作は `/slackmine 123` または `/slackmine comment 123` から行えます。一覧は最大100件の候補から10件、プロジェクトは最大20件を表示し、現在のチャンネルに対応するプロジェクトを優先します。プロジェクト識別子で絞り込めます。閲覧権限を確認し、保存時にも権限とRedmineの検証を再確認します。必須カスタムフィールドは簡易作成フォームでは入力できないため、フォーム内のRedmineへのリンクから登録してください。コメント追加には `work_object_actions: true` が必要で、既存の公開課題編集ポリシーに従います。保存後は通常のRedmine通知処理が動きます。チャンネルへ共有する操作は追加していません。
+結果は実行した本人だけに表示します。番号指定、または `my`・`due`・`search` の結果が1件の場合、対象プロジェクトの `slack.work_object_previews: true` が有効でコマンドと同じBot Tokenを使用していれば、自動でWork Objectカードを表示します。項目・ボタンは既存のYAML設定に従い、新たな切替設定は不要です。未設定や非公開課題では簡易表示を使います。 本人だけに表示するカードのボタン押下では、Slackが課題URLと参照情報を省略する場合があるため、操作ボタンに課題IDを持たせています。自分のRedmineで課題を特定したうえで、連携・閲覧・編集権限を通常どおり確認します。本人だけに表示するカードからも、権限で許可されたステータス・優先度・担当者・期日・コメントの編集フォームを開けます。このカードは [`chat.update`](https://docs.slack.dev/reference/methods/chat.update/) で更新できないため、保存後は番号指定で再取得してください。複数件の課題一覧はリマインダーと同じ色付き添付・件数見出し・箇条書きに統一し、チケットリンク・プロジェクト名・期日までの相対日数を表示します。期日なしでは日数を省略します。並び順は維持し、各行のボタンは表示しません。行の書式は `messages.due_reminders`、見出しは `messages.commands.my`・`.due`・`.search` を使います。コメント操作は `/slackmine 123` または `/slackmine comment 123` から行えます。一覧は最大100件の候補から10件、プロジェクトは最大20件を表示し、現在のチャンネルに対応するプロジェクトを優先します。プロジェクト識別子で絞り込めます。閲覧権限を確認し、保存時にも権限とRedmineの検証を再確認します。必須カスタムフィールドは簡易作成フォームでは入力できないため、フォーム内のRedmineへのリンクから登録してください。コメント追加には `work_object_actions: true` が必要で、既存の公開課題編集ポリシーに従います。保存後は通常のRedmine通知処理が動きます。チャンネルへ共有する操作は追加していません。
 
 `/slackmine reminders` は定期実行と同じ抽出・表示処理を使います。自分が直接担当する未完了課題のうち、閲覧権限、`due_reminders.enabled`、全体・プロジェクト別の `due_reminders.days` を満たすものが対象です。期限超過・今日・近日の一覧を実行した会話で本人だけに返し、0件でも応答します。100件ずつに分割し、現在のapp/teamと本人のSlack対応付けに一致する課題に限定します。全員向けcronの起動やスケジュール変更は行いません。`due` の固定3日・最大10件とは異なり、設定した期間で全件を返します。表示は既存の `messages.due_reminders` と色設定を使用し、ボタン名と0件時の文言は `messages.commands` で変更できます。Slack側のコマンド追加登録・スコープ追加・DBテーブル追加は不要です。
 
@@ -871,7 +871,7 @@ projects:
 
 `due_reminders.colors.overdue`、`.today`、`.upcoming` には 6 桁の 16 進カラーコードを指定します。無効または省略した値は初期値を使います。`upcoming` を省略した場合は `slack.attachment_color` を使います。色は `projects.<identifier>.due_reminders.colors` でプロジェクトごとに上書きできます。
 
-担当者は、Issue を閲覧できる有効な Redmine ユーザーであり、`users` または `slack.auto_map_users_by_name` で Slack ユーザーに対応付けられている必要があります。グループ担当者と対応付けのないユーザーはスキップし、ログに記録します。Redmine で担当者に閲覧権限がある場合は、非公開 Issue も本人への DM に含められます。DM 配信には `chat:write` と `im:write` を持つ Bot Token が必要です。プロジェクトのチャンネル ID は使いません。Slack アプリの設定で **App Home → Messages Tab → Display Messages tab** を有効にしてください。有効にしていないと、`conversations.open` が成功しても Slack が `messages_tab_disabled` を返します。スコープを追加した場合はアプリを再インストールしてください。スケジュールに依存する前に、テスト用の Issue が受信者の Slack DM に表示されることを確認してください。
+担当者は、Issue を閲覧できる有効な Redmine ユーザーであり、`users` または `slack.auto_map_users_by_name` で Slack ユーザーに対応付けられている必要があります。グループ担当者と対応付けのないユーザーはスキップし、ログに記録します。Redmine で担当者に閲覧権限がある場合は、非公開 Issue も本人への DM に含められます。DM 配信には [`chat:write`](https://docs.slack.dev/reference/scopes/chat.write/) と [`im:write`](https://docs.slack.dev/reference/scopes/im.write/) を持つ Bot Token が必要です。プロジェクトのチャンネル ID は使いません。Slack アプリの設定で **App Home → Messages Tab → Display Messages tab** を有効にしてください。有効にしていないと、[`conversations.open`](https://docs.slack.dev/reference/methods/conversations.open/) が成功しても Slack が [`messages_tab_disabled`](https://docs.slack.dev/reference/methods/conversations.open/#errors) を返します。スコープを追加した場合はアプリを再インストールしてください。スケジュールに依存する前に、テスト用の Issue が受信者の Slack DM に表示されることを確認してください。
 
 DM の文言は YAML の `messages.due_reminders` 以下で変更できます。[設定例](config/slackmine.yml.example)にすべてのキーとプレースホルダーを掲載しています。たとえば、他のグループを変更せずに見出しと期限超過グループのラベルを変更できます。
 
@@ -892,7 +892,7 @@ messages:
 
 対象はIssue作成・変更・コメント、Wiki作成・更新、News作成・コメント、文書追加、プロジェクト／バージョン／文書のファイル追加、フォーラム投稿です。Issue更新では、Redmineのメール通知設定でONにした発生条件だけを判定します。「チケットの更新」がOFFで「コメントの追加」がONなら、同時に関連付けや期日を変更しても、それらのSlack設定はコメントのメール抑制を妨げません。「チケットの更新」がONなら閲覧可能な変更すべてを判定します。該当するメール発生条件すべてのSlackイベントが有効で、そのプロジェクトのBot Tokenと通知先チャンネルが決まり、対応する本人のSlackアカウントが通知先に参加している場合に停止します。`users`でのログイン名／メールアドレスの明示的な対応付けを優先します。対応付けがなければ、`slack.auto_map_users_by_name: true`による一意の名前マッチングを使い、その都度取得したSlackプロフィールのメールアドレスが本人のRedmineの主メールアドレスと一致することも確認します（大文字・小文字は区別しません）。不正な明示的対応付けがある場合は自動マッチングに切り替えません。通知先は既存のプロジェクト・親プロジェクト・デフォルトの探索を使います。非公開Issue・非公開コメント、対象外の通知、アカウント・セキュリティ関連メールは通常どおりです。
 
-参加確認は`conversations.members`で同期的に行い、参加済みという結果はキャッシュしません。公開チャンネルは`channels:read`、非公開チャンネルは`groups:read`が必要です。名前の自動マッチングには`users:read`と`users:read.email`も必要です。メールアドレスの欠落・不一致、無効なアカウント・ボット・別ワークスペースのアカウント、曖昧な名前、照合失敗時はメールを残します。本人確認はメールごとに行い、プロフィールのメールアドレスはキャッシュしません。スコープ追加後はアプリを再インストールしてください。設定・対応付けの不足、未参加、APIエラー、不正な応答、ページ取得を完了できない場合はメールを残します。取得は1ページ200人、最大10ページで、各リクエストの接続タイムアウトは2秒、読み取りタイムアウトは3秒です。
+参加確認は[`conversations.members`](https://docs.slack.dev/reference/methods/conversations.members/)で同期的に行い、参加済みという結果はキャッシュしません。公開チャンネルは[`channels:read`](https://docs.slack.dev/reference/scopes/channels.read/)、非公開チャンネルは[`groups:read`](https://docs.slack.dev/reference/scopes/groups.read/)が必要です。名前の自動マッチングには[`users:read`](https://docs.slack.dev/reference/scopes/users.read/)と[`users:read.email`](https://docs.slack.dev/reference/scopes/users.read.email/)も必要です。メールアドレスの欠落・不一致、無効なアカウント・ボット・別ワークスペースのアカウント、曖昧な名前、照合失敗時はメールを残します。本人確認はメールごとに行い、プロフィールのメールアドレスはキャッシュしません。スコープ追加後はアプリを再インストールしてください。設定・対応付けの不足、未参加、APIエラー、不正な応答、ページ取得を完了できない場合はメールを残します。取得は1ページ200人、最大10ページで、各リクエストの接続タイムアウトは2秒、読み取りタイムアウトは3秒です。
 
 確認するのは通知設定と参加状況であり、**Slackへの配信成功ではありません**。配信結果を調整するジョブは追加しません。後からSlackへの投稿が失敗しても、停止したメールを代わりに送る処理はありません。Redmineの既存のメール通知選択は変更せず、チェックを外すとその選択に従った通知に戻ります。
 
@@ -922,7 +922,7 @@ inline 配信は Redmine のリクエスト中に実行されるため、Slack �
 1. 対象イベントのキーと親スイッチが、全体設定とプロジェクト設定で有効になっているか。
 2. 実行中の Redmine と Sidekiq が意図した Token を使っているか。`SLACK_BOT_TOKEN` は YAML より優先されます。
 3. プロジェクト識別子が意図したチャンネルに対応しているか、またはデフォルトのチャンネルが設定されているか。ボットがチャンネルに参加しているか。
-4. Bot Token に `chat:write` があり、オプション機能に応じて `files:write` または `users:read` があるか。スコープの追加後にアプリを再インストールしたか。
+4. Bot Token に [`chat:write`](https://docs.slack.dev/reference/scopes/chat.write/) があり、オプション機能に応じて [`files:write`](https://docs.slack.dev/reference/scopes/files.write/) または [`users:read`](https://docs.slack.dev/reference/scopes/users.read/) があるか。スコープの追加後にアプリを再インストールしたか。
 5. Sidekiq が `slack` キューを処理しているか。ログでジョブと Slack API のエラーコードを確認してください。
 
 YAML を変更した場合は Redmine と Sidekiq の両方を再起動してください。ジョブの投稿成功は API への配信を示します。実際の表示や画像は通知先のチャンネルで確認してください。既存のメッセージは更新されません。
@@ -950,11 +950,11 @@ slack:
     color: '#6D5DFB'
 ```
 
-6桁の16進カラーのみ受け付け、省略・不正な値では `#6D5DFB` を使います。返信カードには「スレッドへの返信」、取得できた親投稿の短いプレビュー、親投稿へのリンクを表示します。親投稿には返信件数を表示します。リンクの `thread_ts` と投稿のメタデータから返信を判定し、選択した投稿と親投稿だけを取得します。スレッド全体は取り込みません。ユーザー・チャンネルへのメンションは名前を解決し、失敗時は元のラベルやIDを残します。Botのプロフィールがない場合は `bots.info` を試します。
+6桁の16進カラーのみ受け付け、省略・不正な値では `#6D5DFB` を使います。返信カードには「スレッドへの返信」、取得できた親投稿の短いプレビュー、親投稿へのリンクを表示します。親投稿には返信件数を表示します。リンクの `thread_ts` と投稿のメタデータから返信を判定し、選択した投稿と親投稿だけを取得します。スレッド全体は取り込みません。ユーザー・チャンネルへのメンションは名前を解決し、失敗時は元のラベルやIDを残します。Botのプロフィールがない場合は [`bots.info`](https://docs.slack.dev/reference/methods/bots.info/) を試します。
 
-閲覧はRedmineのチケット権限に従い、非公開コメントはそのコメントを読めるユーザーに限定します。閲覧者自身のSlackアカウント紐付け・チャンネル参加は要求しません。**リンクを保存すると、そのチケットの閲覧者にSlack本文（返信の場合は親投稿のプレビューを含む）を共有し、Redmineの本文欄に保存します。** Redmineアプリが対象会話に参加しており、履歴取得用の `channels:history` / `groups:history`（DMは `im:history` / `mpim:history`）と会話情報用の `channels:read` / `groups:read`（DMは `im:read` / `mpim:read`）を持つ必要があります。投稿者・ユーザーメンション・Botのプロフィールには `users:read` を使います。スコープ追加後はアプリを再インストールしてください。プロジェクトのBot Tokenで認証されたワークスペースとリンクのホストを照合し、別ワークスペースのリンクは取得しません。
+閲覧はRedmineのチケット権限に従い、非公開コメントはそのコメントを読めるユーザーに限定します。閲覧者自身のSlackアカウント紐付け・チャンネル参加は要求しません。**リンクを保存すると、そのチケットの閲覧者にSlack本文（返信の場合は親投稿のプレビューを含む）を共有し、Redmineの本文欄に保存します。** Redmineアプリが対象会話に参加しており、履歴取得用の [`channels:history`](https://docs.slack.dev/reference/scopes/channels.history/) / [`groups:history`](https://docs.slack.dev/reference/scopes/groups.history/)（DMは [`im:history`](https://docs.slack.dev/reference/scopes/im.history/) / [`mpim:history`](https://docs.slack.dev/reference/scopes/mpim.history/)）と会話情報用の [`channels:read`](https://docs.slack.dev/reference/scopes/channels.read/) / [`groups:read`](https://docs.slack.dev/reference/scopes/groups.read/)（DMは [`im:read`](https://docs.slack.dev/reference/scopes/im.read/) / [`mpim:read`](https://docs.slack.dev/reference/scopes/mpim.read/)）を持つ必要があります。投稿者・ユーザーメンション・Botのプロフィールには [`users:read`](https://docs.slack.dev/reference/scopes/users.read/) を使います。スコープ追加後はアプリを再インストールしてください。プロジェクトのBot Tokenで認証されたワークスペースとリンクのホストを照合し、別ワークスペースのリンクは取得しません。
 
-本文はSlackの `mrkdwn`（太字・斜体・取り消し線・リンク・引用・コード）と基本的なMarkdownの見出し・リスト・太字・リンクを整形します。標準絵文字の名前はUnicodeに変換し、独自絵文字は `:名前:` のまま残します。生HTMLは実行せず文字として表示し、リンク先はHTTP・HTTPS・mailtoに限定します。返信は履歴で取得できない場合 `conversations.replies` を試しますが、APIの制約や失敗で取得できない場合はリンク表示になります。添付ファイルは取り込みません。
+本文はSlackの [`mrkdwn`](https://docs.slack.dev/messaging/formatting-message-text/)（太字・斜体・取り消し線・リンク・引用・コード）と基本的なMarkdownの見出し・リスト・太字・リンクを整形します。標準絵文字の名前はUnicodeに変換し、独自絵文字は `:名前:` のまま残します。生HTMLは実行せず文字として表示し、リンク先はHTTP・HTTPS・mailtoに限定します。返信は履歴で取得できない場合 [`conversations.replies`](https://docs.slack.dev/reference/methods/conversations.replies/) を試しますが、APIの制約や失敗で取得できない場合はリンク表示になります。添付ファイルは取り込みません。
 
 1回の保存で最大20件のリンクを候補にし、API呼び出し開始には5秒の予算と短い通信タイムアウトを設けています。制限を超えたリンクは通常表示のままです。同一取り込み中のみBot Token別にAPI結果を再利用します。既存のライブプレビューにも同じ取得制限があります。引用は元の本文欄に保存し、共有HTMLキャッシュは使いません。保存された本文の閲覧・検索結果には、通常のチケット・非公開コメント権限が適用されます。**保存した引用はRedmineの既存の説明・コメント検索で検索可能です。**「タイトルのみ」の検索では本文は対象外なので解除してください。専用の検索索引は不要です。未取り込みの古いリンクは、取り込むまでSlack本文の言葉では検索できません。引用は本文の編集で変更・削除でき、元のURLだけを消しても保存済み引用は残ります。保存した本文の変更には、通常のRedmine通知・変更履歴が適用されます。
 
