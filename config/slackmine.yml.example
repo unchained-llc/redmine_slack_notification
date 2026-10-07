@@ -557,43 +557,43 @@ messages:
     image_failed: '⚠️ The reply was not saved. Check file size, file access, and the files:read bot scope.'
   # Connection dialogs, feedback, saved history heading, and quote-card labels.
   thread_connections:
-    title: スレッドをチケットに接続
-    close: 閉じる
-    loading_picker: このスレッドの接続設定を確認しています…
-    unsupported_source: ユーザーの対応付けとチャンネルを確認してください。DMには対応していません。
-    destination: 接続先
-    disconnect: 接続を解除
-    save_history: これまでの会話も保存する
-    picker_hint: 接続するチケット番号を入力してください。確認画面で過去の発言を選べます。
-    issue_number: チケット番号
-    history: 過去の会話
-    review: 内容を確認
-    invalid_review: 確認情報が無効です。メニューからやり直してください。
-    issue_denied: チケットが見つからないか、接続する権限がありません。
-    loading_preview: チケットとスレッドの内容を確認しています…
-    destination_number: 接続先チケット番号
-    save_post: この発言を保存する
-    import: 取り込み
-    connect: 接続する
-    preview_failed: 確認できませんでした。権限・Botの参加・スコープを確認してください。過去分は人の発言20件、スレッド全体は1000件までです。メニューからやり直せます。
-    denied: 操作する権限がありません。
-    destination_changed: 接続先を変える場合はメニューからやり直してください。
-    review_incomplete: 確認が完了していません。
-    connected: このスレッドを接続しました。以後の返信・添付を保存します。
-    disconnected: 接続を解除しました。保存済みコメントは残ります。
-    already_connected: 既に別の接続が設定されています。メニューから確認してください。
-    connection_conflict: 別の接続が先に設定されました。メニューから確認してください。
-    attachment_only: "[添付ファイル]"
-    operation_failed: 処理を完了できませんでした。確認後に会話が変わった場合は、接続を解除してから再確認してください。管理者はSlackキューの失敗ジョブも確認できます。
-    current_connection: 'このスレッドは #%{id} に接続されています。解除しても保存済みコメントは残ります。'
+    title: Connect a thread
+    close: Close
+    loading_picker: Checking this thread's connection settings…
+    unsupported_source: Check your user mapping and channel. Direct messages are not supported.
+    destination: Destination
+    disconnect: Disconnect
+    save_history: Save the conversation so far
+    picker_hint: Enter the Issue number to connect. You can select past messages on the review screen.
+    issue_number: Issue number
+    history: Past conversation
+    review: Review
+    invalid_review: Invalid review information. Open the shortcut again.
+    issue_denied: Issue not found or you do not have permission to connect it.
+    loading_preview: Checking the Issue and thread…
+    destination_number: Destination Issue number
+    save_post: Save this message
+    import: Import
+    connect: Connect
+    preview_failed: Could not load the preview. Check permissions, Bot membership, and scopes. Past imports support up to 20 human messages and threads up to 1000 messages. Open the shortcut again.
+    denied: You do not have permission to perform this action.
+    destination_changed: To change the destination, open the shortcut again.
+    review_incomplete: The review has not finished.
+    connected: This thread is connected. Future replies and attachments will be saved.
+    disconnected: This thread is disconnected. Saved comments are retained.
+    already_connected: Another connection is already configured. Open the shortcut to check it.
+    connection_conflict: Another connection was configured first. Open the shortcut to check it.
+    attachment_only: '[Attachment]'
+    operation_failed: Could not complete the operation. If the conversation changed after review, disconnect and review it again. Administrators can also check failed Slack queue jobs.
+    current_connection: 'This thread is connected to #%{id}. Disconnecting retains saved comments.'
     preview_hint: |-
       #%{id} %{subject}
-      過去分はあなたの名義の1件の引用コメントにまとめます。保存する発言を選んでください。確認中に届いた返信も権限に応じて保存します。
+      Past messages will be saved as one quoted comment under your name. Select the messages to save. Replies received during review will also be saved according to permissions.
     post_preview: |-
       %{author} · %{timestamp}
       %{text}
-      添付: %{count}件
-    history_heading: Slackスレッドから取り込み（接続前の会話）
+      Attachments: %{count}
+    history_heading: Conversation imported from a Slack thread (before connection)
   link_cards:
     open: Open in Slack
     parent_open: Open parent message in Slack
