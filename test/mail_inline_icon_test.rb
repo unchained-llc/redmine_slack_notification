@@ -77,6 +77,39 @@ class MailInlineIconTest < Minitest::Test
     refute_includes received.all_parts.find { |part| part.mime_type == 'text/html' }.body.decoded, Slackmine::MailInlineIcon::SOURCE
   end
 
+  def test_mailer_patch_preserves_long_japanese_html_when_delivery_inlines_css
+    text = 'チケットが更新されました。日本語のコメントです。' * 1000
+    avatar = '<img class="slackmine-mail-avatar" src="https://avatars.slack-edge.com/example.png">'
+    html = '<html><body><p>' + text + '</p>' + ICON.sub('</span></a>', avatar + '</span></a>') + '</body></html>'
+    base = Class.new do
+      define_method(:mail) do |*args|
+        message = Mail.new
+        message.text_part = Mail::Part.new(content_type: 'text/plain; charset=UTF-8', body: 'テキスト版')
+        message.html_part = Mail::Part.new(content_type: 'text/html; charset=UTF-8', body: html)
+        message
+      end
+    end
+    mailer = Class.new(base) { prepend Slackmine::MailerPatch }.new
+    image = File.binread(Slackmine::MailInlineIcon::PATH)
+    Slackmine::MailInlineAvatar.stub(:fetch, { content: image, mime_type: 'image/png', extension: 'png' }) do
+      message = mailer.mail
+      part = message.html_part
+      assert_nil part.content_transfer_encoding
+      # Roadie::Rails::MailInliner assigns transformed, decoded HTML on delivery.
+      document = Nokogiri::HTML.parse(part.body.decoded, nil, 'UTF-8')
+      document.at_css('p')['style'] = 'color: purple'
+      part.body = document.to_html
+      received = Mail.read_from_string(message.encoded)
+      doc = Nokogiri::HTML.parse(received.html_part.body.decoded, nil, 'UTF-8')
+      assert_equal text, doc.at_css('p').text
+      assert_equal 'color: purple', doc.at_css('p')['style']
+      assert_equal 'テキスト版', received.text_part.body.decoded.force_encoding('UTF-8')
+      assert_equal 2, received.attachments.size
+      received.attachments.each { |attachment| assert_equal image, attachment.body.decoded }
+      assert doc.css('img').all? { |node| node['src'].start_with?('cid:') }
+    end
+  end
+
   def test_unmarked_mail_is_untouched
     message = Mail.new(content_type: 'text/html', body: '<img src="https://example.com/logo.png">')
     Slackmine::MailInlineIcon.embed(message)

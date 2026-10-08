@@ -25,6 +25,15 @@ module Slackmine
       end
       MailInlineIcon.embed(message)
       MailInlineAvatar.embed(message)
+      # Adding CID resources can negotiate a transfer encoding before Roadie
+      # rewrites the HTML on delivery. Roadie assigns decoded HTML, so a stale
+      # base64 header would make Mail decode that HTML as base64 instead.
+      ([message] + message.all_parts).each do |part|
+        next unless part.mime_type == 'text/html'
+
+        part.body # Materialize any encoded source before removing its header.
+        part.content_transfer_encoding = nil
+      end
       message
     end
 
