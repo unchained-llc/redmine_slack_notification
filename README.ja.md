@@ -4,7 +4,7 @@
 
 ![Slackmine — SlackとRedmineの連携](docs/assets/slackmine-icon.png)
 
-バージョン **1.5.2**。
+バージョン **1.5.3**。
 
 通知機能からSlackとRedmineの統合へ機能が広がったため、**Redmine Event Notifications for Slack**（`redmine_slack_notification`）から **Slackmine** に改名しました。内部名・プラグインID・設定ファイル名・エンドポイントも `slackmine` に統一し、旧名の互換対応は設けていません。
 
@@ -1133,6 +1133,8 @@ YAML を変更した場合は Redmine と Sidekiq の両方を再起動してく
 
 `slack.link_cards.redmine_enabled: false` はRedmine画面のカード表示と未保存リンクのライブプレビューだけをOFFにします。リンク保存時の本文取得・引用保存とメールのカード表示は継続します。メールだけOFFにする場合は既存の `mail_enabled: false` を使います。3項目とも省略時は `true` で、現在の動作を維持します。`projects.<identifier>.slack.link_cards` で個別に上書きできます。
 
+説明・コメントの編集プレビューでも、入力中の保存済み引用を同じカード形式で表示します。保存済み引用にはSlack APIを呼び出さず、URLだけを入力した場合は権限確認後にSlack本文を取得してカード表示します。取得できないURLは通常のリンクのままです。プレビューでは引用を保存しません。
+
 ![Redmine本文内のSlackリンクカード](docs/images/features/slack-link-cards.webp)
 
 チケットの説明・コメントに `https://example.slack.com/archives/C123/p1791115675755579` 形式のURLを貼って新規作成・編集すると、Slack本文を取得し、**既存の説明・コメント欄に引用を追記して保存**します。DBマイグレーション・専用テーブル・索引・バックグラウンドジョブは追加しません。引用本文と名前解決済みのメンションは検索可能な文字として保存し、カードの情報は区切り付きのブロックに保持します。元のURL・本文は維持します。引用は保存時点の内容で、Slack側の編集・削除では変わりません。同じ投稿への複数URL（クエリ違いを含む）や再保存でも引用を重複追加しません。コードブロック・インラインコードはRedmineのMarkdown・Textile整形結果に従って除外します。取得できない場合は元の本文のまま保存します。
@@ -1225,6 +1227,7 @@ ruby -Itest test/thread_comment_feedback_cleanup_test.rb
 
 | バージョン | 主な変更 |
 | --- | --- |
+| **1.5.3** | 説明・コメントの編集プレビューで、保存済みSlack引用とURLだけの入力をカード表示します。 |
 | **1.5.2** | Slack画像の埋め込み後にRoadieがCSSを適用すると、通知メールのHTML本文が壊れる問題を修正。日本語本文・インライン画像・テキスト版を保持します。 |
 | **1.5.1** | SlackがGravatar URLを返す場合に通知メールのアバターが欠落する問題を修正。Gravatar画像とSlack既定アバターへの転送を安全に取得し、インライン添付として埋め込みます。 |
 | **1.5.0** | Slackmine管理画面を追加。実効設定・イベント色の色見本・プロジェクト通知先・ユーザーメンションを多言語で表示。Sidekiq使用時のキュー監視・実行履歴・テスト通知を追加しました。 |

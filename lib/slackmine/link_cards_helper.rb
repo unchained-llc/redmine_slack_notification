@@ -7,20 +7,28 @@ module Slackmine
     def textilizable(*args)
       options = args.last.is_a?(Hash) ? args.last : {}
       object, attribute = args.size >= 2 && !args[1].is_a?(Hash) ? args.first(2) : [options[:object], nil]
-      if object.is_a?(Issue) && attribute == :description
+      preview = args.first.is_a?(String) && respond_to?(:controller_name) &&
+                controller_name == 'previews' && %w[issue text].include?(action_name) && options[:formatting] != false
+      if preview
+        issue = object if object.is_a?(Issue)
+        journal_id = nil
+      elsif object.is_a?(Issue) && attribute == :description
         issue = object; journal_id = nil
       elsif object.is_a?(Journal) && attribute == :notes && object.journalized.is_a?(Issue)
         issue = object.journalized; journal_id = object.id
       else
         return super
       end
+      project = preview ? (issue ? issue.project : @project) : issue.project
       card_view = respond_to?(:controller_name) && options[:formatting] != false &&
-                  ((controller_name == 'issues' && action_name == 'show' && request.format.html?) ||
+                  (preview || (controller_name == 'issues' && action_name == 'show' && request.format.html?) ||
                    (controller_name == 'journals' && action_name == 'update' && request.format.js?))
-      mail_cards = LinkCards.enabled?(issue.project) &&
-                   Slackmine.effective_config(issue.project).dig('slack', 'link_cards', 'mail_enabled') != false
-      render_cards = card_view ? LinkCards.redmine_enabled?(issue.project) : mail_cards
-      raw = if card_view
+      mail_cards = LinkCards.enabled?(project) &&
+                   Slackmine.effective_config(project).dig('slack', 'link_cards', 'mail_enabled') != false
+      render_cards = card_view ? LinkCards.redmine_enabled?(project) : mail_cards
+      raw = if preview
+              args.first
+            elsif card_view
               LinkCards.source(issue, User.current, journal_id)
             elsif object.respond_to?(attribute)
               object.public_send(attribute).to_s
@@ -41,9 +49,9 @@ module Slackmine
         quote_urls[token] = group.size == 1 ? (card['source_urls'] || card['url']) :
                             group.flat_map { |_, entry| Array(entry['source_urls'] || entry['url']) }
         replacements[token] = if options[:formatting] == false || !render_cards
-                                %(<span style="white-space: pre-wrap">#{SlackMarkup.escape(group.map { |source, _| LinkQuotes.plain_source(source, project: issue.project) }.join("\n\n"))}</span>)
+                                %(<span style="white-space: pre-wrap">#{SlackMarkup.escape(group.map { |source, _| LinkQuotes.plain_source(source, project: project) }.join("\n\n"))}</span>)
                               else
-                                LinkCards.render_card(card, card['url'], issue.project,
+                                LinkCards.render_card(card, card['url'], project,
                                                       time_formatter: time_formatter, icon_html: mail_icon)
                               end
         prepared = prepared.sub(block, token)
@@ -53,7 +61,7 @@ module Slackmine
       unless replacements.empty?
         fragment = Nokogiri::HTML.fragment(html.to_s)
         quote_paragraphs = fragment.css('p').select { |node| replacements.keys.any? { |token| node.text.include?(token) } }
-        LinkCards.place_saved_cards(fragment, replacements, quote_urls, project: issue.project) if render_cards
+        LinkCards.place_saved_cards(fragment, replacements, quote_urls, project: project) if render_cards
         fragment.xpath('.//text()').each do |node|
           next unless replacements.keys.any? { |token| node.text.include?(token) }
           pieces = node.text.split(/(#{Regexp.union(replacements.keys)})/)
@@ -68,7 +76,9 @@ module Slackmine
       return html.html_safe unless card_view && render_cards
       @slack_link_card_state ||= { api: {}, cards: {}, count: 0,
                                    deadline: Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5 }
+      live_options = preview ? { preview_source: raw, project: project } : {}
       html = LinkCards.render_links(html, issue, User.current, journal_id, @slack_link_card_state,
+                             **live_options,
                              time_formatter: time_formatter,
                              quoted_urls: quotes.flat_map { |_, card| Array(card['source_urls'] || card['url']) })
       html.html_safe
@@ -266,8 +276,14 @@ module Slackmine
       %(<span class="slackmine-link-card" style="--slack-card-color: #{color(project)}; display: block; box-sizing: border-box; margin: .7em 0; padding: 14px 16px; max-width: 680px; border: 1px solid #d9d9e3; border-left: 4px solid #{color(project)}; border-radius: 8px; background: transparent; color: inherit">#{context}#{header(card, time_formatter, mail: !icon_html.nil?)}<span class="slackmine-link-card-text" style="display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0">#{text}</span>#{SlackMarkup.link(url, label).sub('<a ', '<a style="display: inline-block; margin-top: 6px; font-weight: 700" ')}</span>)
     end
 
-    def render_links(html, issue, viewer, journal_id, state, time_formatter: nil, quoted_urls: [])
-      return html unless redmine_enabled?(issue.project)
+    def render_links(html, issue, viewer, journal_id, state, time_formatter: nil, quoted_urls: [], preview_source: nil, project: nil)
+      project ||= issue.project if issue
+      return html unless redmine_enabled?(project)
+      if preview_source
+        permitted = viewer && viewer.logged? && project &&
+                    (issue ? LinkQuotes.editable_source?(issue, viewer) : viewer.allowed_to?(:add_issues, project))
+        return html unless permitted
+      end
 
       fragment = Nokogiri::HTML.fragment(html.to_s)
       changed = false
@@ -276,15 +292,19 @@ module Slackmine
         url = anchor['href']
         next unless parse(url)
         next if quoted_urls.any? { |quoted| LinkQuotes.identity(quoted) == LinkQuotes.identity(url) }
-        key = [issue.id, journal_id, url]
+        key = [issue && issue.id, journal_id, url]
         unless state[:cards].key?(key)
           break if state[:count] >= 20 || Process.clock_gettime(Process::CLOCK_MONOTONIC) > state[:deadline]
           state[:count] += 1
-          state[:cards][key] = fetch(issue, viewer, url, journal_id: journal_id, api_cache: state[:api], deadline: state[:deadline])
+          state[:cards][key] = if preview_source
+                                 fetch_for_project(project, url, api_cache: state[:api], deadline: state[:deadline]) if referenced?(preview_source, parse(url))
+                               else
+                                 fetch(issue, viewer, url, journal_id: journal_id, api_cache: state[:api], deadline: state[:deadline])
+                               end
         end
         card = state[:cards][key]
         next unless card
-        replace_link_with_card(anchor, render_card(card, url, issue.project, time_formatter: time_formatter))
+        replace_link_with_card(anchor, render_card(card, url, project, time_formatter: time_formatter))
         changed = true
       end
       changed ? fragment.to_html : html

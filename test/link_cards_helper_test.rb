@@ -145,6 +145,80 @@ class LinkCardsHelperTest < Minitest::Test
     end
   end
 
+  def test_editor_previews_render_edited_saved_quotes_without_fetching_slack
+    @view.controller_name = 'previews'
+    @view.render_source = true
+    @view.define_singleton_method(:format_time) { |value| value.iso8601 }
+    @view.instance_variable_set(:@project, @issue.project)
+    card = { 'author' => 'Alice', 'channel' => 'discussion', 'timestamp' => '2026-10-07T01:00:00Z',
+             'text' => 'Original message' }
+    raw = LinkCardsTest::URL + "\n\n" + Slackmine::LinkQuotes.encode(card, LinkCardsTest::URL)
+    raw = raw.sub('Original message', 'Edited message <script>alert(1)</script>')
+    %w[issue text].each do |action|
+      @view.action_name = action
+      [nil, @issue].each do |object|
+        Slackmine::LinkCards.stub(:source, ->(*) { flunk 'Preview must use submitted text' }) do
+          Slackmine::LinkCards.stub(:fetch_for_project, ->(*) { flunk 'Saved quotes must not fetch live links' }) do
+            doc = Nokogiri::HTML.fragment(@view.textilizable(raw, object: object))
+            assert_equal 1, doc.css('.slackmine-link-card').size
+            assert_includes doc.at_css('.slackmine-link-card-header').text, 'Alice'
+            assert_includes doc.at_css('.slackmine-link-card-text').text, 'Edited message'
+            assert_empty doc.css('script')
+            refute_includes doc.to_html, '[slack-quote:'
+            Slackmine.stub(:config, { 'slack' => { 'link_cards' => { 'redmine_enabled' => false } } }) do
+              html = @view.textilizable(raw, object: object)
+              assert_includes html, 'Edited message'
+              refute_includes html, 'class="slackmine-link-card"'
+              refute_includes html, '[slack-quote:'
+            end
+          end
+        end
+      end
+    end
+  end
+
+  def test_editor_preview_fetches_submitted_url_with_permission_and_preserves_failed_links
+    @view.controller_name = 'previews'
+    @view.action_name = 'issue'
+    @view.define_singleton_method(:format_time) { |value| value.iso8601 }
+    @view.instance_variable_set(:@project, @issue.project)
+    @view.source_formatter = ->(raw) { %(<p><a href="#{CGI.escapeHTML(raw)}">Slack</a></p>) }
+    @issue.define_singleton_method(:new_record?) { false }
+    @issue.define_singleton_method(:visible?) { |_| true }
+    viewer = OpenStruct.new(logged?: true)
+    viewer.define_singleton_method(:allowed_to?) { |*| true }
+    card = { 'author' => 'Alice', 'text' => 'URL preview', 'channel' => 'discussion', 'timestamp' => '2026-10-07T01:00:00Z' }
+    calls = []
+    User.stub(:current, viewer) do
+      Slackmine::LinkCards.stub(:source, ->(*) { flunk 'Preview must use submitted source' }) do
+        Slackmine::LinkCards.stub(:fetch_for_project, ->(project, url, **_) { calls << [project, url]; card }) do
+          [@issue, nil].each do |object|
+            @view.instance_variable_set(:@slack_link_card_state, nil)
+            html = @view.textilizable(LinkCardsTest::URL, object: object)
+            assert_includes html, 'URL preview'
+            assert_equal 1, Nokogiri::HTML.fragment(html).css('.slackmine-link-card').size
+          end
+          assert_equal [[@issue.project, LinkCardsTest::URL]] * 2, calls
+          @view.instance_variable_set(:@slack_link_card_state, nil)
+          @issue.define_singleton_method(:visible?) { |_| false }
+          refute_includes @view.textilizable(LinkCardsTest::URL, object: @issue), 'slackmine-link-card'
+          viewer.define_singleton_method(:allowed_to?) { |*| false }
+          refute_includes @view.textilizable(LinkCardsTest::URL), 'slackmine-link-card'
+          viewer.define_singleton_method(:logged?) { false }
+          refute_includes @view.textilizable(LinkCardsTest::URL), 'slackmine-link-card'
+          assert_equal 2, calls.size
+        end
+        viewer.define_singleton_method(:logged?) { true }
+        @issue.define_singleton_method(:visible?) { |_| true }
+        Slackmine::LinkCards.stub(:fetch_for_project, nil) do
+          html = @view.textilizable(LinkCardsTest::URL, object: @issue)
+          assert_includes html, LinkCardsTest::URL
+          refute_includes html, 'slackmine-link-card'
+        end
+      end
+    end
+  end
+
   def test_other_contexts_do_not_fetch_slack
     Slackmine::LinkCards.stub(:source, ->(*) { flunk 'unexpected network context' }) do
       @view.controller_name = 'mailer'

@@ -4,7 +4,7 @@
 
 ![Slackmine — Slack and Redmine integration](docs/assets/slackmine-icon.png)
 
-Version **1.5.2**.
+Version **1.5.3**.
 
 The plugin was renamed from **Redmine Event Notifications for Slack** (`redmine_slack_notification`) to **Slackmine** as it grew from notifications into a broader Slack–Redmine integration. Internal names, plugin ID, configuration filename and endpoints now use `slackmine`; the former names are no longer supported.
 
@@ -1146,6 +1146,8 @@ Set `slack.link_cards.enabled: false` to disable Slack link content retrieval, n
 
 Set `slack.link_cards.redmine_enabled: false` to disable only Redmine web cards and live previews of unquoted links. Content retrieval and quote imports when saving, and email cards, continue. Use the existing `mail_enabled: false` to disable only email cards. All three options default to `true`, preserving current behavior, and support overrides under `projects.<identifier>.slack.link_cards`.
 
+Description and comment editor previews render submitted saved quotes with the same cards, without calling the Slack API for saved quotes. Bare URLs fetch live cards after issue/project permission checks; unavailable messages remain ordinary links. Previewing does not save quotes.
+
 ![Slack message cards in issue text](docs/images/features/slack-link-cards.webp)
 
 When an issue description or comment containing a Slack permalink such as `https://example.slack.com/archives/C123/p1791115675755579` is created or edited, the plugin retrieves the message and appends a quote to the **existing description/notes column**. No database migration, new table, index or background job is required. The quoted body and resolved mention labels are saved as plain searchable text, with card metadata in a delimited block. The original URL and source wording are retained. The quote is a snapshot of the message at save time: Slack edits/deletions do not alter it. Repeated URLs (including different query parameters for the same message) and repeated saves do not append duplicate quotes. Code blocks and inline code are excluded using the current Redmine Markdown/Textile formatter. Failed retrievals leave the source unchanged and do not prevent saving.
@@ -1259,6 +1261,7 @@ version numbers are editorial labels, not a record of published releases or Git 
 
 | Version | Highlights |
 | --- | --- |
+| **1.5.3** | Render saved Slack quotes and bare Slack URLs as cards in description and comment editor previews. |
 | **1.5.2** | Fix corrupted HTML notification emails when Roadie inlines CSS after Slack images are embedded. Preserve Japanese text, inline images, and the plain-text alternative. |
 | **1.5.1** | Fix missing Slack avatars in notification emails when Slack returns a Gravatar URL. Safely embed Gravatar images and Slack default-avatar redirects as inline attachments. |
 | **1.5.0** | Add the localized Slackmine administration screen for effective settings, event-color swatches, project/channel routing and user mentions. Add Sidekiq-only queue monitoring, bounded execution history and test notifications. |
