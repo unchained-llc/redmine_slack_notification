@@ -85,6 +85,88 @@ class MailInlineAvatarTest < Minitest::Test
     end
   end
 
+  DEFAULT = 'https://a.slack-edge.com/example/img/avatars/ava_0022-48.png'.freeze
+  GRAVATAR = ('https://secure.gravatar.com/avatar/' + 'a' * 32 + '.jpg?' +
+              URI.encode_www_form('s' => '48', 'd' => DEFAULT)).freeze
+
+  def test_slack_gravatar_is_embedded_as_cid
+    message = Mail.new(content_type: 'text/html', body: avatar(GRAVATAR.gsub('&', '&amp;')))
+    with_response(Net::HTTPOK.new('1.1', '200', 'OK'), [PNG]) do
+      Slackmine::MailInlineAvatar.embed(message)
+    end
+    received = Mail.read_from_string(message.encoded)
+    assert_equal PNG, received.attachments.first.body.decoded
+    assert_equal received.attachments.first.url, Nokogiri::HTML.fragment(html_part(received).body.decoded).at_css('img')['src']
+  end
+
+  def with_redirects(locations)
+    visited = []
+    http = Object.new
+    http.define_singleton_method(:request) do |request, &block|
+      raise 'credentials must not be sent' if request['Authorization']
+      location = locations.shift
+      response = if location
+                   Net::HTTPFound.new('1.1', '302', 'Found').tap { |r| r['Location'] = location }
+                 else
+                   Net::HTTPOK.new('1.1', '200', 'OK')
+                 end
+      response.define_singleton_method(:read_body) { |&reader| reader.call(PNG) }
+      block.call(response)
+    end
+    Net::HTTP.stub(:start, ->(host, *args, **options, &block) { visited << host; block.call(http) }) do
+      yield visited
+    end
+  end
+
+  def test_gravatar_redirects_to_slack_default_within_same_download_budget
+    with_redirects([GRAVATAR.sub('secure.gravatar.com', 'www.gravatar.com'), DEFAULT]) do |visited|
+      assert_equal data, Slackmine::MailInlineAvatar.fetch(GRAVATAR, 1)
+      assert_equal %w[secure.gravatar.com www.gravatar.com a.slack-edge.com], visited
+    end
+  end
+
+  def test_unsafe_gravatar_parameters_are_rejected_without_network
+    base = GRAVATAR.split('?').first
+    sources = [base.sub('a' * 32, 'not-a-hash'), base + '?s=9999', base + '?s=48&s=96',
+               base + '?url=https://example.com/image.png',
+               base + '?' + URI.encode_www_form('d' => 'https://127.0.0.1/avatar.png'),
+               base + '?' + URI.encode_www_form('d' => GRAVATAR),
+               base + '?' + URI.encode_www_form('d' => DEFAULT.sub('/img/avatars/', '/other/')),
+               DEFAULT + '?query=1']
+    Net::HTTP.stub(:start, ->(*) { flunk 'must not access network' }) do
+      sources.each { |source| assert_nil Slackmine::MailInlineAvatar.fetch(source, 1) }
+    end
+  end
+
+  def test_gravatar_redirect_targets_and_hops_are_bounded
+    ['https://127.0.0.1/avatar.png', 'https://secure.gravatar.com.evil.example/avatar.png',
+     DEFAULT.sub('https:', 'http:'), DEFAULT.sub('/img/avatars/', '/other/')].each do |target|
+      with_redirects([target]) do |visited|
+        assert_nil Slackmine::MailInlineAvatar.fetch(GRAVATAR, 1)
+        assert_equal ['secure.gravatar.com'], visited
+      end
+    end
+    with_redirects([GRAVATAR, GRAVATAR, GRAVATAR]) do |visited|
+      assert_nil Slackmine::MailInlineAvatar.fetch(GRAVATAR, 1)
+      assert_equal 3, visited.size
+    end
+  end
+
+  def test_gravatar_wordpress_proxy_accepts_only_slack_avatar_paths
+    proxy = 'https://i2.wp.com/a.slack-edge.com/example/img/avatars/ava_0022-48.png?ssl=1'
+    with_redirects([proxy]) do |visited|
+      assert_equal data, Slackmine::MailInlineAvatar.fetch(GRAVATAR, 1)
+      assert_equal %w[secure.gravatar.com i2.wp.com], visited
+    end
+    [proxy.sub('a.slack-edge.com', '127.0.0.1'), proxy.sub('/img/avatars/', '/other/'),
+     proxy + '&url=https://example.com', proxy.sub('i2.wp.com', 'i2.wp.com.evil.example')].each do |target|
+      with_redirects([target]) do |visited|
+        assert_nil Slackmine::MailInlineAvatar.fetch(GRAVATAR, 1)
+        assert_equal ['secure.gravatar.com'], visited
+      end
+    end
+  end
+
   def with_response(response, chunks)
     response.define_singleton_method(:read_body) { |&block| chunks.each(&block) }
     http = Object.new

@@ -74,23 +74,32 @@ module Slackmine
     end
 
     def fetch(source, seconds)
-      return if source.bytesize > 2048
-      uri = URI.parse(source)
-      return unless uri.scheme == 'https' && uri.host == 'avatars.slack-edge.com' &&
-                    uri.port == 443 && !uri.userinfo && !uri.query && !uri.fragment
+      uri = avatar_uri(source)
+      return unless uri
 
       bytes = +''.b
       Timeout.timeout([seconds, 3].min) do
-        # Public avatar CDN only; no bot credentials and no redirects.
-        Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 2, read_timeout: 2) do |http|
-          http.request(Net::HTTP::Get.new(uri.request_uri)) do |response|
-            return unless response.is_a?(Net::HTTPSuccess)
-            return if response['Content-Length'].to_i > MAX_BYTES
-            response.read_body do |chunk|
-              return if bytes.bytesize + chunk.bytesize > MAX_BYTES
-              bytes << chunk
+        # Revalidate every redirect; never send credentials to avatar services.
+        3.times do |attempt|
+          redirect = nil
+          Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 2, read_timeout: 2) do |http|
+            http.request(Net::HTTP::Get.new(uri.request_uri)) do |response|
+              if response.is_a?(Net::HTTPRedirection)
+                return unless gravatar_uri?(uri) && attempt < 2
+                redirect = avatar_uri(URI.join(uri.to_s, response['Location'].to_s).to_s)
+                return unless redirect
+              else
+                return unless response.is_a?(Net::HTTPSuccess)
+                return if response['Content-Length'].to_i > MAX_BYTES
+                response.read_body do |chunk|
+                  return if bytes.bytesize + chunk.bytesize > MAX_BYTES
+                  bytes << chunk
+                end
+              end
             end
           end
+          break unless redirect
+          uri = redirect
         end
       end
       if bytes.start_with?("\x89PNG\r\n\x1a\n".b)
@@ -102,6 +111,43 @@ module Slackmine
       # Avatar failure must not prevent notification delivery or retain remote images.
       nil
     end
+
+    def gravatar_uri?(uri)
+      %w[secure.gravatar.com gravatar.com www.gravatar.com 0.gravatar.com 1.gravatar.com 2.gravatar.com].include?(uri.host) &&
+        uri.path.match?(%r{\A/avatar/(?:[a-f0-9]{32}|[a-f0-9]{64})(?:\.jpg)?\z}i)
+    end
+
+    def avatar_uri(source)
+      return if source.bytesize > 2048
+      uri = URI.parse(source)
+      return unless uri.scheme == 'https' && uri.port == 443 && !uri.userinfo && !uri.fragment
+      return uri if uri.host == 'avatars.slack-edge.com' && !uri.query
+      if uri.host == 'a.slack-edge.com'
+        return uri if !uri.query && uri.path.match?(%r{\A/[^?#]*/img/avatars/ava_[a-z0-9_-]+\.png\z}i)
+      elsif %w[i0.wp.com i1.wp.com i2.wp.com].include?(uri.host)
+        # Gravatar proxies custom defaults through WordPress; allow Slack images only.
+        return unless uri.query == 'ssl=1'
+        target = URI.parse('https:/' + uri.path)
+        return uri if %w[avatars.slack-edge.com a.slack-edge.com].include?(target.host) && avatar_uri(target.to_s)
+      elsif gravatar_uri?(uri)
+        params = URI.decode_www_form(uri.query.to_s)
+        return unless params.map(&:first).uniq.size == params.size
+        return unless params.all? do |key, value|
+          case key
+          when 's', 'size' then value.match?(/\A[0-9]{1,4}\z/) && value.to_i.between?(1, 2048)
+          when 'd', 'default'
+            next false unless %w[avatars.slack-edge.com a.slack-edge.com].include?(URI.parse(value).host)
+            avatar_uri(value)
+          else false
+          end
+        end
+        return uri
+      end
+      nil
+    rescue URI::InvalidURIError, ArgumentError
+      nil
+    end
+    private_class_method :avatar_uri, :gravatar_uri?
 
     def parent_of(node, target)
       return node if node.parts.include?(target)
