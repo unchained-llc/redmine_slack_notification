@@ -4,7 +4,7 @@
 
 ![Slackmine — Slack and Redmine integration](docs/assets/slackmine-icon.png)
 
-Version **1.5.0**.
+Version **1.5.1**.
 
 The plugin was renamed from **Redmine Event Notifications for Slack** (`redmine_slack_notification`) to **Slackmine** as it grew from notifications into a broader Slack–Redmine integration. Internal names, plugin ID, configuration filename and endpoints now use `slackmine`; the former names are no longer supported.
 
@@ -1259,6 +1259,7 @@ version numbers are editorial labels, not a record of published releases or Git 
 
 | Version | Highlights |
 | --- | --- |
+| **1.5.1** | Fix missing Slack avatars in notification emails when Slack returns a Gravatar URL. Safely embed Gravatar images and Slack default-avatar redirects as inline attachments. |
 | **1.5.0** | Add the localized Slackmine administration screen for effective settings, event-color swatches, project/channel routing and user mentions. Add Sidekiq-only queue monitoring, bounded execution history and test notifications. |
 | **1.4.0** | Separate display wording from operational settings and add a Japanese wording example. Improve duplicate-operation handling and failure responses for Slack interactions. |
 | **1.3.0** | Process Work Object details and short actions in the Web process; queue URL unfurls, post-save refreshes, App Home lists, slash command delivery, connection saves, and quote-heavy form saves. Review thread history in the Web process first, falling back to Sidekiq after two seconds. |

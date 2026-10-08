@@ -4,7 +4,7 @@
 
 ![Slackmine — SlackとRedmineの連携](docs/assets/slackmine-icon.png)
 
-バージョン **1.5.0**。
+バージョン **1.5.1**。
 
 通知機能からSlackとRedmineの統合へ機能が広がったため、**Redmine Event Notifications for Slack**（`redmine_slack_notification`）から **Slackmine** に改名しました。内部名・プラグインID・設定ファイル名・エンドポイントも `slackmine` に統一し、旧名の互換対応は設けていません。
 
@@ -1225,6 +1225,7 @@ ruby -Itest test/thread_comment_feedback_cleanup_test.rb
 
 | バージョン | 主な変更 |
 | --- | --- |
+| **1.5.1** | SlackがGravatar URLを返す場合に通知メールのアバターが欠落する問題を修正。Gravatar画像とSlack既定アバターへの転送を安全に取得し、インライン添付として埋め込みます。 |
 | **1.5.0** | Slackmine管理画面を追加。実効設定・イベント色の色見本・プロジェクト通知先・ユーザーメンションを多言語で表示。Sidekiq使用時のキュー監視・実行履歴・テスト通知を追加しました。 |
 | **1.4.0** | 表示文言を動作設定から分離し、日本語の設定例を追加しました。Slack操作の重複実行や処理失敗時の応答も改善しました。 |
 | **1.3.0** | Work Objectの即時表示・軽い操作をWebで処理。URL展開・保存後の更新、App Home一覧、スラッシュコマンド配信、スレッド接続の保存、時間のかかる引用付きフォーム保存をSidekiqで処理。接続先選択後の履歴確認はWebを優先し、2秒を超えた場合にキューへ切り替えます。 |
