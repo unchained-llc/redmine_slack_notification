@@ -1,3 +1,2 @@
-<% if controller_name == 'issues' && action_name == 'show' && @issue %>
+<%# Cards also appear in activity feeds and issue quick previews outside issues#show. %>
 <%= stylesheet_link_tag 'link_cards', plugin: 'slackmine' %>
-<% end %>

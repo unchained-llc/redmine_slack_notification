@@ -1129,6 +1129,8 @@ YAML を変更した場合は Redmine と Sidekiq の両方を再起動してく
 
 ## Redmine本文内のSlackリンクカード
 
+カード用CSSはRedmine全体で読み込み、活動欄・エディターのプレビュー・チケットのクイックプレビューでも、詳細ページと同じ控えめな枠線を表示します。
+
 `slack.link_cards.enabled: false` でSlackリンク本文の取得・新しい引用の保存・Redmine画面とメールのカード表示をまとめてOFFにできます。既存の保存済み引用は削除せず、通常のテキストとして表示します。
 
 `slack.link_cards.redmine_enabled: false` はRedmine画面のカード表示と未保存リンクのライブプレビューだけをOFFにします。リンク保存時の本文取得・引用保存とメールのカード表示は継続します。メールだけOFFにする場合は既存の `mail_enabled: false` を使います。3項目とも省略時は `true` で、現在の動作を維持します。`projects.<identifier>.slack.link_cards` で個別に上書きできます。

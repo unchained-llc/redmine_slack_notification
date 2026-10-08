@@ -1142,6 +1142,8 @@ A YAML change requires restarting both Redmine and Sidekiq. A successful job pos
 
 ## Slack message cards in issue text
 
+Card styles are loaded throughout Redmine so activity feeds, editor previews, and issue quick previews use the same subdued borders as issue details.
+
 Set `slack.link_cards.enabled: false` to disable Slack link content retrieval, new quote imports, and card rendering in both Redmine and email. Existing saved quotes remain as readable plain text; they are not deleted.
 
 Set `slack.link_cards.redmine_enabled: false` to disable only Redmine web cards and live previews of unquoted links. Content retrieval and quote imports when saving, and email cards, continue. Use the existing `mail_enabled: false` to disable only email cards. All three options default to `true`, preserving current behavior, and support overrides under `projects.<identifier>.slack.link_cards`.
