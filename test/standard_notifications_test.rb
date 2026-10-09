@@ -8,6 +8,56 @@ class StandardNotificationsTest < Minitest::Test
     @deliveries = []
   end
 
+  def test_every_operation_header_keeps_actor_when_metadata_is_hidden
+    Slackmine.stub(:config, { 'slack' => { 'metadata' => false } }) do
+      Slackmine.with_project(@project) do
+        Slackmine::Formatter::EVENT_NOUN_KEYS.each do |noun, key|
+          Slackmine::Formatter::DEFAULT_MESSAGES.fetch('events').fetch(key).each_key do |action|
+            heading = Slackmine::Formatter.notification_heading(noun, action, @actor,
+              project: @project, subject: 'Subject', id: 12)
+            assert_includes heading, @actor.name, "#{noun} #{action}"
+            assert_includes heading, Slackmine::Formatter.event_label(noun, action), "#{noun} #{action}"
+          end
+        end
+      end
+    end
+  end
+
+  def test_notification_header_variables_project_overrides_and_safe_fallback
+    settings = { 'messages' => { 'work_objects' => { 'product_name' => 'Global' } },
+      'projects' => { 'example' => { 'messages' => {
+        'work_objects' => { 'product_name' => 'Example Tracker & Co' },
+        'notification_headers' => { 'comment' => '%{actor} · %{project} · %{subject} · %{id} · %{product_name} · %{event} · %{noun} · %{action}' }
+      } } } }
+    actor = OpenStruct.new(name: 'A <B>')
+    Slackmine.stub(:config, settings) do
+      Slackmine.with_project(@project) do
+        heading = Slackmine::Formatter.notification_heading('Comment', 'added', actor,
+          project: @project, subject: 'A & B', id: 12)
+        assert_equal 'A &lt;B&gt; · Example project · A &amp; B · 12 · Example Tracker &amp; Co · Comment added · Comment · added', heading
+        settings['projects']['example']['messages']['notification_headers']['comment'] = '%{missing}'
+        heading = Slackmine::Formatter.notification_heading('Comment', 'added', nil,
+          project: @project, subject: 'Subject', id: 12)
+        assert_includes heading, Slackmine::Formatter.message('values', 'unknown_user')
+        refute_includes heading, '%{'
+      end
+    end
+  end
+
+  def test_product_name_expands_across_message_groups_without_consuming_other_variables
+    settings = { 'projects' => { 'example' => { 'messages' => {
+      'work_objects' => { 'product_name' => 'Example Tracker' }
+    } } } }
+    Slackmine.stub(:config, settings) do
+      Slackmine.with_project(@project) do
+        assert_equal 'Open the full form in Example Tracker', Slackmine::SlashCommands.message('full_form')
+        assert_equal 'Open in Example Tracker', Slackmine::AppHome.message('open')
+        assert_equal '✅ Comment added to Example Tracker #%{id}.', Slackmine::Formatter.message('thread_comments', 'saved')
+        assert_equal 'Example Tracker', Slackmine::Formatter.message('work_objects', 'product_name')
+      end
+    end
+  end
+
   def capture
     Slackmine.stub(:config, {}) do
       Slackmine.stub(:enqueue, ->(payload, **options) { @deliveries << [payload, options] }) { yield }

@@ -1922,17 +1922,17 @@ class WorkObjectNotificationTest < Minitest::Test
     Slackmine.stub(:config, @settings) do
       result = Slackmine::Formatter.journal_payload(@issue, actor: @actor, notes: 'Hello **team**')
       compact = result.fetch('_slackmine_thread_comment_payload')
-      assert_equal 'Redmine <https://redmine.example.com/issues/7|#7>: New comment', compact['text']
+      assert_equal 'Alice · Redmine <https://redmine.example.com/issues/7|#7>: New comment', compact['text']
       assert_equal 'Hello *team*', compact.dig('attachments', 0, 'blocks', 0, 'text', 'text')
       refute compact.key?('metadata')
       refute compact.dig('attachments', 0).key?('color')
       edited = Slackmine::Formatter.journal_payload(@issue, actor: @actor, notes: 'New',
         previous_notes: 'Old', comment_action: 'updated')
       assert edited.fetch('_slackmine_thread_comment_payload').dig('attachments', 0, 'blocks').any?
-      assert_equal 'Redmine <https://redmine.example.com/issues/7|#7>: Comment updated', edited.fetch('_slackmine_thread_comment_payload')['text']
+      assert_equal 'Alice · Redmine <https://redmine.example.com/issues/7|#7>: Comment updated', edited.fetch('_slackmine_thread_comment_payload')['text']
       deleted = Slackmine::Formatter.journal_payload(@issue, actor: @actor, notes: '',
         previous_notes: 'Old', comment_action: 'deleted')
-      assert_equal 'Redmine <https://redmine.example.com/issues/7|#7>: Comment deleted', deleted.fetch('_slackmine_thread_comment_payload')['text']
+      assert_equal 'Alice · Redmine <https://redmine.example.com/issues/7|#7>: Comment deleted', deleted.fetch('_slackmine_thread_comment_payload')['text']
       assert deleted.fetch('_slackmine_thread_comment_payload').dig('attachments', 0, 'blocks').any?
       assert result.key?('metadata'), 'Fallback retains the full notification'
     end
@@ -1949,7 +1949,7 @@ class WorkObjectNotificationTest < Minitest::Test
       assert_equal 'Example Tracker <https://redmine.example.com/issues/7|#7> の新規コメント · Alice: Fix A &amp; B', result.dig('_slackmine_thread_comment_payload', 'text')
       @settings['projects']['agentic']['messages']['thread_notifications']['added_header'] = '%{unknown}'
       result = Slackmine::Formatter.journal_payload(@issue, actor: @actor, notes: 'Body')
-      assert_equal 'Example Tracker <https://redmine.example.com/issues/7|#7>: New comment', result.dig('_slackmine_thread_comment_payload', 'text')
+      assert_equal 'Alice · Example Tracker <https://redmine.example.com/issues/7|#7>: New comment', result.dig('_slackmine_thread_comment_payload', 'text')
     end
   end
 
@@ -3508,7 +3508,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
       )
       assert_equal '🔄 Alice *Issue updated*', updated.dig('attachments', 0, 'blocks', 0, 'text', 'text')
       assert_equal '🔄 Alice *Issue updated*', combined.dig('attachments', 0, 'blocks', 0, 'text', 'text')
-      assert_equal '🆕 *Issue created*', created.dig('attachments', 0, 'blocks', 0, 'text', 'text')
+      assert_equal '🆕 Alice *Issue created*', created.dig('attachments', 0, 'blocks', 0, 'text', 'text')
     end
 
     Slackmine.stub(:config, { 'messages' => { 'templates' => {
@@ -3574,7 +3574,7 @@ class NotificationDisplaySettingsTest < Minitest::Test
       card = payload.fetch('attachments').first
       assert_equal '#12Ab34', card['color']
       assert_equal 'News changed: Headline', card['fallback']
-      assert_includes card.dig('blocks', 0, 'text', 'text'), '🔔 *News changed*'
+      assert_includes card.dig('blocks', 0, 'text', 'text'), '🔔 Alice *News changed*'
       assert card['blocks'].any? { |block| block.dig('text', 'text').to_s.include?('*Summary*') }
       assert card['blocks'].any? { |block| block.dig('text', 'text').to_s == '*Details*' }
       fields = card['blocks'].flat_map { |block| block.fetch('fields', []) }.map { |field| field['text'] }

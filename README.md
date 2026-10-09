@@ -4,7 +4,7 @@
 
 ![Slackmine — Slack and Redmine integration](docs/assets/slackmine-icon.png)
 
-Version **1.5.3**.
+Version **1.5.4**.
 
 The plugin was renamed from **Redmine Event Notifications for Slack** (`redmine_slack_notification`) to **Slackmine** as it grew from notifications into a broader Slack–Redmine integration. Internal names, plugin ID, configuration filename and endpoints now use `slackmine`; the former names are no longer supported.
 
@@ -326,6 +326,21 @@ For Issues, use one `slack.metadata.issue` map for both creation and updates. A 
 | `time_entry` | `project`, `updater`, `hours`, `spent_on` |
 | `version` | `project`, `updater`, `status`, `due_date` |
 
+Operation notification headings show the actor independently of metadata visibility. Configure each kind under `messages.notification_headers`: `issue`, `comment`, `wiki`, `document`, `file`, `message`, `news`, `news_comment`, `time_entry`, `version`, and `project`. All headers support `%{actor}`, `%{event}`, `%{icon}`, `%{project}`, `%{subject}`, `%{product_name}`, `%{noun}`, and `%{action}`. Issue and Comment headers also support `%{id}`. Project-specific message overrides apply. The legacy `templates.issue_updated_header` is used only when `notification_headers.issue` is not configured.
+
+```yaml
+messages:
+  notification_headers:
+    comment: "%{icon} %{actor} *%{event}*"
+    news: "%{actor} · %{project} · *%{event}*"
+  work_objects:
+    product_name: Example Tracker
+  commands:
+    full_form: Open the full form in %{product_name}
+```
+
+`%{product_name}` is available in every message and resolves from the same project's `work_objects.product_name`. Other variables depend on the individual template.
+
 For example, this shows the current status and target version on both new Issues and Issue updates, and hides the project on News notifications:
 
 ```yaml
@@ -603,9 +618,9 @@ Customize the compact notification heading with `messages.thread_notifications.a
 ```yaml
 messages:
   thread_notifications:
-    added_header: '%{product_name} #%{id}: New comment'
-    updated_header: '%{product_name} #%{id}: Comment updated'
-    deleted_header: '%{product_name} #%{id}: Comment deleted'
+    added_header: '%{actor} · %{product_name} #%{id}: New comment'
+    updated_header: '%{actor} · %{product_name} #%{id}: Comment updated'
+    deleted_header: '%{actor} · %{product_name} #%{id}: Comment deleted'
 ```
 
 Each delivery searches up to three history pages, requesting 100 messages per page (Slack may return fewer). Only root notifications from the configured app with the exact Issue subject link qualify; user messages, links in comment bodies, and broadcast replies do not. Missing matches, missing app configuration, and lookup errors fall back to a normal channel post. No thread mapping is saved in a database, Redis, or a file. The latest notification may differ from the thread where a conversation started; older threads outside the search range are not found. History requests add latency and consume Slack API rate limits. Existing cards are not moved.
@@ -1263,6 +1278,7 @@ version numbers are editorial labels, not a record of published releases or Git 
 
 | Version | Highlights |
 | --- | --- |
+| **1.5.4** | Show actors in every operation notification, customize headers with YAML variables, and reuse the configured product name across messages. |
 | **1.5.3** | Render saved Slack quotes and bare Slack URLs as cards in description and comment editor previews. |
 | **1.5.2** | Fix corrupted HTML notification emails when Roadie inlines CSS after Slack images are embedded. Preserve Japanese text, inline images, and the plain-text alternative. |
 | **1.5.1** | Fix missing Slack avatars in notification emails when Slack returns a Gravatar URL. Safely embed Gravatar images and Slack default-avatar redirects as inline attachments. |

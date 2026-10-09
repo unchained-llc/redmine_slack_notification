@@ -31,6 +31,13 @@ module Slackmine
     module_function
 
     def message(*path, project: Thread.current[:slackmine_project])
+      value = raw_message(*path, project: project)
+      return value unless value.is_a?(String) && path != %w[work_objects product_name]
+
+      value.gsub('%{product_name}') { raw_message('work_objects', 'product_name', project: project) }
+    end
+
+    def raw_message(*path, project: Thread.current[:slackmine_project])
       default = DEFAULT_MESSAGES.dig(*path)
       configured = Slackmine.message_settings(project)
       path.each do |key|
@@ -231,13 +238,12 @@ module Slackmine
     end
 
     def build_issue_payload(issue, actor:, action:, details: [], notes: nil)
-      event_label = event_label('Issue', action)
       title = interpolate(message('templates', 'issue_fallback'),
                           { project: issue.project.name, actor: actor&.name || message('values', 'unknown_user'),
                             action: message('values', action), tracker: issue.tracker.name, id: issue.id, subject: issue.subject },
                           fallback: DEFAULT_MESSAGES.dig('templates', 'issue_fallback'))
       blocks = [
-        section_text("#{event_icon(action, noun: 'Issue')} #{issue_heading(action, actor, event_label)}"),
+        section_text(notification_heading('Issue', action, actor, project: issue.project, subject: issue.subject, id: issue.id)),
         section_text("*<#{url('/issues/' + issue.id.to_s)}|##{issue.id} #{text(issue.subject)}>*")
       ]
 
@@ -287,14 +293,14 @@ module Slackmine
       end
       combined_update = details.any?
       label = combined_update ? event_label('Issue', 'updated') : message('events', 'comment', comment_action)
-      icon = combined_update ? event_icon('updated', noun: 'Issue') : event_icon(comment_action, noun: 'Comment')
       fallback = interpolate(message('templates', 'journal_fallback'),
                              { project: issue.project.name, actor: actor&.name || message('values', 'unknown_user'),
                                event: label.downcase, tracker: issue.tracker.name, id: issue.id, subject: issue.subject },
                              fallback: DEFAULT_MESSAGES.dig('templates', 'journal_fallback'))
-      heading = combined_update ? issue_heading('updated', actor, label) : "*#{text(label)}*"
+      heading = notification_heading(combined_update ? 'Issue' : 'Comment', combined_update ? 'updated' : comment_action,
+                                     actor, project: issue.project, subject: issue.subject, id: issue.id)
       blocks = [
-        section_text("#{icon} #{heading}"),
+        section_text(heading),
         section_text("*<#{url('/issues/' + issue.id.to_s)}|##{issue.id} #{text(issue.subject)}>*"),
         { 'type' => 'divider' }
       ]
@@ -548,7 +554,7 @@ module Slackmine
                              fallback: DEFAULT_MESSAGES.dig('templates', 'generic_fallback'))
       change_summary = content.comments.to_s.strip
       blocks = [
-        section_text("#{event_icon(action, noun: 'Wiki page')} *#{label}*"),
+        section_text(notification_heading('Wiki page', action, actor, project: project, subject: title)),
         section_text("*<#{url('/projects/' + project.identifier.to_s + '/wiki/' + title.to_s)}|#{text(title)}>*")
       ]
       blocks.concat(mrkdwn_sections(section_label('changes'), change_summary)) if change_summary.present?
@@ -575,7 +581,7 @@ module Slackmine
       body_diff_label ||= section_label('body')
       body_full_label ||= section_label('summary')
       blocks = [
-        section_text("#{event_icon(action, noun: noun)} *#{label}*"),
+        section_text(notification_heading(noun, action, actor, project: project, subject: subject)),
         section_text("*<#{url}|#{text(subject)}>*")
       ]
       if body_diff
@@ -616,12 +622,21 @@ module Slackmine
                   fallback: DEFAULT_MESSAGES.dig('templates', 'event_fallback'))
     end
 
-    def issue_heading(action, actor, label)
-      return "*#{text(label)}*" unless action == 'updated'
-
-      values = { actor: text(actor&.name || message('values', 'unknown_user')), event: text(label) }
-      interpolate(message('templates', 'issue_updated_header'), values,
-                  fallback: DEFAULT_MESSAGES.dig('templates', 'issue_updated_header'))
+    def notification_heading(noun, action, actor, project:, subject:, id: nil)
+      key = event_key(noun)
+      values = { actor: text(actor&.name || message('values', 'unknown_user')),
+                 event: text(event_label(noun, action)), icon: event_icon(action, noun: noun),
+                 project: text(project.name), subject: text(subject), id: id,
+                 product_name: text(raw_message('work_objects', 'product_name')),
+                 noun: text(noun), action: text(action) }
+      configured = Slackmine.message_settings
+      # Preserve existing update-only templates until a new header is configured.
+      legacy = configured.dig('templates', 'issue_updated_header') if noun == 'Issue' && action == 'updated'
+      if legacy.is_a?(String) && !configured.dig('notification_headers', key)
+        return "#{values[:icon]} #{interpolate(legacy, values, fallback: DEFAULT_MESSAGES.dig('templates', 'issue_updated_header'))}"
+      end
+      interpolate(raw_message('notification_headers', key), values,
+                  fallback: DEFAULT_MESSAGES.dig('notification_headers', key))
     end
 
     def event_icon(action, noun: 'Issue')

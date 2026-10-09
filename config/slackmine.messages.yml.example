@@ -14,9 +14,9 @@ messages:
     this_week: Due this week
     refresh: Refresh
     detail: Open details
-    open: Open in Redmine
+    open: Open in %{product_name}
     empty: No open issues.
-    unmapped: Your Slack account is not linked to an active Redmine user.
+    unmapped: Your Slack account is not linked to an active %{product_name} user.
     limit: Up to 10 open issues per section. Open details or refresh to get current data.
   commands:
     project: Project
@@ -26,9 +26,9 @@ messages:
     message_expired: This form expired. Open the message shortcut again.
     message_retry: Could not retrieve the source link. Please retry.
     processing: This submission is still processing. Check the issue before retrying.
-    background_saved: Your Issue change was saved in Redmine.
+    background_saved: Your Issue change was saved in %{product_name}.
     background_failed: The Issue change could not be saved. Check the Issue before retrying.
-    full_form: Open the full form in Redmine
+    full_form: Open the full form in %{product_name}
     help: |-
       *%{command} — Issue commands*
       • `%{command} my` — Your assigned open issues (up to 10).
@@ -89,11 +89,11 @@ messages:
     edit_failed: 'Could not update issue #%{id}. Check your permissions and the current state.'
     operation_failed: Could not perform this action. Check your permissions and the current state.
   thread_notifications:
-    added_header: "%{product_name} #%{id}: New comment"
-    updated_header: "%{product_name} #%{id}: Comment updated"
-    deleted_header: "%{product_name} #%{id}: Comment deleted"
+    added_header: "%{actor} · %{product_name} #%{id}: New comment"
+    updated_header: "%{actor} · %{product_name} #%{id}: Comment updated"
+    deleted_header: "%{actor} · %{product_name} #%{id}: Comment deleted"
   thread_comments:
-    saved: "✅ Comment added to Redmine #%{id}."
+    saved: "✅ Comment added to %{product_name} #%{id}."
     restricted: "⚠️ Could not add the comment. Check the user mapping, Issue permissions and state, and text length."
     image_failed: "⚠️ The reply was not saved. Check file size, file access, and the files:read bot scope."
   events:
@@ -250,6 +250,20 @@ messages:
   images:
     alt: Image
     link_label: 'Image: %{name}'
+  # Headers support actor, event, icon, project, subject, product_name, noun, action.
+  # Issue and Comment headers also support id. Override per project as needed.
+  notification_headers:
+    issue: "%{icon} %{actor} *%{event}*"
+    comment: "%{icon} %{actor} *%{event}*"
+    wiki: "%{icon} %{actor} *%{event}*"
+    document: "%{icon} %{actor} *%{event}*"
+    file: "%{icon} %{actor} *%{event}*"
+    message: "%{icon} %{actor} *%{event}*"
+    news: "%{icon} %{actor} *%{event}*"
+    news_comment: "%{icon} %{actor} *%{event}*"
+    time_entry: "%{icon} %{actor} *%{event}*"
+    version: "%{icon} %{actor} *%{event}*"
+    project: "%{icon} %{actor} *%{event}*"
   templates:
     icon_fallback: "🔧"
     event_fallback: "%{noun} %{action}"

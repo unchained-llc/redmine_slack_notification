@@ -14,9 +14,9 @@ messages:
     this_week: 今週が期限
     refresh: 更新
     detail: 詳細を開く
-    open: Redmineで開く
+    open: "%{product_name}で開く"
     empty: 未完了のチケットはありません
-    unmapped: Slackアカウントが有効なRedmineユーザーに紐づいていません
+    unmapped: Slackアカウントが有効な%{product_name}ユーザーに紐づいていません
     limit: 各セクション最大10件の未完了チケットを表示します。最新情報を取得するには、詳細を開くか更新してください
   commands:
     project: プロジェクト
@@ -26,9 +26,9 @@ messages:
     message_expired: フォームの有効期限が切れました。メッセージのショートカットから開き直してください
     message_retry: 投稿元リンクを取得できませんでした。もう一度お試しください
     processing: この操作は現在処理中です。再実行する前にチケットを確認してください
-    background_saved: Redmineにチケットの変更を保存しました
+    background_saved: "%{product_name}にチケットの変更を保存しました"
     background_failed: チケットの変更を保存できませんでした。再試行する前にチケットを確認してください
-    full_form: Redmineで完全なフォームを開く
+    full_form: "%{product_name}で完全なフォームを開く"
     help: |-
       *%{command} — チケット操作*
       • `%{command} my` — 自分が担当する未完了チケットを表示（最大10件）
@@ -89,11 +89,11 @@ messages:
     edit_failed: "⚠️ #%{id} を更新できませんでした。権限と現在の状態を確認してください"
     operation_failed: ⚠️ 操作を実行できませんでした。権限と現在の状態を確認してください
   thread_notifications:
-    added_header: "%{product_name} #%{id} 新しいコメント"
-    updated_header: "%{product_name} #%{id} のコメント更新"
-    deleted_header: "%{product_name} #%{id} のコメント削除"
+    added_header: "%{actor} · %{product_name} #%{id} 新しいコメント"
+    updated_header: "%{actor} · %{product_name} #%{id} のコメント更新"
+    deleted_header: "%{actor} · %{product_name} #%{id} のコメント削除"
   thread_comments:
-    saved: "✅ Redmine #%{id} にコメントを追加しました"
+    saved: "✅ %{product_name} #%{id} にコメントを追加しました"
     restricted: "  コメントを追加できませんでした。ユーザーの対応付け、チケットの権限・状態、テキストの長さを確認してください"
     image_failed: "  返信を保存できませんでした。ファイルサイズ、ファイルへのアクセス権、Bot の files:read スコープを確認してください"
   events:
@@ -250,6 +250,20 @@ messages:
   images:
     alt: 画像
     link_label: '画像: %{name}'
+  # Headers support actor, event, icon, project, subject, product_name, noun, action.
+  # Issue and Comment headers also support id. Override per project as needed.
+  notification_headers:
+    issue: "%{icon} %{actor} *%{event}*"
+    comment: "%{icon} %{actor} *%{event}*"
+    wiki: "%{icon} %{actor} *%{event}*"
+    document: "%{icon} %{actor} *%{event}*"
+    file: "%{icon} %{actor} *%{event}*"
+    message: "%{icon} %{actor} *%{event}*"
+    news: "%{icon} %{actor} *%{event}*"
+    news_comment: "%{icon} %{actor} *%{event}*"
+    time_entry: "%{icon} %{actor} *%{event}*"
+    version: "%{icon} %{actor} *%{event}*"
+    project: "%{icon} %{actor} *%{event}*"
   templates:
     icon_fallback: 🔧
     event_fallback: '不明なイベント: %{noun} / %{action}'

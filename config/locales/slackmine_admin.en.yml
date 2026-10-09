@@ -81,7 +81,7 @@ en:
     due_reminders_colors_today: "Color used for reminders due today."
     due_reminders_colors_upcoming: "Color used for upcoming reminders. Falls back to slack.attachment_color when omitted."
     channel_id: "Legacy explicit project channel ID. A project slack.default_channel_id takes precedence."
-    messages_work_objects_product_name: "Service name shown in Work Objects and notifications, such as WAC."
+    messages_work_objects_product_name: "Service name shown in Work Objects and notifications, such as Example Tracker."
     messages_work_objects_display_type: "Object type label shown in Work Objects, such as Issue."
     events_issue_updated_enabled: "Parent switch for all issue detail update events. False disables individual detail events too; comment events are independent."
     button: "Show the %{action} Work Object button. In configuration order, the first two are primary buttons and the next five appear in More."

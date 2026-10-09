@@ -4,7 +4,7 @@
 
 ![Slackmine — SlackとRedmineの連携](docs/assets/slackmine-icon.png)
 
-バージョン **1.5.3**。
+バージョン **1.5.4**。
 
 通知機能からSlackとRedmineの統合へ機能が広がったため、**Redmine Event Notifications for Slack**（`redmine_slack_notification`）から **Slackmine** に改名しました。内部名・プラグインID・設定ファイル名・エンドポイントも `slackmine` に統一し、旧名の互換対応は設けていません。
 
@@ -281,6 +281,21 @@ messages:
       updated: '#F79009'
       deleted: '#C62828'
 ```
+
+操作通知の見出しは、メタデータの表示設定にかかわらず操作した人の名前を表示します。`messages.notification_headers` の `issue`、`comment`、`wiki`、`document`、`file`、`message`、`news`、`news_comment`、`time_entry`、`version`、`project` で種別ごとに変更できます。共通変数は `%{actor}`（操作した人）、`%{event}`（イベント文言）、`%{icon}`、`%{project}`、`%{subject}`、`%{product_name}`、`%{noun}`、`%{action}` です。`issue` と `comment` では `%{id}` も使えます。プロジェクト別の文言設定にも対応します。従来の `templates.issue_updated_header` は、新しい `notification_headers.issue` が未設定の場合のみ利用します。
+
+```yaml
+messages:
+  notification_headers:
+    comment: "%{icon} %{actor} *%{event}*"
+    news: "%{actor} · %{project} · *%{event}*"
+  work_objects:
+    product_name: Example Tracker
+  commands:
+    full_form: "%{product_name}で完全なフォームを開く"
+```
+
+`%{product_name}` はすべてのメッセージで利用でき、同じプロジェクトの `work_objects.product_name` から展開します。他の変数は、それぞれのテンプレートが対応するものを使ってください。
 
 Issue には、作成・更新の両方に共通する `slack.metadata.issue` マップを 1 つ使います。項目を `true` にすると、変更の有無にかかわらず、どちらの通知でも表示します。初期状態では `project`、`updater`、`tracker`、`category`、`priority` を表示し、その他の Issue 項目は非表示です。未設定の単一値は `Not set`、空のリストは `None` と表示します。その他の通知種別では、`slack.metadata.<type>.<field>` を `false` にすると項目を非表示にでき、省略した項目は表示されます。指定できる項目は次のとおりです。
 
@@ -582,9 +597,9 @@ slack:
 ```yaml
 messages:
   thread_notifications:
-    added_header: '%{product_name} #%{id}: New comment'
-    updated_header: '%{product_name} #%{id}: Comment updated'
-    deleted_header: '%{product_name} #%{id}: Comment deleted'
+    added_header: '%{actor} · %{product_name} #%{id}: New comment'
+    updated_header: '%{actor} · %{product_name} #%{id}: Comment updated'
+    deleted_header: '%{actor} · %{product_name} #%{id}: Comment deleted'
 ```
 
 通知ごとに履歴を最大3ページ、各ページ100件を要求して検索します（Slackが返す件数は少ない場合があります）。設定したアプリの最上位通知で、件名のチケットURLが完全一致するものだけを対象にします。利用者の投稿、コメント本文中のリンク、チャンネルにも送信されたスレッド返信は対象外です。見つからない場合、アプリID未設定、履歴取得エラー時は通常のチャンネル投稿に戻ります。DB・Redis・ファイルにスレッドの対応表は保存しません。会話開始時と最新通知のスレッドが異なる場合があり、検索範囲外の古い通知には戻れません。履歴取得による遅延とSlack API利用回数が増えます。既存の通知は移動しません。
@@ -1229,6 +1244,7 @@ ruby -Itest test/thread_comment_feedback_cleanup_test.rb
 
 | バージョン | 主な変更 |
 | --- | --- |
+| **1.5.4** | 全操作通知に操作した人を表示し、YAML変数による見出し設定と製品名の共通展開に対応します。 |
 | **1.5.3** | 説明・コメントの編集プレビューで、保存済みSlack引用とURLだけの入力をカード表示します。 |
 | **1.5.2** | Slack画像の埋め込み後にRoadieがCSSを適用すると、通知メールのHTML本文が壊れる問題を修正。日本語本文・インライン画像・テキスト版を保持します。 |
 | **1.5.1** | SlackがGravatar URLを返す場合に通知メールのアバターが欠落する問題を修正。Gravatar画像とSlack既定アバターへの転送を安全に取得し、インライン添付として埋め込みます。 |

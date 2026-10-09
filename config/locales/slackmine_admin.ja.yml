@@ -81,7 +81,7 @@ ja:
     due_reminders_colors_today: "本日が期日のリマインダーの色です。"
     due_reminders_colors_upcoming: "期日が近いリマインダーの色です。省略時はslack.attachment_colorを使います。"
     channel_id: "プロジェクトの通知先チャンネルIDを指定する旧形式の設定です。slack.default_channel_idのプロジェクト指定が優先されます。"
-    messages_work_objects_product_name: "Work Objectや通知文で表示するサービス名です（例：WAC）。"
+    messages_work_objects_product_name: "Work Objectや通知文で表示するサービス名です（例：Example Tracker）。"
     messages_work_objects_display_type: "Work Objectで表示する対象の種類名です（例：チケット）。"
     events_issue_updated_enabled: "チケット詳細の更新通知全体の親スイッチです。falseなら個別の変更通知も停止します。コメント通知は独立しています。"
     button: "Work Objectカードの「%{action}」ボタンを表示します。設定順で先頭2件が主ボタン、続く5件が追加メニューに入ります。"
